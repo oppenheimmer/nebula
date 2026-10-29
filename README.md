@@ -1,19 +1,19 @@
 # Nebula
 
-A local, single-user note-taking and diary application in development. Database
-entries will open as flowing block documents, with Notion-inspired organization
-and Zim-inspired cross-references. Linux comes first; macOS is planned.
+An always-local, single-user note-taking and diary application. Database entries
+open as flowing block documents, with Notion-inspired organization and
+Zim-inspired cross-references. Linux comes first; macOS is planned.
 
-The current deliverable is the **M01 editor feasibility prototype**. It edits a
-sample page in memory and compares two native editor designs. **Closing the window
-discards edits.** Workspace storage, database views, managed file import, and the
-full wiki-link workflow are later milestones in [ROADMAP.md](ROADMAP.md).
+The executable is an **editor prototype**. Its sample page is held in memory:
+**closing the window discards edits**, including when a workspace is open.
+The workspace database currently stores its identity, not notes. Implementation
+status, milestones, bugs, and verification results belong in
+[ROADMAP.md](ROADMAP.md).
 
-## Isolated development with Docker
+## Build with Docker
 
-Qt and build dependencies belong to the project development image. Nothing in
-this workflow installs Qt into the host OS. It uses the existing Docker CLI and
-daemon; Podman is not required.
+Use the existing Docker CLI and daemon. Qt and build dependencies stay inside the
+development image; this workflow does not install packages into the host OS.
 
 ```sh
 ./scripts/dev.sh build-image
@@ -22,107 +22,95 @@ daemon; Podman is not required.
 ./scripts/dev.sh test core
 ```
 
-The first command downloads a Debian 13 base image and installs development
-packages **inside that image**. Later commands run without networking. Containers
-are removed after each command. Source is mounted read-only at `/workspace`;
-generated files go to `build-container-gcc/`, `build-container-clang/`, or
-`build-container-core/`, all excluded from Git. Containers run as your numeric
-user/group with a read-only root filesystem, temporary writable `/tmp`, no added
-capabilities, and no Docker socket or home-directory mount.
+`build-image` downloads Debian and installs packages inside the image. Subsequent
+build/test containers run without networking, as your numeric user/group, with a
+read-only root filesystem and source mount. Build output goes to the ignored
+`build-container-gcc/`, `build-container-clang/`, or `build-container-core/` folder.
+Containers are removed after each command. Docker daemon access is required; the
+wrapper does not change daemon settings, socket permissions, or user groups.
 
-Docker images share the host's Linux kernel. This supplies filesystem, process,
-and network isolation analogous to the development use of a jail; it does not
-provide a separate kernel. Docker daemon access is required. The wrapper does not
-change socket permissions, user groups, or the daemon configuration. See
-[Docker's security model](https://docs.docker.com/engine/security/) for the daemon
-boundary.
+For a development shell, run `./scripts/dev.sh shell`. Source is read-only at
+`/workspace`; build output is writable at `/build`. Dependency requirements and
+the optional project-local SDK workflow are described in
+[DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
-For a shell in the same environment:
-
-```sh
-./scripts/dev.sh shell
-```
-
-Edit source with your host editor. The container shell can write build output in
-`/build`; the `/workspace` source mount remains read-only.
-
-## Run the prototype
-
-After `./scripts/dev.sh test gcc`, launch it through the container:
+## Run
 
 ```sh
 ./scripts/dev.sh run
 ```
 
-The Linux GUI launcher uses X11 or Xwayland: it requires `DISPLAY`, the X11 socket,
-and a readable `XAUTHORITY` file (or `~/.Xauthority`). Only that display socket and
-authorization file are shared. Headless test commands do not share the display.
-The launcher does not use `xhost +`, privileged mode, or host networking. Native
-Wayland socket integration and macOS container GUI launching remain future work.
+The launcher rebuilds the executable, then asks where to keep the workspace. It
+suggests `~/Document/nebula/`. Choose an existing Nebula folder or enter a new
+location; Open workspace creates `nebula.sqlite3` and `attachments/` there.
+Cancel leaves the location untouched. The selected host folder survives container
+exit and is shown above the editor.
 
-For an automatically closing GUI check or a screenshot of only this window:
+The folder chooser sees your home directory read-only. The editor receives only
+the selected workspace as a writable data mount at `/data`. To select a location
+directly, including a location outside your home:
 
 ```sh
-./scripts/dev.sh run --smoke-test
-./scripts/dev.sh run --screenshot /build/prototype.png
-./scripts/dev.sh test-native
+./scripts/dev.sh run --workspace /path/to/your/nebula
 ```
 
-The screenshot is written to `build-container-gcc/prototype.png` on the host.
-`test-native` runs the interaction suite through the same X11/Xwayland launcher.
+The Linux GUI uses X11 or Xwayland and requires `DISPLAY`, `/tmp/.X11-unix`, and a
+readable `XAUTHORITY` file (or `~/.Xauthority`). GUI containers share that display
+socket and authorization file. Headless tests do not share the display. No
+`xhost +`, privileged mode, or host networking is used.
 
-The page-wide document tab currently supports:
-
-- Paragraph splitting/merging, soft line breaks, and selection across blocks.
-- Bold/italic formatting, headings, bullets, and to-do markers.
-- Stable block identities, nesting, and subtree movement with undo/redo.
-- Typed inline references and Ctrl+click navigation to blocks in the sample page.
-- Painted image/attachment representations for testing layout and selection.
-- Plain-text clipboard import, including multiline and Unicode text.
-
-Use Enter for a new block, Shift+Enter for a soft break, Alt+Up/Down to move a
-subtree, and Tab/Shift+Tab to indent/outdent. A split gives the trailing block a new
-ID; existing children follow that trailing block. The separate-block tab is an
-investigation baseline: native selection and undo remain local to each widget.
-
-Asset cards are representations, not imported files. Rich clipboard preservation,
-drag reordering, link completion/backlinks, persistence, and autosave are tracked
-in the roadmap. Prototype limitations and evidence are recorded in
-[the editor feasibility report](docs/EDITOR_FEASIBILITY.md).
-
-## Tests and measurements
-
-CTest runs a standalone core suite, Qt interaction tests, and a prototype launch
-check. The core suite builds without Qt when `NEBULA_BUILD_EDITOR=OFF`. Every
-implemented editing behavior has focused tests; the parent-splitting regression
-is retained alongside them.
-
-The Qt suite sends keyboard, mouse, clipboard, and synthetic input-method events.
-It also checks the accessible text interface. Real OS input-method and
-screen-reader behavior still require desktop validation; headless passes do not
-establish those results.
+To open just the in-memory sample or the editor comparison:
 
 ```sh
+./scripts/dev.sh run --demo
+./scripts/dev.sh run --demo --compare-editors
+```
+
+The comparison tab uses separate text widgets with independent selection and undo.
+Use the **Block editor** tab for structural editing; block controls are disabled
+in the comparison tab.
+
+## Edit blocks
+
+Click a block to make it active. A thin outline with a subtle shadow identifies
+the active block; the label above the editor shows its position and nesting level.
+
+| Action | Keyboard or control |
+| --- | --- |
+| Create a block | Enter |
+| Soft line break inside a block | Shift+Enter |
+| Move a block and its children | Alt+Up/Down, or Move up/down in the toolbar |
+| Nest under the previous sibling | Tab, or Indent |
+| Leave the current parent | Shift+Tab, or Outdent |
+| Bold / italic | Ctrl+B / Ctrl+I |
+| Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
+| Follow a sample block reference | Ctrl+click the link |
+
+The first sibling cannot be indented. Unavailable toolbar actions are disabled.
+Wrapping text does not create a block. Splitting a parent gives the trailing block
+a new identity and transfers its children there; structural edits can be undone.
+Image and file cards are layout representations, not imported files. Mouse drag
+reordering is not available yet.
+
+## Checks and measurements
+
+`test gcc` and `test clang` run CTest for the document core, launcher, editor,
+workspace lifecycle, application window, and launch check. `test core` builds the
+document core without Qt or SQLite.
+
+```sh
+./scripts/dev.sh test-native
+./scripts/dev.sh run --smoke-test
+./scripts/dev.sh run --screenshot /build/prototype.png
 ./scripts/dev.sh benchmark single
 ./scripts/dev.sh benchmark separate
 ```
 
-These commands load the same 1,000-paragraph fixture in fresh processes and emit
-JSON with load time, typing latency, native editor count, and Linux peak resident
-memory. Treat these as local measurements; record hardware, build type, toolkit,
-and display backend when comparing results.
+`test-native` runs editor and desktop interactions on X11/Xwayland. The screenshot
+appears at `build-container-gcc/prototype.png`. Smoke tests and screenshots skip
+the chooser unless `--workspace` is supplied. Benchmarks print JSON measurements
+for the same 1,000-block fixture; see
+[EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md) for methodology.
 
-An explicitly scoped SDK can also be used without a container, when desired:
-
-```sh
-cmake -S . -B build-local -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/project/.tools/qt
-cmake --build build-local --parallel 4
-ctest --test-dir build-local --output-on-failure
-```
-
-This is an optional development fallback. Do not install project SDKs through the
-host package manager or change global PATH/library settings. Exact tested versions
-and dependency boundaries are in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
-
-Nebula's own source is [MIT licensed](LICENSE). Dependencies retain their own
-licenses. Project management conventions are in [AGENTS.md](AGENTS.md).
+Nebula's source is [MIT licensed](LICENSE). Dependencies retain their own licenses.
+Project management conventions are in [AGENTS.md](AGENTS.md).

@@ -1,7 +1,11 @@
+#include "nebula/app/prototype_window.hpp"
+#include "nebula/app/workspace_dialog.hpp"
+#include "nebula/storage/workspace.hpp"
 #include "nebula/editor/block_widgets.hpp"
 #include "nebula/editor/page_editor.hpp"
 
-#include <QAction>
+#include <QDir>
+#include <QMessageBox>
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QElapsedTimer>
@@ -9,13 +13,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QKeyEvent>
-#include <QLabel>
-#include <QMainWindow>
-#include <QStatusBar>
-#include <QTabWidget>
 #include <QTimer>
-#include <QToolBar>
-#include <QVBoxLayout>
 #include <algorithm>
 #include <cstdio>
 
@@ -79,10 +77,15 @@ int main(int argc, char** argv)
     QApplication::setApplicationName("Nebula editor prototype");
     QCommandLineParser parser;
     parser.addHelpOption();
-    parser.addOption({"smoke-test", "Create both editor approaches and exit after event processing."});
+    parser.addOption({"smoke-test", "Create the editor and exit after event processing."});
     parser.addOption({"benchmark", "Measure single or separate block editors.", "mode"});
     parser.addOption({"blocks", "Number of benchmark blocks (1–10000).", "count", "1000"});
-    parser.addOption({"screenshot", "Save a prototype screenshot and exit.", "path"});
+    parser.addOption({"screenshot", "Save an editor screenshot and exit.", "path"});
+    parser.addOption({"workspace", "Open or create a workspace in this folder.", "directory"});
+    parser.addOption({"workspace-display", "Display the host path of a mounted workspace.", "directory"});
+    parser.addOption({"select-workspace", "Choose a folder and print its path; do not create files."});
+    parser.addOption({"demo", "Open the sample editor without a workspace."});
+    parser.addOption({"compare-editors", "Show the separate-widget investigation tab."});
     parser.process(app);
     if (parser.isSet("benchmark")) {
         const auto mode = parser.value("benchmark");
@@ -94,74 +97,50 @@ int main(int argc, char** argv)
         }
         return benchmark(mode, count);
     }
-
-    QMainWindow window;
-    window.setWindowTitle("Nebula — editor feasibility prototype");
-    window.resize(1050, 820);
-    auto* central = new QWidget(&window);
-    auto* layout = new QVBoxLayout(central);
-    auto* notice = new QLabel("PROTOTYPE  ·  In memory only; edits are discarded when this window closes.", central);
-    notice->setStyleSheet("QLabel { padding: 12px; background: #fff3d5; color: #654c13; }");
-    layout->addWidget(notice);
-    auto* tabs = new QTabWidget(central);
-    auto* editor = new PageEditor(tabs);
-    auto* comparison = new BlockWidgets(tabs);
-    editor->set_page(sample_page());
-    comparison->set_page(sample_page());
-    tabs->addTab(editor, "Page-wide document");
-    tabs->addTab(comparison, "Separate blocks — comparison");
-    layout->addWidget(tabs);
-    window.setCentralWidget(central);
-
-    auto* toolbar = window.addToolBar("Editing");
-    toolbar->setMovable(false);
-    auto action = [&](const QString& label, auto callback) {
-        auto* item = toolbar->addAction(label);
-        editor->addAction(item);
-        item->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        QObject::connect(item, &QAction::triggered, editor, callback);
-        return item;
-    };
-    action("Undo", [=] { editor->undo(); })->setShortcut(QKeySequence::Undo);
-    action("Redo", [=] { editor->redo(); })->setShortcut(QKeySequence::Redo);
-    toolbar->addSeparator();
-    action("Bold", [=] { editor->toggle_bold(); })->setShortcut(QKeySequence::Bold);
-    action("Italic", [=] { editor->toggle_italic(); })->setShortcut(QKeySequence::Italic);
-    action("Heading", [=] { editor->set_block_kind(BlockKind::Heading); });
-    action("Paragraph", [=] { editor->set_block_kind(BlockKind::Paragraph); });
-    action("Bullet", [=] { editor->set_block_kind(BlockKind::Bullet); });
-    action("To-do", [=] { editor->set_block_kind(BlockKind::Todo); });
-    action("Check", [=] { editor->toggle_checked(); });
-    toolbar->addSeparator();
-    action("↑", [=] { editor->move_current(-1); });
-    action("↓", [=] { editor->move_current(1); });
-    action("Indent", [=] { editor->indent_current(); });
-    action("Outdent", [=] { editor->outdent_current(); });
-    window.addToolBarBreak();
-    auto* insert = window.addToolBar("Insert and fixtures");
-    insert->setMovable(false);
-    QObject::connect(insert->addAction("Link to heading"), &QAction::triggered, editor,
-        [=] { editor->insert_reference("the heading", ReferenceKind::Block, "heading"); });
-    QObject::connect(insert->addAction("Image card"), &QAction::triggered, editor,
-        [=] { editor->insert_card(true, "Sample image representation"); });
-    QObject::connect(insert->addAction("Attachment card"), &QAction::triggered, editor,
-        [=] { editor->insert_card(false, "example.txt"); });
-    QObject::connect(insert->addAction("Reset sample"), &QAction::triggered, editor,
-        [=] { editor->set_page(sample_page()); comparison->set_page(sample_page()); });
-    QObject::connect(insert->addAction("Load 1000 blocks"), &QAction::triggered, editor,
-        [=] { editor->set_page(long_page(1000)); comparison->set_page(long_page(1000)); });
-    QObject::connect(tabs, &QTabWidget::currentChanged, toolbar, [=](int index) {
-        toolbar->setEnabled(index == 0);
-        insert->setEnabled(index == 0);
-    });
-    QObject::connect(editor, &PageEditor::reference_activated, &window, [=, &window](int kind, const QString& id) {
-        if (kind == static_cast<int>(ReferenceKind::Block) && editor->go_to_block(id))
-            window.statusBar()->showMessage("Followed block reference: " + id, 4000);
-        else
-            window.statusBar()->showMessage("Target not present in this prototype page: " + id, 4000);
-    });
-    window.statusBar()->showMessage("Enter: new block · Shift+Enter: line break · Alt+↑/↓: move · Tab/Shift+Tab: nest · Ctrl+click: reference");
+    auto user_home = qEnvironmentVariable("NEBULA_USER_HOME");
+    if (user_home.isEmpty())
+        user_home = QDir::homePath();
+    QApplication::setQuitOnLastWindowClosed(false);
+    if (parser.isSet("select-workspace")) {
+        WorkspaceDialog dialog(user_home);
+        if (parser.isSet("workspace"))
+            dialog.set_directory(parser.value("workspace"));
+        if (dialog.exec() == QDialog::Accepted)
+            std::puts(dialog.directory().toUtf8().constData());
+        return 0;
+    }
+    const bool automated = parser.isSet("smoke-test") || parser.isSet("screenshot");
+    std::optional<Workspace> workspace;
+    QString display;
+    if (parser.isSet("workspace")) {
+        try {
+            const auto directory = normalize_workspace_directory(parser.value("workspace"), user_home);
+            workspace.emplace(Workspace::open(std::filesystem::u8path(directory.toUtf8().constData())));
+            display = parser.isSet("workspace-display") ? parser.value("workspace-display") : directory;
+        } catch (const std::exception& error) {
+            if (automated)
+                std::fprintf(stderr, "%s\n", error.what());
+            else
+                QMessageBox::critical(nullptr, "Cannot open workspace", QString::fromUtf8(error.what()));
+            return 1;
+        }
+    } else if (!automated && !parser.isSet("demo")) {
+        WorkspaceDialog dialog(user_home);
+        for (;;) {
+            if (dialog.exec() != QDialog::Accepted)
+                return 0;
+            try {
+                workspace.emplace(Workspace::open(std::filesystem::u8path(dialog.directory().toUtf8().constData())));
+                display = dialog.directory();
+                break;
+            } catch (const std::exception& error) {
+                dialog.show_error(QString::fromUtf8(error.what()));
+            }
+        }
+    }
+    PrototypeWindow window(sample_page(), display, parser.isSet("compare-editors"));
     window.show();
+    QApplication::setQuitOnLastWindowClosed(true);
     if (parser.isSet("smoke-test"))
         QTimer::singleShot(50, &app, &QApplication::quit);
     if (parser.isSet("screenshot")) {

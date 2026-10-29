@@ -16,6 +16,7 @@ public:
     void set_page(const Page& page);
     Page snapshot() const;
     QString current_block_id() const;
+    QRectF active_block_rect() const; // Viewport coordinates, including wrapped lines.
     bool go_to_block(const QString& id);
     bool move_current(int direction);
     bool indent_current();
@@ -33,6 +34,7 @@ signals:
     void reference_activated(int kind, const QString& target_id);
 
 protected:
+    void paintEvent(QPaintEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void inputMethodEvent(QInputMethodEvent* event) override;
     void insertFromMimeData(const QMimeData* source) override;

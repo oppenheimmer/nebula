@@ -19,7 +19,18 @@ Qt and development packages are installed inside the image only.
 Source is mounted read-only; build output uses build-container-<compiler>/.
 Tests and benchmarks run with networking disabled and an offscreen Qt backend.
 Run shares the X11 display socket and a single authorization file explicitly.
+Run asks for a workspace folder; --workspace HOST_FOLDER selects one directly.
+The chooser sees your home read-only. Only the chosen folder is mounted writable.
+Run rebuilds the executable automatically. --demo opens the editor without a workspace.
 HELP
+}
+
+mount_spec() {
+    local source_path=${1//\"/\"\"}
+    local target_path=${2//\"/\"\"}
+    printf 'type=bind,"source=%s","target=%s"' "$source_path" "$target_path"
+    [[ ${3:-} != readonly ]] || printf ',readonly'
+    return 0
 }
 
 if [[ "$command_name" == help || "$command_name" == --help || "$command_name" == -h ]]; then
@@ -60,8 +71,8 @@ run=(docker run --rm --init --network=none --cap-drop=ALL
      --security-opt=no-new-privileges --pids-limit=256
      --user "$(id -u):$(id -g)" --read-only
      --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777
-     --mount "type=bind,source=$project_dir,target=/workspace,readonly"
-     --mount "type=bind,source=$build_dir,target=/build"
+     --mount "$(mount_spec "$project_dir" /workspace readonly)"
+     --mount "$(mount_spec "$build_dir" /build)"
      --workdir /workspace)
 
 case "$command_name" in
@@ -84,12 +95,50 @@ case "$command_name" in
             printf 'GUI launch needs DISPLAY, the X11 socket, and a readable XAUTHORITY file.\n' >&2
             exit 1
         fi
-        executable=/build/nebula_prototype
-        [[ "$command_name" != test-native ]] || executable=/build/editor_tests
-        exec "${run[@]}" --env QT_QPA_PLATFORM=xcb --env "DISPLAY=$DISPLAY" \
-            --env XAUTHORITY=/run/nebula-xauthority \
-            --mount type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix,readonly \
-            --mount "type=bind,source=$auth_file,target=/run/nebula-xauthority,readonly" \
-            "$image" "$executable" "${@:2}"
+        # Rebuild here too: running a stale binary must not hide source changes.
+        "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON && cmake --build /build --parallel 4'
+        gui=("${run[@]}" --env QT_QPA_PLATFORM=xcb --env "DISPLAY=$DISPLAY"
+            --env XAUTHORITY=/run/nebula-xauthority
+            --mount type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix,readonly
+            --mount "$(mount_spec "$auth_file" /run/nebula-xauthority readonly)")
+        if [[ "$command_name" == test-native ]]; then
+            exec "${gui[@]}" "$image" sh -ec '/build/editor_tests && /build/desktop_tests'
+        fi
+        host_workspace=
+        skip_picker=false
+        app_args=()
+        shift
+        while (( $# )); do
+            case "$1" in
+                --workspace)
+                    if (( $# < 2 )); then printf '%s\n' '--workspace needs a host folder.' >&2; exit 2; fi
+                    host_workspace=$2
+                    [[ -n "$host_workspace" ]] || { printf '%s\n' '--workspace needs a host folder.' >&2; exit 2; }
+                    shift 2 ;;
+                --workspace=*)
+                    host_workspace=${1#--workspace=}
+                    [[ -n "$host_workspace" ]] || { printf '%s\n' '--workspace needs a host folder.' >&2; exit 2; }
+                    shift ;;
+                --demo|--smoke-test|--screenshot|--benchmark|--help|-h)
+                    skip_picker=true; app_args+=("$1"); shift ;;
+                *) app_args+=("$1"); shift ;;
+            esac
+        done
+        if [[ -z "$host_workspace" && "$skip_picker" == false ]]; then
+            host_workspace=$("${gui[@]}" --env "NEBULA_USER_HOME=$HOME" \
+                --mount "$(mount_spec "$HOME" "$HOME" readonly)" \
+                "$image" /build/nebula_prototype --select-workspace)
+            [[ -n "$host_workspace" ]] || exit 0
+        fi
+        if [[ -n "$host_workspace" ]]; then
+            [[ "$host_workspace" != '~' ]] || host_workspace=$HOME
+            [[ "$host_workspace" != '~/'* ]] || host_workspace="$HOME/${host_workspace:2}"
+            mkdir -p -- "$host_workspace"
+            host_workspace=$(CDPATH= cd -- "$host_workspace" && pwd -P)
+            exec "${gui[@]}" --mount "$(mount_spec "$host_workspace" /data)" "$image" \
+                /build/nebula_prototype --workspace /data --workspace-display "$host_workspace" "${app_args[@]}"
+        fi
+        exec "${gui[@]}" "$image" /build/nebula_prototype "${app_args[@]}"
         ;;
 esac

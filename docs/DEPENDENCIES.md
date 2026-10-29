@@ -26,7 +26,7 @@ verification results; release packaging reproducibility remains M09 work.
 | CMake | 3.22 or newer | Targets, optional GUI build, CTest integration. |
 | Qt | 6.5 or newer | Core/Gui/Widgets for the prototype; Test for interaction tests. |
 | Compiler | GCC or Clang with C++17 support | Both are exercised during development. |
-| SQLite | Planned; not linked by this prototype | Storage work begins in M03. Development headers are included in the container for that milestone. |
+| SQLite | 3.33 or newer | Workspace identity/bootstrap storage via its C API, isolated from Qt. Page storage is tracked in M03. |
 | Ninja | Container build tool | Host SDK fallback can use CMake's default generator. |
 
 Qt 6.5 is the configured API minimum, not a claim that this change was tested
@@ -51,6 +51,18 @@ cmake --build build-core --parallel 4
 ctest --test-dir build-core --output-on-failure
 ```
 
+It also has no SQLite dependency. A local GUI build can use an explicitly scoped
+SDK without modifying global paths:
+
+```sh
+cmake -S . -B build-local -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/path/to/project/.tools/qt
+cmake --build build-local --parallel 4
+ctest --test-dir build-local --output-on-failure
+```
+
+Keep Qt, SQLite development files, and any additional compiler dependencies local
+to that environment; do not install them through the host package manager.
+
 ## Licensing and references
 
 The user selected MIT for Nebula's own source on 2026-10-29. The root `LICENSE`
@@ -61,6 +73,11 @@ Qt is a separate dependency with its own commercial and open-source licensing
 options; selected module and third-party notices must accompany a distributed
 package as appropriate. This development image is not a release packaging design.
 Record the exact linked libraries and notices during M09/M10.
+SQLite is [public domain](https://sqlite.org/copyright.html); it has no Qt or GUI
+dependency and is available on both Linux and macOS. The bootstrap uses the
+[`sqlite_schema` name available since SQLite 3.33](https://sqlite.org/forum/info/d90adfbb0a6eea88);
+later storage features must
+respect or explicitly revise this baseline.
 
 - [Qt licensing](https://doc.qt.io/qt-6/licensing.html)
 - [Qt Widgets](https://doc.qt.io/qt-6/qtwidgets-index.html)

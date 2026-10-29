@@ -25,11 +25,13 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Runtime | Local desktop application; no server, account, synchronization, or collaboration service. |
 | Organization | User-defined databases containing pages; saved views share the underlying pages. |
 | Editor | Flowing document with movable, nestable blocks; not a spatial canvas. |
+| Block affordance | Active block has a thin outline and subtle shadow; mouse reordering will use grip dots as its drag target. |
 | Cross-referencing | Links to pages, headings, and blocks across databases in one workspace; backlinks and link-aware navigation/search. |
 | Language | C++17 baseline with conservative dependencies; C libraries where useful. |
 | Application license | MIT, selected by the user; dependencies retain their own licenses. |
 | Interface | Qt 6 Widgets is the preferred starting point, subject to the editor feasibility milestone. |
 | Storage | SQLite for structured records, with small versioned JSON payloads for flexible block content and view settings. |
+| Workspace location | Ask where to create/open the workspace, suggesting `~/Document/nebula/`; keep the database and managed attachments together. |
 | Attachments | Prefer managed files beside the database; evaluate SQLite BLOBs if a single-file workspace becomes a requirement. |
 | Build | CMake; keep compiler and platform requirements explicit. |
 | Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
@@ -187,6 +189,23 @@ directory. Import copies files into managed storage so moving the original file
 does not break the note. Complete the file write before committing its reference;
 interrupted imports may leave orphan files that can be reconciled safely.
 
+Startup asks for the workspace folder and suggests `~/Document/nebula/` (singular
+`Document`, matching the requested default). The user can browse, type a new path,
+or cancel without creating it. The Docker launcher selects a host folder in a
+separate chooser container with the home directory mounted read-only, then mounts
+only the selected data folder writable at `/data` in the editor container. An
+explicit `--workspace HOST_FOLDER` bypasses the chooser and can select folders
+outside the home directory. The host path remains visible in the window.
+
+The bootstrap format is deliberately small: `nebula.sqlite3`, SQLite
+`application_id = 0x4e454255` (`NEBU`), `user_version = 1`, and
+`workspace_meta(id INTEGER PRIMARY KEY CHECK(id=1), workspace_id TEXT NOT NULL
+UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
+Initialization occurs in a transaction; reopening preserves that identity.
+Unrelated databases and unsupported versions are rejected without modifying their
+contents. **Version 1 stores no pages or notes.** Production tables and migrations
+remain M03 work; the editor displays an explicit in-memory prototype notice.
+
 Application operations must give related edits coherent validation and undo
 semantics. Autosave needs explicit saved/unsaved/error states. A change is saved
 only after persistence succeeds; the durability and pending-edit window must be
@@ -226,19 +245,22 @@ Use task IDs and checkboxes for individual steps. A milestone is complete only
 when every required step and its exit criteria have supporting verification.
 Record partial progress explicitly; do not infer completion from code existing or
 from a proposed design. An in-memory editor prototype and test/build foundation
-now exist. Production workspace storage and database views remain unimplemented.
+now exist, with a workspace chooser and SQLite identity bootstrap. Persisting note
+contents, autosave, and database views remain unimplemented.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
 and learned constraints in the gotcha log. Preserve the history of resolved bugs
 and changed decisions. Avoid unsupported completion percentages.
+Keep progress and verification updates here; `README.md` is for setup and usage,
+including material data-handling limitations, rather than a running progress log.
 
 | ID | Milestone | Dependencies | Status |
 | --- | --- | --- | --- |
 | M00 | Project definition and working conventions | None | Complete |
 | M01 | Editor feasibility and architecture decisions | M00 | In progress |
 | M02 | Modular application foundation | M01; prototype build/core scaffolding started early | In progress |
-| M03 | Persistent workspace and recovery foundations | M02 | Not started |
+| M03 | Persistent workspace and recovery foundations | M02; identity bootstrap started early at user request | In progress |
 | M04 | Database-to-page workflow | M03 | Not started |
 | M05 | Complete first-release block editing | M01, M04 | Not started |
 | M06 | Attachments and diary workflow | M03, M05 | Not started |
@@ -313,6 +335,9 @@ and a repeatable developer workflow.
   commands; exercise both GCC and Clang where available.
 - [ ] M02.6 Introduce an early macOS compile/smoke check when a runner or machine
   is available; record any infrastructure limitation rather than claiming a pass.
+- [x] M02.7 Ask for a workspace location at startup, suggest `~/Document/nebula/`,
+  support browse/type/cancel and an explicit path, and preserve the selected host
+  location through Docker launches. Test full-window focus and block controls.
 
 Exit criteria: a fresh checkout builds and launches on the chosen Linux baseline;
 core tests run without a GUI. Platform assumptions and the status of the early
@@ -323,6 +348,11 @@ test harness were needed to investigate M01, so that scaffolding was started
 before M01's manual desktop validation is complete. This does not complete the
 production core, application command/undo architecture, workspace shell, or macOS
 checks. [README.md](README.md) documents the Docker build/test and GUI commands.
+The user requested a functional location picker while evaluating the prototype,
+so the path/dialog adapter and reusable application window were added before the
+rest of M02.4. The normal window contains one block editor; the comparison baseline
+requires `--compare-editors`. Native-window tests exercise toolbar clicks,
+shortcut routing, Enter, nesting feedback, and the active block outline.
 
 ### M03 — Persistent workspace and recovery foundations
 
@@ -346,6 +376,15 @@ records, and an initial backup/restore path.
 - [ ] M03.8 Persist resolved and unresolved inline references; maintain a rebuildable
   index of source/target page and block relationships. Verify consistency across
   commits, undo/redo, trash, and restoration without resolving targets by title.
+- [x] M03.9 Create/open a versioned workspace identity database and attachments
+  directory at the chosen location. Test reopening, process restart, unsupported
+  versions, unrelated files/databases, invalid attachment paths, and read-only
+  errors. This bootstrap does not persist the sample editor's page content.
+
+Dependency exception: M03.9 was pulled forward to make the user-requested folder
+selection concrete and durable. It does not complete M03.1/M03.2: no production
+page/property/block schema or repository operations exist yet. M03.4 still needs
+migrations despite the bootstrap's refusal of unsupported formats.
 
 Exit criteria: supported records survive closing/reopening; failed operations do
 not leave partial logical edits; migrations and database backup/restore preserve
@@ -382,7 +421,9 @@ Deliverables: the production block editor implementing the approach chosen in M0
 - [ ] M05.3 Implement cross-block selection, copy/cut/paste, and defined handling
   of plain text and supported rich-text clipboard content.
 - [ ] M05.4 Implement drag reordering, keyboard-accessible move operations, and
-  basic nesting while preserving IDs and preventing invalid trees.
+  basic nesting while preserving IDs and preventing invalid trees. Keep the active
+  block's thin outline/subtle shadow and add grip dots as the mouse drag target;
+  verify dragging a subtree, nesting, canceled drops, undo, and keyboard access.
 - [ ] M05.5 Integrate consistent undo/redo for text and structural edits with
   autosave; document undo boundaries and whether history survives restart.
 - [ ] M05.6 Implement page/block link resolution using permanent IDs and predictable
@@ -584,6 +625,57 @@ problems remain in the risk register until reproduced.
   reproduced the wrong target, then passed with an explicit focus-restoration
   assertion after the fix. Compiler/native suite results are in the report.
 
+### BUG-004 — Reported block controls behaved like plain text editing
+
+- **Milestone/state/impact:** M01/M02; report investigated, exact prior-session
+  cause unconfirmed. The user reported Alt+arrows scrolling, Tab inserting spaces,
+  and Enter not creating application blocks after launching with `dev.sh`.
+- **Environment/reproduction:** user launched the Docker prototype on Linux;
+  focused tab and binary revision were not established. Expected controls move,
+  nest, and split blocks. The complete reported failure has not been independently
+  reproduced in the page-wide editor.
+- **Diagnosis:** the old normal launch exposed a separate-widget comparison tab
+  with native text behavior, and `run` did not rebuild stale executables. Exact
+  modifier equality also excluded keypad arrow events. These are confirmed paths
+  to confusing behavior, not proof of which affected the user's session.
+- **Resolution:** normal launch now shows only the block editor; comparison mode
+  is explicit and disables block controls. `run` rebuilds automatically. Block
+  position/depth are visible, unavailable actions are disabled, toolbar operations
+  restore editor focus, and keypad modifier bits do not suppress structural keys.
+- **Verification:** full-window tests pass for toolbar movement/nesting, focus,
+  Alt+Down, Tab/Shift+Tab, Enter increasing the block count, keypad-modified keys,
+  boundary actions, and explicit comparison mode on offscreen and Xwayland Qt.
+  The original session's exact cause remains unconfirmed; mouse drag is planned
+  in M05.4 and was never implemented in this prototype.
+
+### BUG-005 — Initial active-block outline was shorter than the text
+
+- **Milestone/state/impact:** M01/M02; fixed and verified during implementation.
+  The outline's lower edge crossed the first heading instead of enclosing it.
+- **Environment/reproduction:** Qt 6.8.2, Xwayland screenshot of the default sample.
+  Expected a thin outline around the whole active block, including its text height.
+- **Cause:** `blockBoundingRect()` already excluded the bottom inter-block margin;
+  subtracting that margin again made the outline ten pixels too short.
+- **Resolution:** use the layout's full block height with a small outside padding.
+- **Verification:** the heading outline must contain the cursor rectangle; wrapped
+  paragraphs, moving the outline, painted edge pixels, and scrolling are covered
+  by desktop tests. The native preview was inspected as well.
+
+### BUG-006 — Workspace bootstrap could misclassify an unrelated database
+
+- **Milestone/state/impact:** M03; fixed and verified during implementation.
+  An unrelated database with only a user table named `sqliteNotes` was treated as
+  empty and gained Nebula metadata instead of being rejected.
+- **Environment/reproduction:** SQLite 3.46.1 in the development image; put that
+  table and a record in `nebula.sqlite3`, then open the folder as a workspace.
+  Expected rejection with byte-for-byte preservation of the original file.
+- **Cause:** filtering internal names with SQL `LIKE 'sqlite_%'` treated `_` as a
+  wildcard and incorrectly excluded a legal user table without the reserved prefix.
+- **Resolution:** count every existing schema object before initializing a blank
+  database, avoiding name-based exclusions entirely.
+- **Verification:** `unrelated_database_is_not_modified` first failed with this
+  fixture, then passed after the fix, checking rejection and unchanged file bytes.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -635,6 +727,18 @@ milestone, evidence, and the resulting action.
 - **G14 — Native display checks need explicit access:** the container GUI shares
   only the X11/Xwayland socket and its authorization file. Headless tests use the
   offscreen backend. Neither establishes real screen-reader or OS IME validation.
+- **G15 — Workspace identity is not a saved note (2026-10-29, M03):** creating a
+  real SQLite file does not establish content persistence. Keep the prototype's
+  discard-on-close notice visible until page storage and autosave are verified.
+- **G16 — Full-window tests need window-manager timing (2026-10-29, M01/M02):**
+  offscreen focus was immediate, but Xwayland activation was asynchronous. Wait
+  for exposure/activation before sending events to the focused widget; an immediate
+  focus query initially returned null in the native test harness.
+- **G17 — Docker mount and fixture paths (2026-10-29, M02):** bind-mount options
+  use CSV quoting, not shell quoting alone; commas and quotes in host folders are
+  exercised by launcher tests and a real GUI launch. The container's temporary
+  filesystem is non-executable, so mock executable fixtures live in the writable
+  build directory rather than `/tmp`.
 
 ## Work log
 
@@ -643,6 +747,29 @@ milestone, evidence, and the resulting action.
 | 2026-10-29 | M00 | Recorded the accepted discussion in this roadmap and added project management instructions. Repository inspection found no application files or commits. Document review and structural checks passed: 11 milestone definitions/table entries, 61 unique task IDs, matching exit criteria, accurate completion states, balanced code fences, and clean whitespace. Application tests are not applicable to this documentation-only change. | Begin M01 when implementation is requested; record prototype evidence before finalizing the editor design. |
 | 2026-10-29 | M00, M01–M03, M05, M07–M08 | Reviewed Zim's repository and official linking, backlinks, page-navigation, and search documentation. Added cross-referencing scope, data/index responsibilities, lifecycle rules, tasks, acceptance criteria, and management guidance. Document review, whitespace checks, and structural validation passed: 11 milestones, 67 unique tasks, and all 61 earlier task IDs/statuses preserved. Application tests are not applicable; implementation remains unstarted. | Begin M01 when implementation is requested, including validation of typed inline references in the editor prototype. |
 | 2026-10-29 | M01, M02 | Began execution with a C++17/Qt prototype, a Qt-independent document/tree module, 10 core and 27 interaction/comparison cases plus a launch check, two editor approaches, and measurement commands. The user selected MIT and required Docker-based dependency isolation; added the development image/wrapper and management guidance. Fixed BUG-001 through BUG-003 with regression checks. Detailed compiler, native/offscreen, and measurement evidence is in the feasibility report. | Finish M01.4 with real OS IME and screen-reader validation, then continue the production module/command foundation in M02. Storage and database milestones remain not started. |
+| 2026-10-29 | M01–M03 | Added the startup folder picker with the requested default, separate host selection/data mounts, SQLite identity bootstrap, reusable desktop window, explicit comparison mode, toolbar/focus feedback, keypad handling, and a thin active-block outline/shadow. Recorded grip dots for M05.4 and moved README progress content here. Added 18 desktop cases plus launcher integration checks alongside the existing 10 core and 27 editor cases. Verification results are recorded below. | Finish M01.4 manual input/accessibility checks and M02's production operations; implement note persistence/schema and autosave in M03 before treating the app as a usable diary. |
+
+Verification for the workspace/editor follow-up uses the existing Debian 13 image
+`sha256:d96a2a1a0a4e223d4df47f2088b052961673eb5cc2f3a0e74fe4a0a0893a6f6e`,
+Qt 6.8.2, SQLite 3.46.1, GCC 14.2.0 and Clang 19.1.7 on the RHEL 9.8 x86_64 host.
+No host development packages were installed.
+
+| Check | Outcome |
+| --- | --- |
+| `./scripts/dev.sh test gcc` | Passed all five CTest entries: core, launcher, editor, desktop, and prototype smoke. Includes the BUG-006 regression. |
+| `./scripts/dev.sh test clang` | Passed the same five entries; new modules compile with warnings enabled. |
+| `./scripts/dev.sh test core` | Passed core and launcher checks with the GUI disabled; no Qt or SQLite discovery/linking. |
+| `./scripts/dev.sh test-native` | Passed 27 editor and 18 desktop cases on Xwayland, excluding Qt's setup/cleanup counts. Tests wait for window exposure and activation. |
+| Real Docker workspace launch/reopen | Passed with a temporary host folder containing Unicode, spaces, a comma, and quotes; created the database and attachments directory and reopened it on a later launch. |
+| Outline preview | Inspected the final native window screenshot; the thin outline encloses the heading with a subtle shadow and no background fill. |
+| Shell and documentation checks | Bash syntax, 69 unique task IDs, balanced fences, local Markdown links, and `git diff --check` passed. |
+
+Initial failures were corrected rather than omitted: an outline-test fixture used
+the wrong block ID, the mock launcher could not execute on `/tmp`'s container
+mount, native test focus needed activation waits (G16/G17), and the outline height
+and unrelated-database edge case became BUG-005/BUG-006. BUG-004's exact original
+session remains unconfirmed. Real OS IME, screen-reader, and macOS checks remain
+unperformed; no production note persistence or autosave is claimed.
 
 Future entries should record the steps changed, checks actually performed and
 their outcomes, relevant commits, encountered bugs, and the next concrete action.

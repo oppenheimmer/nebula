@@ -99,7 +99,36 @@ PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
     setPlaceholderText("Write a note…");
     document()->setDocumentMargin(24);
     document()->documentLayout()->registerHandler(CardObject, new CardRenderer(this));
+    connect(this, &QTextEdit::cursorPositionChanged, viewport(), QOverload<>::of(&QWidget::update));
     set_page({"untitled", {{"first-block", "", BlockKind::Paragraph, {}}}});
+}
+
+QRectF PageEditor::active_block_rect() const
+{
+    const auto block = textCursor().block();
+    const auto bounds = document()->documentLayout()->blockBoundingRect(block);
+    const auto* layout = block.layout();
+    const qreal line_y = layout && layout->lineCount() ? layout->lineAt(0).y() : 0;
+    const qreal top = cursorRect(QTextCursor(block)).top() - line_y;
+    return {8, top - 4, qreal(viewport()->width() - 16), bounds.height() + 8};
+}
+
+void PageEditor::paintEvent(QPaintEvent* event)
+{
+    QTextEdit::paintEvent(event);
+    QPainter painter(viewport());
+    painter.setRenderHint(QPainter::Antialiasing);
+    const auto rect = active_block_rect();
+    painter.setBrush(Qt::NoBrush);
+    // A quiet one-pixel outline and a small shadow; leave text selection native.
+    auto shadow = palette().color(QPalette::Text);
+    shadow.setAlpha(14);
+    painter.setPen(QPen(shadow, 1));
+    painter.drawRoundedRect(rect.translated(0, 1.5), 4, 4);
+    auto outline = palette().color(QPalette::Text);
+    outline.setAlpha(55);
+    painter.setPen(QPen(outline, 1));
+    painter.drawRoundedRect(rect, 4, 4);
 }
 
 void PageEditor::set_page(const Page& page)
@@ -303,19 +332,21 @@ void PageEditor::split_block(QTextCursor& cursor)
 
 void PageEditor::keyPressEvent(QKeyEvent* event)
 {
+    const auto modifiers = event->modifiers()
+        & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
     if (event->matches(QKeySequence::Undo) || event->matches(QKeySequence::Redo)) {
         QTextEdit::keyPressEvent(event);
         return;
     }
-    if (event->modifiers() == Qt::AltModifier && (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)) {
+    if (modifiers == Qt::AltModifier && (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)) {
         move_current(event->key() == Qt::Key_Up ? -1 : 1);
         return;
     }
-    if (event->key() == Qt::Key_Tab && event->modifiers() == Qt::NoModifier) {
+    if (event->key() == Qt::Key_Tab && modifiers == Qt::NoModifier) {
         indent_current();
         return;
     }
-    if (event->key() == Qt::Key_Backtab || (event->key() == Qt::Key_Tab && event->modifiers() == Qt::ShiftModifier)) {
+    if (event->key() == Qt::Key_Backtab || (event->key() == Qt::Key_Tab && modifiers == Qt::ShiftModifier)) {
         outdent_current();
         return;
     }

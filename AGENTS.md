@@ -75,6 +75,9 @@ prerequisite. Keep SDKs, container build output, and tool caches out of Git.
   dependencies; record a reason if work changes their order or scope.
 - Update affected checkboxes, milestone status, and the work log with the change.
   Use Not started, In progress, Blocked, or Complete; avoid invented percentages.
+- Keep progress updates, completed-check results, encountered bugs, and remaining
+  milestone work in `ROADMAP.md`. Keep `README.md` focused on the project,
+  setup, usage, and material data-handling limitations; do not add progress snippets.
 - Mark a milestone complete only when its deliverables and exit criteria have
   evidence. Distinguish prototypes, production behavior, and planned work.
 - Keep unresolved decisions visible. Record significant choices and their reasons
@@ -101,6 +104,10 @@ prerequisite. Keep SDKs, container build output, and tool caches out of Git.
 - Exercise editor behavior directly: selection across blocks, split/merge,
   navigation, clipboard, undo/redo, Unicode, input-method composition, and keyboard
   access. Screenshots alone are insufficient evidence.
+- Exercise the full application window as well as isolated editor widgets; verify
+  focus and shortcut routing. Identify the active block with a thin outline and
+  subtle shadow. When mouse reordering is implemented, provide grip dots as the
+  block's drag target and retain keyboard equivalents.
 - Use representative fixtures and recorded environments for performance claims.
   Establish thresholds before treating a benchmark as a pass/fail release gate.
 - Record Linux and macOS verification separately. A Linux build does not establish
