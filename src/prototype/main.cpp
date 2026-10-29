@@ -1,5 +1,6 @@
 #include "nebula/app/prototype_window.hpp"
 #include "nebula/app/workspace_dialog.hpp"
+#include "nebula/app/workspace_window.hpp"
 #include "nebula/storage/workspace.hpp"
 #include "nebula/editor/block_widgets.hpp"
 #include "nebula/editor/page_editor.hpp"
@@ -138,14 +139,22 @@ int main(int argc, char** argv)
             }
         }
     }
-    PrototypeWindow window(sample_page(), display, parser.isSet("compare-editors"));
-    window.show();
+    std::unique_ptr<PrototypeWindow> window;
+    try {
+        if (workspace) window=std::make_unique<WorkspaceWindow>(*workspace,display);
+        else window=std::make_unique<PrototypeWindow>(sample_page(), display, parser.isSet("compare-editors"));
+    } catch (const std::exception& error) {
+        if (automated) std::fprintf(stderr,"%s\n",error.what());
+        else QMessageBox::critical(nullptr,"Cannot load workspace",QString::fromUtf8(error.what()));
+        return 1;
+    }
+    window->show();
     QApplication::setQuitOnLastWindowClosed(true);
     if (parser.isSet("smoke-test"))
         QTimer::singleShot(50, &app, &QApplication::quit);
     if (parser.isSet("screenshot")) {
         QTimer::singleShot(100, &app, [&] {
-            app.exit(window.grab().save(parser.value("screenshot")) ? 0 : 1);
+            app.exit(window->grab().save(parser.value("screenshot")) ? 0 : 1);
         });
     }
     return app.exec();

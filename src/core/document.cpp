@@ -49,6 +49,8 @@ void validate(const Page& page)
     std::unordered_set<std::string> ids;
     std::vector<std::string> ancestors;
     for (const auto& block : page.blocks) {
+        if (int(block.kind)<0 || int(block.kind)>5)
+            throw std::invalid_argument("Unknown block kind");
         if (block.id.empty() || !ids.insert(block.id).second)
             throw std::invalid_argument("Block IDs must be nonempty and unique");
         while (!ancestors.empty() && ancestors.back() != block.parent_id)
@@ -61,6 +63,8 @@ void validate(const Page& page)
                 throw std::invalid_argument("Hard line breaks must be separate blocks");
             if (run.reference && run.reference->target_id.empty())
                 throw std::invalid_argument("Resolved references need a target ID");
+            if (run.reference && (int(run.reference->kind)<0 || int(run.reference->kind)>1))
+                throw std::invalid_argument("Unknown reference kind");
             if (run.asset && run.asset->label.empty())
                 throw std::invalid_argument("Inline asset cards need a label");
         }

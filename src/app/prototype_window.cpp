@@ -30,6 +30,7 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
         layout->addWidget(location);
     }
     auto* notice = new QLabel("EDITOR PROTOTYPE · Sample content stays in memory and is discarded on close.", central);
+    notice->setObjectName("prototypeNotice");
     notice->setStyleSheet("QLabel { padding: 10px; background: #fff3d5; color: #654c13; }");
     layout->addWidget(notice);
     selection_ = new QLabel(central);
@@ -96,6 +97,7 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
     add_action(blocks, "Image card", "image", [this] { editor_->insert_card(true, "Sample image representation"); });
     add_action(blocks, "File card", "attachment", [this] { editor_->insert_card(false, "example.txt"); });
     auto* fixtures = menuBar()->addMenu("Sample");
+    fixtures->setObjectName("sampleMenu");
     connect(fixtures->addAction("Reset sample"), &QAction::triggered, this, [this, comparison] {
         editor_->set_page(sample_page());
         if (comparison)

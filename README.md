@@ -4,11 +4,9 @@ An always-local, single-user note-taking and diary application. Database entries
 open as flowing block documents, with Notion-inspired organization and
 Zim-inspired cross-references. Linux comes first; macOS is planned.
 
-The executable is an **editor prototype**. Its sample page is held in memory:
-**closing the window discards edits**, including when a workspace is open.
-The workspace database currently stores its identity, not notes. Implementation
-status, milestones, bugs, and verification results belong in
-[ROADMAP.md](ROADMAP.md).
+Workspace pages and properties are stored in a local SQLite database. The separate
+`--demo` mode edits an in-memory sample and discards it on close. Implementation
+status, milestones, bugs, and verification results belong in [ROADMAP.md](ROADMAP.md).
 
 ## Build with Docker
 
@@ -45,6 +43,18 @@ suggests `~/Document/nebula/`. Choose an existing Nebula folder or enter a new
 location; Open workspace creates `nebula.sqlite3` and `attachments/` there.
 Cancel leaves the location untouched. The selected host folder survives container
 exit and is shown above the editor.
+
+Choose a database, create a page, and select its row to edit the flowing document.
+Double-click table cells to edit titles or typed properties. New view/Edit view
+configure filters, sorting, and visible columns over the same pages. A new workspace
+includes a Journal database with Entry date, Mood, and Tags. Journal entry asks for
+the intended calendar date. Trash and Restore preserve page/database identities.
+
+Edits save after a 500 ms pause, before navigating to another page, and when closing
+the window. The status distinguishes pending edits, successful saves, and failures.
+Ctrl+S saves immediately. On failure, edits remain visible and closing asks whether
+to keep the window open or discard pending changes. Undo survives autosave but is
+cleared when switching pages and does not survive restart.
 
 The folder chooser sees your home directory read-only. The editor receives only
 the selected workspace as a writable data mount at `/data`. To select a location
@@ -89,13 +99,32 @@ the active block; the label above the editor shows its position and nesting leve
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
 Wrapping text does not create a block. Splitting a parent gives the trailing block
 a new identity and transfers its children there; structural edits can be undone.
-Image and file cards are layout representations, not imported files. Mouse drag
+Image and file cards in demo mode are layout representations, not imported files. Mouse drag
 reordering is not available yet.
+
+Use Link… to select a page, heading, or block across databases. Ctrl+click follows
+it; the backlinks list opens the referring page/block. Targets retain their IDs
+through renaming and trash/restore. The link picker disambiguates page names by
+database. Wiki syntax and unresolved-name links are tracked in the roadmap.
+
+## Backup and restore
+
+```sh
+./scripts/dev.sh backup /path/to/nebula /path/to/new-backup
+./scripts/dev.sh restore /path/to/new-backup /path/to/new-workspace
+```
+
+These commands work without a display. Destinations must be new folders outside
+the source workspace. The source is mounted read-only; the database is copied
+using SQLite's backup API. Restore creates a new workspace copy and preserves the
+original backup. The attachment directory is copied, but managed file import and
+complete attachment recovery are not implemented yet. The format and durability
+rules are documented in [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
 ## Checks and measurements
 
 `test gcc` and `test clang` run CTest for the document core, launcher, editor,
-workspace lifecycle, application window, and launch check. `test core` builds the
+workspace lifecycle/recovery, application window, and launch check. `test core` builds the
 document core without Qt or SQLite.
 
 ```sh

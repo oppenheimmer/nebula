@@ -1,6 +1,6 @@
 # Nebula roadmap
 
-Last updated: 2026-10-29 (Asia/Tokyo)
+Last updated: 2026-10-30 (Asia/Tokyo)
 
 ## Project goal
 
@@ -41,8 +41,8 @@ architecture or a promise of full Notion or Zim format compatibility.
 
 The following remain implementation decisions rather than settled facts:
 
-- Whether the editor uses one rich-text document per page or separate block
-  components, including how selection and undo cross block boundaries.
+- Remaining OS input-method/accessibility validation of the selected page-wide
+  rich-text adapter, including whether those checks require architectural changes.
 - Release dependency pinning and third-party distribution notices. The current
   module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 - Minimum Linux distribution/compiler baseline and macOS deployment target.
@@ -197,14 +197,17 @@ only the selected data folder writable at `/data` in the editor container. An
 explicit `--workspace HOST_FOLDER` bypasses the chooser and can select folders
 outside the home directory. The host path remains visible in the window.
 
-The bootstrap format is deliberately small: `nebula.sqlite3`, SQLite
+The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`, SQLite
 `application_id = 0x4e454255` (`NEBU`), `user_version = 1`, and
 `workspace_meta(id INTEGER PRIMARY KEY CHECK(id=1), workspace_id TEXT NOT NULL
 UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
 Initialization occurs in a transaction; reopening preserves that identity.
 Unrelated databases and unsupported versions are rejected without modifying their
-contents. **Version 1 stores no pages or notes.** Production tables and migrations
-remain M03 work; the editor displays an explicit in-memory prototype notice.
+contents. **Version 1 stores no pages or notes.** Version 2 now migrates that
+bootstrap to persistent databases, pages, block payloads, properties, views, and
+derived link edges. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
+schema, JSON versions, ownership, autosave/undo boundaries, and backup contract.
+The prototype notice applies only to explicit in-memory demo mode.
 
 Application operations must give related edits coherent validation and undo
 semantics. Autosave needs explicit saved/unsaved/error states. A change is saved
@@ -245,8 +248,9 @@ Use task IDs and checkboxes for individual steps. A milestone is complete only
 when every required step and its exit criteria have supporting verification.
 Record partial progress explicitly; do not infer completion from code existing or
 from a proposed design. An in-memory editor prototype and test/build foundation
-now exist, with a workspace chooser and SQLite identity bootstrap. Persisting note
-contents, autosave, and database views remain unimplemented.
+now exist, with a workspace chooser and persistent SQLite database-to-page workflow.
+Content persistence, autosave, typed properties, and saved table views are
+implemented; attachment import and the full wiki workflow remain incomplete.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -261,9 +265,9 @@ including material data-handling limitations, rather than a running progress log
 | M01 | Editor feasibility and architecture decisions | M00 | In progress |
 | M02 | Modular application foundation | M01; prototype build/core scaffolding started early | In progress |
 | M03 | Persistent workspace and recovery foundations | M02; identity bootstrap started early at user request | In progress |
-| M04 | Database-to-page workflow | M03 | Not started |
-| M05 | Complete first-release block editing | M01, M04 | Not started |
-| M06 | Attachments and diary workflow | M03, M05 | Not started |
+| M04 | Database-to-page workflow | M03; primary workflow implemented while broader recovery work continues | Complete |
+| M05 | Complete first-release block editing | M01, M04 | In progress |
+| M06 | Attachments and diary workflow | M03, M05; diary template pulled forward with database UI | In progress |
 | M07 | Search and portable interchange | M04, M06 | Not started |
 | M08 | Reliability, accessibility, and performance | M04–M07 | Not started |
 | M09 | Linux release | M08 | Not started |
@@ -324,12 +328,12 @@ and a repeatable developer workflow.
 
 - [x] M02.1 Establish CMake targets and the C++17 baseline; document dependencies
   and supported Linux compiler configurations.
-- [ ] M02.2 Implement the initial UI-independent document types and invariants,
+- [x] M02.2 Implement the initial UI-independent document types and invariants,
   including permanent IDs, typed references, hierarchy validation, and deterministic
   ordering.
-- [ ] M02.3 Define application operations, storage interfaces, and ownership of
+- [x] M02.3 Define application operations, storage interfaces, and ownership of
   undo/redo without duplicating editing rules in individual views.
-- [ ] M02.4 Add workspace navigation, database/page placeholders, and platform
+- [x] M02.4 Add workspace navigation, database/page placeholders, and platform
   adapters for paths, dialogs, menus, and shortcuts.
 - [x] M02.5 Establish meaningful automated core tests and documented build/check
   commands; exercise both GCC and Clang where available.
@@ -345,9 +349,10 @@ macOS check are documented.
 
 Dependency exception: the CMake targets, initial core values/tree operations, and
 test harness were needed to investigate M01, so that scaffolding was started
-before M01's manual desktop validation is complete. This does not complete the
-production core, application command/undo architecture, workspace shell, or macOS
-checks. [README.md](README.md) documents the Docker build/test and GUI commands.
+before M01's manual desktop validation is complete. The subsequent persistent
+workflow adds the application/session/storage boundaries and workspace shell.
+The macOS compile/smoke check remains unavailable and M02 is not complete.
+[README.md](README.md) documents the Docker build/test and GUI commands.
 The user requested a functional location picker while evaluating the prototype,
 so the path/dialog adapter and reusable application window were added before the
 rest of M02.4. The normal window contains one block editor; the comparison baseline
@@ -359,19 +364,19 @@ shortcut routing, Enter, nesting feedback, and the active block outline.
 Deliverables: versioned SQLite storage, workspace lifecycle, persistence of core
 records, and an initial backup/restore path.
 
-- [ ] M03.1 Define and document tables, relationships, typed property storage,
+- [x] M03.1 Define and document tables, relationships, typed property storage,
   rich-text/reference payload versions, derived link edges, and schema versioning.
-- [ ] M03.2 Implement create/open/close operations, storage adapters, transactions,
+- [x] M03.2 Implement create/open/close operations, storage adapters, transactions,
   and validation of persisted document relationships.
-- [ ] M03.3 Implement autosave with visible persistence state and actionable write
+- [x] M03.3 Implement autosave with visible persistence state and actionable write
   errors; define commit/durability behavior and the pending-edit window.
-- [ ] M03.4 Implement versioned migrations and safe behavior for unsupported newer
+- [x] M03.4 Implement versioned migrations and safe behavior for unsupported newer
   workspace formats; verify preservation of existing data.
 - [ ] M03.5 Implement trash and restore semantics for pages/blocks, including how
   links and attachment references behave.
-- [ ] M03.6 Implement database snapshot backup and restore; reserve the manifest
+- [x] M03.6 Implement database snapshot backup and restore; reserve the manifest
   and attachment inclusion mechanism completed in M06.
-- [ ] M03.7 Verify interrupted operations, reopening, rollback, migration, and
+- [x] M03.7 Verify interrupted operations, reopening, rollback, migration, and
   backup/restore using representative persisted fixtures.
 - [ ] M03.8 Persist resolved and unresolved inline references; maintain a rebuildable
   index of source/target page and block relationships. Verify consistency across
@@ -382,9 +387,20 @@ records, and an initial backup/restore path.
   errors. This bootstrap does not persist the sample editor's page content.
 
 Dependency exception: M03.9 was pulled forward to make the user-requested folder
-selection concrete and durable. It does not complete M03.1/M03.2: no production
-page/property/block schema or repository operations exist yet. M03.4 still needs
-migrations despite the bootstrap's refusal of unsupported formats.
+selection concrete and durable. M03.1/M03.2/M03.4 were subsequently implemented
+with the version 2 schema and tested migration, rather than treating the original
+identity bootstrap as production note persistence.
+
+Current implementation: version 2 stores application-owned block JSON and typed
+properties, with deferred same-page parent foreign keys, global block IDs,
+transactional page/index replacement, and optimistic revisions. `PageSession`
+owns pending values and save failures; the Qt adapter owns per-page undo. Autosave
+waits 500 ms and flushes before navigation/close. Tests exercise failed writes,
+revision conflicts, killed writers before/after commit, migration rollback, and
+read-only-source backup/restore. M03.5 remains partial: database/page trash works,
+but deleted blocks are only recoverable by the current editor's undo. M03.8 has
+resolved references and a rebuildable index; unresolved-name reference persistence
+is still pending. M03 is not complete.
 
 Exit criteria: supported records survive closing/reopening; failed operations do
 not leave partial logical edits; migrations and database backup/restore preserve
@@ -396,19 +412,27 @@ index rebuilds reproduce the references in persisted content.
 Deliverables: the first complete organization workflow, from a database table to
 an editable page and back.
 
-- [ ] M04.1 Create, rename, and remove logical databases and their pages using the
+- [x] M04.1 Create, rename, and remove logical databases and their pages using the
   established trash policy.
-- [ ] M04.2 Add editable text, number, date, checkbox, and tags/select properties,
+- [x] M04.2 Add editable text, number, date, checkbox, and tags/select properties,
   with correct validation and type-aware ordering.
-- [ ] M04.3 Build the table model/view interface, visible-column settings, filters,
+- [x] M04.3 Build the table model/view interface, visible-column settings, filters,
   sorting, and persistence of saved views.
-- [ ] M04.4 Open a row as its page, edit basic text through application operations,
+- [x] M04.4 Open a row as its page, edit basic text through application operations,
   and keep page properties and database views consistent.
-- [ ] M04.5 Verify that multiple saved views share data and retain their settings
+- [x] M04.5 Verify that multiple saved views share data and retain their settings
   across restart; changing presentation must not duplicate content.
 
 Exit criteria: create a Journal database, add properties and entries, edit a page,
 filter/sort the table, save a view, restart, and recover the same data and view.
+
+Completion evidence: GCC and Clang offscreen suites and native Xwayland tests pass
+for all five steps, including the actual view dialog, database/trash controls,
+typed table edits, multiple views over shared IDs, navigation, autosave, and reopen.
+Storage tests reopen saved numeric filters and sorting and verify page identities.
+The native workspace window was also inspected. This work proceeds with M01's manual
+IME/screen-reader and M02's macOS checks still outstanding; those gates have not
+been treated as passes.
 
 ### M05 — Complete first-release block editing
 
@@ -458,9 +482,9 @@ backup, and a useful daily journal workflow.
   cleanup must account for live documents, trash, and active backups.
 - [ ] M06.3 Complete database-plus-attachment backup/restore with a consistent
   manifest and verification of referenced files.
-- [ ] M06.4 Add a Journal template with Title, Entry date, Mood, and Tags, plus a
+- [x] M06.4 Add a Journal template with Title, Entry date, Mood, and Tags, plus a
   convenient way to create an entry for a chosen day.
-- [ ] M06.5 Keep date-only entry values distinct from timestamps and verify diary
+- [x] M06.5 Keep date-only entry values distinct from timestamps and verify diary
   behavior around date/timezone changes.
 
 Exit criteria: create a dated entry with an image and file, move/remove the original
@@ -739,6 +763,15 @@ milestone, evidence, and the resulting action.
   exercised by launcher tests and a real GUI launch. The container's temporary
   filesystem is non-executable, so mock executable fixtures live in the writable
   build directory rather than `/tmp`.
+- **G18 — C++17 lambda portability (2026-10-29, M02):** Clang flagged capture of a
+  structured binding as a C++20 extension even though GCC accepted it. Use ordinary
+  local references when a lambda needs values from map entries; both compilers
+  must remain clean under the selected language baseline.
+- **G19 — Backups must not initialize or migrate their source (2026-10-29, M03):**
+  use a read-only SQLite connection for backup/restore input and migrate only the
+  restored copy. Tests back up a file without write permission and compare its
+  original bytes. Docker checks source/destination host overlap before mounting,
+  since different container paths can otherwise alias a nested host folder.
 
 ## Work log
 
@@ -774,6 +807,36 @@ unperformed; no production note persistence or autosave is claimed.
 Future entries should record the steps changed, checks actually performed and
 their outcomes, relevant commits, encountered bugs, and the next concrete action.
 Do not record tests as passed when they were unavailable or not run.
+
+### Persistent workspace execution checkpoint — 2026-10-29–30
+
+- Added `nebula_core` database/property/view values, `nebula_storage` records and
+  JSON codec, `nebula_application` page session, `WorkspaceWindow`, and a headless
+  `nebula_workspace` backup/restore tool. Qt Core handles JSON internally; the
+  document core and all public application/storage values use standard C++ types.
+- GCC: all six CTest entries passed, including 13 core cases, 15 storage/recovery
+  cases, the existing 27 editor cases, and 27 desktop cases. Killed-process tests verify both
+  rollback before commit and durability after commit. Actual view creation,
+  database rename/trash/restore, table property edits, autosave/reopen, undo after
+  save, failed-save close prompts, and cross-page navigation have focused tests.
+- Clang and core-only passed; native Xwayland passed the full editor and desktop
+  suites. The selected journal date (including a DST-transition calendar day)
+  survives reopen as a date-only value; leap-year/date validation is also tested.
+  A real Docker backup command succeeded without display access; the native
+  workspace screenshot was inspected. Clang exposed
+  a captured structured binding that required C++20, so it was rewritten for the
+  agreed C++17 baseline. A nested JSON property-version validation check was added
+  during final review; its focused rejection test and the final Clang suite passed.
+  Final native tests also passed all 27 desktop cases. A real Docker restore into
+  a new temporary workspace succeeded; source and backup remained intact.
+- Next: implement
+  grip-dot mouse reordering with subtree/identity/undo tests. M03 still needs
+  independent deleted-block recovery and unresolved reference persistence. M05
+  still needs dividers, rich clipboard, wiki entry, full link lifecycle/navigation,
+  input/accessibility checks, and the remaining editor polish. M06 attachment
+  ownership/import/manifest recovery, M07 search/interchange, M08 reliability,
+  and Linux/macOS packaging remain unfinished. Do not infer completion from this
+  checkpoint or restore the old in-memory-only README warning for workspace mode.
 
 ## Technical references discussed
 

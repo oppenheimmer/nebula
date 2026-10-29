@@ -95,4 +95,15 @@ reset_calls
 export NEBULA_TEST_PICKER_STATUS=1
 if bash "$launcher" run 2>/dev/null; then fail 'chooser failure must propagate'; fi
 count_calls 2
+reset_calls
+unset NEBULA_TEST_PICKER_STATUS
+mkdir -p "$fixture/source"
+bash "$launcher" backup "$fixture/source" "$fixture/backup"
+count_calls 2
+load_call 1
+has_argument /build/nebula_workspace || fail 'backup must use the headless workspace tool'
+has_argument "type=bind,\"source=$fixture/source\",\"target=/source\",readonly" || fail 'backup source must be read-only'
+has_argument /output/backup || fail 'backup destination was lost'
+reset_calls
+if bash "$launcher" backup "$fixture/source" "$fixture/source/inside" 2>/dev/null; then fail 'nested backup must fail'; fi
 printf 'PASS: launcher rebuild, cancel, selection, quoting, mounts, demo, and failures\n'

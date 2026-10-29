@@ -12,6 +12,8 @@ Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh test [gcc|clang|core]
        ./scripts/dev.sh benchmark [single|separate]
        ./scripts/dev.sh test-native
+       ./scripts/dev.sh backup SOURCE_FOLDER NEW_BACKUP_FOLDER
+       ./scripts/dev.sh restore BACKUP_FOLDER NEW_WORKSPACE_FOLDER
        ./scripts/dev.sh run [prototype options]
        ./scripts/dev.sh shell
 
@@ -56,7 +58,7 @@ case "$command_name" in
         [[ "$mode" == single || "$mode" == separate ]] || { usage >&2; exit 2; }
         compiler=gcc
         ;;
-    run|test-native|shell) compiler=gcc ;;
+    run|test-native|shell|backup|restore) compiler=gcc ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -88,6 +90,24 @@ case "$command_name" in
         ;;
     shell)
         exec "${run[@]}" -it "$image" /bin/bash
+        ;;
+    backup|restore)
+        if (( $# != 3 )); then usage >&2; exit 2; fi
+        source_folder=$(CDPATH= cd -- "$2" && pwd -P)
+        destination_parent=$(dirname -- "$3")
+        destination_name=$(basename -- "$3")
+        if [[ "$destination_name" == . || "$destination_name" == .. ]]; then printf 'Choose a new destination folder.\n' >&2; exit 2; fi
+        mkdir -p -- "$destination_parent"
+        destination_parent=$(CDPATH= cd -- "$destination_parent" && pwd -P)
+        case "$destination_parent/$destination_name" in
+            "$source_folder"|"$source_folder"/*)
+                printf 'Choose a destination outside the source workspace.\n' >&2; exit 2 ;;
+        esac
+        "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON && cmake --build /build --parallel 4'
+        exec "${run[@]}" --mount "$(mount_spec "$source_folder" /source readonly)" \
+            --mount "$(mount_spec "$destination_parent" /output)" "$image" \
+            /build/nebula_workspace "$command_name" /source "/output/$destination_name"
         ;;
     run|test-native)
         auth_file=${XAUTHORITY:-${HOME}/.Xauthority}

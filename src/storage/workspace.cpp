@@ -3,12 +3,13 @@
 #include <sqlite3.h>
 #include <stdexcept>
 #include <utility>
+#include "sql.hpp"
 
 namespace nebula {
 namespace {
 
 constexpr int ApplicationId = 0x4e454255; // NEBU
-constexpr int SchemaVersion = 1; // Workspace identity only; no page schema yet.
+constexpr int SchemaVersion = 2;
 
 void execute(sqlite3* database, const std::string& sql)
 {
@@ -54,6 +55,8 @@ Workspace Workspace::open(const std::filesystem::path& directory)
         throw std::runtime_error("The workspace location is a file, not a folder");
     fs::create_directories(root);
     const auto attachments = root / "attachments";
+    if (fs::is_symlink(attachments))
+        throw std::runtime_error("The managed attachments directory must not be a symlink");
     if (fs::exists(attachments) && !fs::is_directory(attachments))
         throw std::runtime_error("The attachments location is a file, not a folder");
     const auto filename = root / "nebula.sqlite3";
@@ -71,25 +74,66 @@ Workspace Workspace::open(const std::filesystem::path& directory)
         throw std::runtime_error("The workspace database is read-only");
     sqlite3_busy_timeout(raw, 3000);
     execute(raw, "PRAGMA foreign_keys=ON");
+    execute(raw, "PRAGMA synchronous=FULL");
     execute(raw, "BEGIN IMMEDIATE");
     try {
         const auto application = scalar(raw, "PRAGMA application_id");
-        const auto version = scalar(raw, "PRAGMA user_version");
+        auto version = scalar(raw, "PRAGMA user_version");
         const auto objects = scalar(raw, "SELECT count(*) FROM sqlite_schema");
         if (application == "0" && version == "0" && objects == "0") {
             execute(raw, "PRAGMA application_id=" + std::to_string(ApplicationId));
-            execute(raw, "PRAGMA user_version=" + std::to_string(SchemaVersion));
+            execute(raw, "PRAGMA user_version=1");
             execute(raw, "CREATE TABLE workspace_meta (id INTEGER PRIMARY KEY CHECK(id=1),"
                          " workspace_id TEXT NOT NULL UNIQUE)");
             execute(raw, "INSERT INTO workspace_meta VALUES (1, lower(hex(randomblob(16))))");
+            version = "1";
         } else if (application != std::to_string(ApplicationId)) {
             throw std::runtime_error("This folder contains a database that is not a Nebula workspace");
-        } else if (version != std::to_string(SchemaVersion)) {
+        } else if (version != "1" && version != std::to_string(SchemaVersion)) {
             throw std::runtime_error("This workspace format is not supported by this version of Nebula");
         }
         const auto id = scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
         if (id.empty())
             throw std::runtime_error("The workspace identity is missing");
+        if (version == "1") {
+            execute(raw, R"SQL(
+                CREATE TABLE databases(id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL,
+                    trashed INTEGER NOT NULL DEFAULT 0 CHECK(trashed IN (0,1)));
+                CREATE TABLE pages(id TEXT PRIMARY KEY NOT NULL,
+                    database_id TEXT NOT NULL REFERENCES databases(id), title TEXT NOT NULL,
+                    revision INTEGER NOT NULL CHECK(revision>0),
+                    trashed INTEGER NOT NULL DEFAULT 0 CHECK(trashed IN (0,1)),
+                    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    modified_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+                CREATE INDEX pages_database ON pages(database_id,trashed);
+                CREATE TABLE blocks(id TEXT PRIMARY KEY NOT NULL,
+                    page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                    parent_id TEXT, position INTEGER NOT NULL CHECK(position>=0),
+                    kind INTEGER NOT NULL CHECK(kind BETWEEN 0 AND 5), payload TEXT NOT NULL,
+                    UNIQUE(page_id,position), UNIQUE(page_id,id),
+                    FOREIGN KEY(page_id,parent_id) REFERENCES blocks(page_id,id)
+                        DEFERRABLE INITIALLY DEFERRED);
+                CREATE TABLE property_definitions(id TEXT PRIMARY KEY NOT NULL,
+                    database_id TEXT NOT NULL REFERENCES databases(id), name TEXT NOT NULL,
+                    kind INTEGER NOT NULL CHECK(kind BETWEEN 0 AND 4), UNIQUE(database_id,name));
+                CREATE TABLE property_values(page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                    property_id TEXT NOT NULL REFERENCES property_definitions(id), value_json TEXT NOT NULL,
+                    PRIMARY KEY(page_id,property_id));
+                CREATE TABLE saved_views(id TEXT PRIMARY KEY NOT NULL,
+                    database_id TEXT NOT NULL REFERENCES databases(id), name TEXT NOT NULL, settings TEXT NOT NULL);
+                CREATE TABLE links(source_page TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                    source_block TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+                    run_index INTEGER NOT NULL, target_kind INTEGER NOT NULL CHECK(target_kind IN(0,1)),
+                    target_id TEXT NOT NULL, PRIMARY KEY(source_block,run_index));
+                CREATE INDEX links_target ON links(target_kind,target_id);
+                PRAGMA user_version=2;
+            )SQL");
+        }
+        if (scalar(raw, "PRAGMA quick_check") != "ok")
+            throw std::runtime_error("Workspace integrity check failed");
+        sql::Statement relationships(raw,"PRAGMA foreign_key_check");
+        if (relationships.row()) throw std::runtime_error("Workspace relationships are inconsistent");
+        execute(raw,"SELECT id,database_id,title,revision,trashed FROM pages LIMIT 0");
         // Validate the attachment path before committing a newly created database.
         fs::create_directories(attachments);
         execute(raw, "COMMIT");

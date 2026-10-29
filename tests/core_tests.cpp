@@ -1,4 +1,5 @@
 #include "nebula/core/document.hpp"
+#include "nebula/core/database.hpp"
 
 #include <functional>
 #include <iostream>
@@ -115,6 +116,28 @@ int main()
             check(page.blocks.size() == 1000, "Wrong fixture size");
             check(page.blocks.back().id == "block-999", "Unstable fixture identity");
             rejects([] { long_page(0); });
+        }},
+        {"calendar dates remain date-only values", [] {
+            check(valid_date("2024-02-29"),"Leap day rejected");
+            check(!valid_date("1900-02-29") && valid_date("2000-02-29"),"Gregorian leap rule incorrect");
+            check(!valid_date("2026-02-30") && !valid_date("0000-01-01"),"Invalid date accepted");
+            validate_value(PropertyKind::Date,Date{"2026-10-29"});
+            rejects([]{ validate_value(PropertyKind::Date,std::string("2026-10-29")); });
+        }},
+        {"properties enforce declared types", [] {
+            validate_value(PropertyKind::Number,2.0);
+            validate_value(PropertyKind::Checkbox,false);
+            rejects([]{ validate_value(PropertyKind::Number,std::string("2")); });
+            rejects([]{ validate_value(PropertyKind::Tags,std::vector<std::string>{"a","a"}); });
+            rejects([]{ validate_value(PropertyKind(99),{}); });
+        }},
+        {"views sort numbers and combine typed filters", [] {
+            PageRecord a{{"a",{}},"db","Ten",{{"score",10.0},{"done",true}},0,false};
+            PageRecord b{{"b",{}},"db","Two",{{"score",2.0},{"done",false}},0,false};
+            View view; view.sort_property="score";
+            auto sorted=apply_view({a,b},view); check(sorted[0].title=="Two","Numbers sorted as text");
+            view.filters={{"score",Comparison::Greater,1.0},{"done",Comparison::Equal,true}};
+            auto filtered=apply_view({a,b},view); check(filtered.size()==1 && filtered[0].title=="Ten","Filters did not combine");
         }}
     };
     int failures = 0;

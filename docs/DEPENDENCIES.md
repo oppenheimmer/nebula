@@ -24,9 +24,9 @@ verification results; release packaging reproducibility remains M09 work.
 | --- | --- | --- |
 | C++ | C++17 | Core values/operations and Qt adapters; no language extensions. |
 | CMake | 3.22 or newer | Targets, optional GUI build, CTest integration. |
-| Qt | 6.5 or newer | Core/Gui/Widgets for the prototype; Test for interaction tests. |
+| Qt | 6.5 or newer | Core for internal JSON coding, Gui/Widgets for desktop adapters, Test for interaction tests. Core model types remain Qt-free. |
 | Compiler | GCC or Clang with C++17 support | Both are exercised during development. |
-| SQLite | 3.33 or newer | Workspace identity/bootstrap storage via its C API, isolated from Qt. Page storage is tracked in M03. |
+| SQLite | 3.33 or newer | Versioned workspace records, transactions, link indexes, and online backup via its C API. JSON codec uses Qt Core internally. |
 | Ninja | Container build tool | Host SDK fallback can use CMake's default generator. |
 
 Qt 6.5 is the configured API minimum, not a claim that this change was tested
