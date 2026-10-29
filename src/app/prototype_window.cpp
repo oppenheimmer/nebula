@@ -78,6 +78,7 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
         add_action(formatting, entry.first, entry.first, [this, kind] { editor_->set_block_kind(kind); });
     }
     add_action(formatting, "Check", "check", [this] { editor_->toggle_checked(); });
+    add_action(formatting, "Divider", "insertDivider", [this] { editor_->insert_divider(); });
     addToolBarBreak();
     auto* blocks = addToolBar("Block controls");
     blocks->setObjectName("blockControls");
@@ -120,6 +121,7 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
     }
     connect(editor_, &PageEditor::cursorPositionChanged, this, &PrototypeWindow::queue_refresh);
     connect(editor_, &PageEditor::textChanged, this, &PrototypeWindow::queue_refresh);
+    connect(editor_,&PageEditor::paste_rejected,this,[this](const QString& reason) { statusBar()->showMessage("Paste failed: "+reason,8000); });
     connect(editor_, &PageEditor::reference_activated, this, [this](int kind, const QString& id) {
         if (kind == static_cast<int>(ReferenceKind::Block) && editor_->go_to_block(id))
             statusBar()->showMessage("Followed reference", 4000);

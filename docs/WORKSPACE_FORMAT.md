@@ -1,13 +1,15 @@
-# Workspace format, version 4
+# Workspace format, version 5
 
 A workspace contains `nebula.sqlite3` and `attachments/`. The database has SQLite
-application ID `0x4e454255` and `user_version = 4`. The application refuses unknown
+application ID `0x4e454255` and `user_version = 5`. The application refuses unknown
 versions. Version 1 contained only workspace identity; upgrading to version 2
 adds the persistent record tables in one transaction and preserves that identity.
 Version 3 adds deleted-block recovery. Version 4 records deletion operation IDs and
 original positions to preserve sibling order when fragments are restored in a
-different order. Versions 1–3 migrate transactionally; existing version 3 fragments
-retain their content and original parent/next-sibling anchors.
+different order. Version 5 adds divider blocks, rebuilding block/link tables in
+one transaction while preserving their records. Versions 1–4 migrate
+transactionally; existing version 3 fragments retain their content and original
+parent/next-sibling anchors.
 Failed migrations roll back. Managed attachment paths and database files cannot be
 symlinks.
 
@@ -24,7 +26,8 @@ symlinks.
 | `deleted_blocks` | Deleted subtree fragments, original parent/next sibling, deletion operation ID, original position, page, timestamp, and restored state; saved atomically with page edits. |
 
 Block kinds are paragraph (0), heading (1), bullet (2), to-do (3), image card (4),
-and attachment card (5). Positions are unique within a page. The block vector is
+attachment card (5), and divider (6). Dividers have no text runs. Positions are
+unique within a page. The block vector is
 tree preorder; roots have a null parent, and descendants are contiguous. A deferred
 composite foreign key requires parents to belong to the same page. The core
 additionally validates active ancestry, cycles, IDs, and paragraph boundaries.
@@ -78,7 +81,10 @@ navigation or a normal window close. Pending changes are visible. Saved locally
 means the SQLite commit succeeded with `synchronous=FULL`; edits during the debounce interval are pending
 and may be lost if the process is killed. Save failures retain the document and
 block silent closing. Undo belongs to the page editor, survives autosave, and is
-cleared on page navigation; it does not survive restart.
+cleared on page navigation; it does not survive restart. Adjacent printable typing
+joins one undo group while the caret is continuous and pauses remain under one
+second. Navigation, focus changes, formatting, structural commands, clipboard
+operations, and composition events end that group. Autosave does not end it.
 
 Database/page trash preserves IDs and stored content. Links retain permanent
 targets, including unavailable targets. Backlinks exclude trashed source pages

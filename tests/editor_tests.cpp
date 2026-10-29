@@ -1,11 +1,13 @@
 #include "nebula/editor/block_widgets.hpp"
 #include "nebula/editor/page_editor.hpp"
+#include "nebula/format/codec.hpp"
 
 #include <QAccessible>
 #include <QApplication>
 #include <QClipboard>
 #include <QFontMetrics>
 #include <QInputMethodEvent>
+#include <QMimeData>
 #include <QSignalSpy>
 #include <QScrollBar>
 #include <QTest>
@@ -90,6 +92,16 @@ private slots:
     void grip_drag_escape_and_invalid_target_do_not_edit();
     void grip_drag_scrolls_long_documents();
     void unresolved_reference_keeps_scope_and_emits_intent();
+    void divider_insertion_preserves_subtree_and_undo();
+    void divider_editing_becomes_a_paragraph();
+    void typing_undo_groups_stop_at_navigation_and_structure();
+    void rich_clipboard_preserves_tree_and_remaps_internal_references();
+    void rich_clipboard_clips_unicode_and_unresolved_runs();
+    void html_clipboard_keeps_supported_formatting_without_resources();
+    void malformed_clipboard_leaves_document_unchanged();
+    void rich_paste_preserves_suffix_and_existing_children();
+    void empty_list_enter_exits_without_an_extra_block();
+    void pasted_divider_does_not_consume_surrounding_text();
 };
 
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
@@ -153,6 +165,121 @@ void EditorTests::unresolved_reference_keeps_scope_and_emits_intent()
     QTest::mouseClick(editor.viewport(),Qt::LeftButton,Qt::ControlModifier,point);
     QCOMPARE(unresolved.count(),1); QCOMPARE(resolved.count(),0); QCOMPARE(unresolved[0][0].toString(),QString("Future page"));
     editor.undo(); QCOMPARE(editor.toPlainText(),QString("alpha\nbravo\ncharlie"));
+}
+void EditorTests::divider_insertion_preserves_subtree_and_undo()
+{
+    PageEditor editor; ready(editor,sample_page()); QVERIFY(editor.go_to_block("list"));
+    editor.insert_divider(); const auto page=editor.snapshot(); validate(page);
+    QCOMPARE(page.blocks[3].id,std::string("child")); QCOMPARE(page.blocks[4].kind,BlockKind::Divider);
+    QVERIFY(page.blocks[4].runs.empty()); QCOMPARE(page.blocks[5].kind,BlockKind::Paragraph);
+    QCOMPARE(editor.current_block_id().toStdString(),page.blocks[5].id);
+    QCOMPARE(page.blocks[6].id,std::string("todo"));
+    QVERIFY(editor.go_to_block(QString::fromStdString(page.blocks[4].id))); QVERIFY(editor.indent_current());
+    QCOMPARE(editor.snapshot().blocks[4].parent_id,std::string("list"));
+    editor.undo(); editor.undo(); QCOMPARE(ids(editor.snapshot()),ids(sample_page()));
+    editor.redo(); QCOMPARE(ids(editor.snapshot()),ids(page));
+}
+void EditorTests::divider_editing_becomes_a_paragraph()
+{
+    PageEditor editor; ready(editor,{"page",{{"rule","",BlockKind::Divider,{}},{"next","",BlockKind::Paragraph,{{"After"}}}}});
+    QTest::keyClicks(&editor,"Text"); const auto page=editor.snapshot(); validate(page);
+    QCOMPARE(page.blocks[0].kind,BlockKind::Paragraph); QCOMPARE(text(page.blocks[0]),QString("Text"));
+    editor.undo();
+    QCOMPARE(editor.snapshot().blocks[0].kind,BlockKind::Divider);
+    QTest::keyClick(&editor,Qt::Key_Return); QCOMPARE(editor.snapshot().blocks[1].kind,BlockKind::Paragraph);
+}
+void EditorTests::typing_undo_groups_stop_at_navigation_and_structure()
+{
+    PageEditor editor; ready(editor,{"page",{{"a","",BlockKind::Paragraph,{}}}});
+    QTest::keyClicks(&editor,"first"); editor.undo(); QCOMPARE(editor.toPlainText(),QString{});
+    editor.redo(); QCOMPARE(editor.toPlainText(),QString("first"));
+    QTest::keyClick(&editor,Qt::Key_Left); QTest::keyClick(&editor,Qt::Key_Right);
+    QTest::keyClicks(&editor,"!"); editor.undo(); QCOMPARE(editor.toPlainText(),QString("first"));
+    QTest::keyClick(&editor,Qt::Key_Return); QTest::keyClicks(&editor,"second");
+    editor.undo(); QCOMPARE(editor.toPlainText(),QString("first\n"));
+    editor.undo(); QCOMPARE(editor.toPlainText(),QString("first"));
+    editor.undo(); QCOMPARE(editor.toPlainText(),QString{});
+    validate(editor.snapshot());
+}
+void EditorTests::rich_clipboard_preserves_tree_and_remaps_internal_references()
+{
+    PageEditor source; ready(source,sample_page()); auto selection=source.textCursor(); selection.select(QTextCursor::Document); source.setTextCursor(selection); source.copy();
+    QVERIFY(QApplication::clipboard()->mimeData()->hasFormat("application/x-nebula-blocks+json"));
+    QVERIFY(QApplication::clipboard()->text().contains("journal-notes.txt"));
+    PageEditor target; ready(target,{"destination",{{"destination-block","",BlockKind::Paragraph,{}}}}); target.paste();
+    const auto page=target.snapshot(); validate(page); QCOMPARE(page.blocks.size(),sample_page().blocks.size());
+    QCOMPARE(page.blocks[0].kind,BlockKind::Heading); QVERIFY(page.blocks[0].runs[0].bold);
+    QCOMPARE(page.blocks[3].parent_id,page.blocks[2].id);
+    QCOMPARE(page.blocks[5].runs[1].reference->target_id,page.blocks[0].id);
+    QCOMPARE(page.blocks[7].kind,BlockKind::Image); QVERIFY(page.blocks[7].runs[0].asset->image);
+    for (const auto& original:sample_page().blocks) for (const auto& copy:page.blocks) QVERIFY(original.id!=copy.id);
+    target.undo(); QCOMPARE(target.snapshot().blocks.size(),std::size_t(1)); QVERIFY(target.toPlainText().isEmpty());
+    target.redo(); QCOMPARE(ids(target.snapshot()),ids(page));
+}
+void EditorTests::rich_clipboard_clips_unicode_and_unresolved_runs()
+{
+    PageEditor source; ready(source,{"source",{{"a","",BlockKind::Paragraph,{{u8"café 🌙",true},{"Future",false,true,Reference{ReferenceKind::Page,"","Future","notes"}}}}}});
+    auto selection=source.textCursor(); selection.setPosition(5); selection.movePosition(QTextCursor::End,QTextCursor::KeepAnchor); source.setTextCursor(selection); source.copy();
+    PageEditor target; ready(target,{"target",{{"b","",BlockKind::Paragraph,{}}}}); target.paste();
+    const auto page=target.snapshot(); validate(page); QCOMPARE(text(page.blocks[0]),QString::fromUtf8(u8"🌙Future"));
+    QVERIFY(page.blocks[0].runs[0].bold); QVERIFY(page.blocks[0].runs[1].italic);
+    QVERIFY(page.blocks[0].runs[1].reference);
+    QCOMPARE(page.blocks[0].runs[1].reference->unresolved_name,std::string("Future"));
+    QCOMPARE(page.blocks[0].runs[1].reference->database_scope,std::string("notes"));
+}
+void EditorTests::html_clipboard_keeps_supported_formatting_without_resources()
+{
+    auto* mime=new QMimeData; mime->setHtml("<h2>Title</h2><p><b>bold</b> <i>italic</i> <a href='https://example.invalid'>anchor</a><img src='file:///tmp/not-a-nebula-asset.png'></p><ul><li>list</li></ul>");
+    QApplication::clipboard()->setMimeData(mime);
+    PageEditor editor; ready(editor,{"target",{{"b","",BlockKind::Paragraph,{}}}}); editor.paste();
+    const auto page=editor.snapshot(); validate(page); QCOMPARE(page.blocks[0].kind,BlockKind::Heading);
+    bool bold=false,italic=false,bullet=false;
+    for (const auto& block:page.blocks) {
+        bullet|=block.kind==BlockKind::Bullet;
+        for (const auto& run:block.runs) { bold|=run.bold && run.text=="bold"; italic|=run.italic && run.text=="italic"; QVERIFY(!run.reference); QVERIFY(!run.asset); }
+    }
+    QVERIFY(bold); QVERIFY(italic); QVERIFY(bullet); QVERIFY(editor.toPlainText().contains("[image]"));
+    editor.undo(); QVERIFY(editor.toPlainText().isEmpty());
+}
+void EditorTests::malformed_clipboard_leaves_document_unchanged()
+{
+    PageEditor editor; ready(editor); const auto before=encode_document(editor.snapshot());
+    auto* mime=new QMimeData; mime->setData("application/x-nebula-blocks+json","{\"version\":99}"); mime->setText("Fallback must not replace this selection");
+    QApplication::clipboard()->setMimeData(mime); QSignalSpy rejected(&editor,&PageEditor::paste_rejected);
+    auto selected=editor.textCursor(); selected.select(QTextCursor::Document); editor.setTextCursor(selected); editor.paste();
+    QCOMPARE(rejected.count(),1); QCOMPARE(encode_document(editor.snapshot()),before); QVERIFY(!editor.document()->isUndoAvailable());
+}
+void EditorTests::rich_paste_preserves_suffix_and_existing_children()
+{
+    PageEditor source; ready(source,{"source",{{"one","",BlockKind::Heading,{{"ONE",true}}},{"two","",BlockKind::Paragraph,{{"TWO"}}}}});
+    auto selection=source.textCursor(); selection.select(QTextCursor::Document); source.setTextCursor(selection); source.copy();
+    const Page original{"target",{{"parent","",BlockKind::Paragraph,{{"before after"}}},{"child","parent",BlockKind::Paragraph,{{"Keep child"}}},{"next","",BlockKind::Paragraph,{{"Keep next"}}}}};
+    PageEditor target; ready(target,original); at(target,7); target.paste();
+    const auto page=target.snapshot(); validate(page); QCOMPARE(text(page.blocks[0]),QString("before ONE"));
+    QCOMPARE(text(page.blocks[1]),QString("TWOafter")); QCOMPARE(page.blocks[2].id,std::string("child"));
+    QCOMPARE(page.blocks[2].parent_id,page.blocks[1].id); QCOMPARE(page.blocks[3].id,std::string("next"));
+    QCOMPARE(target.textCursor().position(),int(QString("before ONE\nTWO").size()));
+    target.undo(); QCOMPARE(encode_document(target.snapshot()),encode_document(original));
+}
+void EditorTests::empty_list_enter_exits_without_an_extra_block()
+{
+    PageEditor editor; ready(editor,{"page",{{"item","",BlockKind::Todo,{},"",true}}});
+    QTest::keyClick(&editor,Qt::Key_Return); const auto page=editor.snapshot(); validate(page);
+    QCOMPARE(page.blocks.size(),std::size_t(1)); QCOMPARE(page.blocks[0].id,std::string("item"));
+    QCOMPARE(page.blocks[0].kind,BlockKind::Paragraph); QVERIFY(!page.blocks[0].checked); QVERIFY(!editor.textCursor().currentList());
+    editor.undo(); QCOMPARE(editor.snapshot().blocks[0].kind,BlockKind::Todo); QVERIFY(editor.snapshot().blocks[0].checked);
+    QApplication::clipboard()->setText("\ntext"); editor.paste(); const auto pasted=editor.snapshot(); validate(pasted);
+    QCOMPARE(pasted.blocks.size(),std::size_t(2)); QVERIFY(text(pasted.blocks[0]).isEmpty());
+    QCOMPARE(text(pasted.blocks[1]),QString("text"));
+}
+void EditorTests::pasted_divider_does_not_consume_surrounding_text()
+{
+    auto* mime=new QMimeData; mime->setData("application/x-nebula-blocks+json",QByteArray::fromStdString(encode_document({"source",{{"rule","",BlockKind::Divider,{}}}})));
+    QApplication::clipboard()->setMimeData(mime);
+    PageEditor editor; ready(editor,{"page",{{"a","",BlockKind::Paragraph,{{"leftRIGHT"}}}}}); at(editor,4); editor.paste();
+    const auto page=editor.snapshot(); validate(page); QCOMPARE(page.blocks.size(),std::size_t(3));
+    QCOMPARE(text(page.blocks[0]),QString("left")); QCOMPARE(page.blocks[1].kind,BlockKind::Divider); QCOMPARE(text(page.blocks[2]),QString("RIGHT"));
+    editor.undo(); QCOMPARE(editor.toPlainText(),QString("leftRIGHT"));
 }
 
 void EditorTests::load_preserves_model()

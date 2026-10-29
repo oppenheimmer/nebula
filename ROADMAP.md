@@ -203,7 +203,7 @@ The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`
 UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
 Initialization occurs in a transaction; reopening preserves that identity.
 Unrelated databases and unsupported versions are rejected without modifying their
-contents. **Version 1 stores no pages or notes.** The current version 4 format
+contents. **Version 1 stores no pages or notes.** The current version 5 format
 adds persistent databases, pages, block payloads, properties, views, derived link
 edges, and deleted-block recovery. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
 schema, JSON versions, ownership, autosave/undo boundaries, and backup contract.
@@ -378,7 +378,7 @@ records, and an initial backup/restore path.
 - [x] M03.9 Verify interrupted operations, reopening, rollback, migration, and
   backup/restore using representative persisted fixtures.
 
-Current implementation: version 4 stores application-owned block JSON and typed
+Current implementation: version 5 stores application-owned block JSON and typed
 properties, with deferred same-page parent foreign keys, global block IDs,
 transactional page/index replacement, and optimistic revisions. `PageSession`
 owns pending values and save failures; the Qt adapter owns per-page undo. Autosave
@@ -425,23 +425,23 @@ The native workspace window was also inspected.
 
 Deliverables: the production block editor implementing the approach chosen in M01.
 
-- [ ] M05.1 Support paragraphs, headings, lists, checkboxes, links, and dividers,
+- [x] M05.1 Support paragraphs, headings, lists, checkboxes, links, and dividers,
   including a practical way to insert blocks and change their types.
-- [ ] M05.2 Implement Enter/Shift+Enter behavior, split/merge operations, inline
+- [x] M05.2 Implement Enter/Shift+Enter behavior, split/merge operations, inline
   formatting, and natural cursor movement across block boundaries.
-- [ ] M05.3 Implement cross-block selection, copy/cut/paste, and defined handling
+- [x] M05.3 Implement cross-block selection, copy/cut/paste, and defined handling
   of plain text and supported rich-text clipboard content.
 - [x] M05.4 Implement drag reordering, keyboard-accessible move operations, and
   basic nesting while preserving IDs and preventing invalid trees. Keep the active
   block's thin outline/subtle shadow and add grip dots as the mouse drag target;
   verify dragging a subtree, nesting, canceled drops, undo, and keyboard access.
-- [ ] M05.5 Integrate consistent undo/redo for text and structural edits with
+- [x] M05.5 Integrate consistent undo/redo for text and structural edits with
   autosave; document undo boundaries and whether history survives restart.
 - [ ] M05.6 Implement page/block link resolution using permanent IDs and predictable
   behavior when a target is in trash or unavailable. Preserve targets across page
   renames, database moves, heading edits, and block moves between pages.
-- [ ] M05.7 Recheck Unicode, composition input, accessibility, and the long-document
-  scenarios from M01 against the production editor.
+- [x] M05.7 Recheck Unicode, synthetic composition, accessible text, and the
+  long-document scenarios from M01 against the production editor.
 - [ ] M05.8 Add wiki-style link entry, completion and a target picker for pages,
   headings, and blocks, with duplicate-title disambiguation and custom labels.
 - [ ] M05.9 Add backlinks/outgoing-link navigation with source context and exact
@@ -457,6 +457,13 @@ another database, navigate to them and back, and expose the corresponding backli
 Renaming or moving targets preserves references; ambiguous/unresolved references
 require an explicit target choice. Missing first-release behavior is tracked
 explicitly.
+
+Implementation evidence: divider insertion, empty-list exit, split/merge, formatting,
+rich clipboard, structural movement, typing groups, and undo after autosave pass
+GCC/Clang and native window tests. The shared format module preserves canonical
+values without linking the editor to SQLite. [CLIPBOARD_FORMAT.md](docs/CLIPBOARD_FORMAT.md)
+defines copied identities, reference remapping, and the supported HTML subset.
+Reference lifecycle, wiki entry, default labels, and navigation history remain open.
 
 ### M06 — Attachments and diary workflow
 
@@ -710,6 +717,35 @@ problems remain in the risk register until reproduced.
   reproduced the defect and passes after the fix. The partial-undo case also
   failed before broadening the anchor lookup. Final checks are recorded below.
 
+### BUG-008 — Qt's lazy clipboard object hid Nebula's block payload
+
+- **Milestone/state/impact:** M05; fixed and verified. Copy/paste fell back to HTML,
+  losing structured references and hierarchy even though custom data had been set.
+- **Environment/reproduction:** Qt 6.8.2 in Docker; select the sample document,
+  copy it, and inspect clipboard formats or paste into another page. Expected the
+  Nebula MIME type and preserved internal/unresolved references.
+- **Cause:** Qt's lazy text MIME subclass supplies its own `formats()` behavior,
+  hiding data added directly to that object.
+- **Resolution:** materialize native formats into an ordinary `QMimeData`, then add
+  the versioned Nebula payload. New IDs and copied-target remapping remain explicit.
+- **Verification:** rich clipboard hierarchy and unresolved-reference cases failed
+  before the fix and now pass with GCC, Clang, and native Xwayland. The full-window
+  copy/paste/save/undo/redo regression also passes.
+
+### BUG-009 — Exiting an empty list retained the native list marker
+
+- **Milestone/state/impact:** M05; fixed and verified during implementation.
+- **Environment/reproduction:** Qt 6.8.2; press Enter in an empty checked to-do.
+  Expected a paragraph with the same ID and no list; the kind changed but the
+  native block still belonged to its list.
+- **Cause:** the saved block format reintroduced Qt's list object index after
+  removing the block from that list.
+- **Resolution:** clear the object index before applying the paragraph format.
+  Empty-list exit is specific to Enter; the shared splitter still preserves
+  paragraph separators during paste and card insertion.
+- **Verification:** `empty_list_enter_exits_without_an_extra_block` failed before
+  the fix and passes with GCC, Clang, and Xwayland, including undo of checked state.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -782,6 +818,11 @@ milestone, evidence, and the resulting action.
   restored copy. Tests back up a file without write permission and compare its
   original bytes. Docker checks source/destination host overlap before mounting,
   since different container paths can otherwise alias a nested host folder.
+- **G20 — Clipboard text is insufficient for blocks (2026-10-30, M05):** Qt's
+  native HTML does not preserve application identities or reference metadata.
+  Use versioned semantic JSON alongside external text/HTML formats. A copy uses
+  fresh inserted identities and remaps references within the copied selection;
+  identity-preserving cross-page movement remains a separate application operation.
 
 ## Work log
 
@@ -896,6 +937,70 @@ record operations, migrations, autosave, references, recovery, and verification.
   by the wiki/reference navigation workflow. M06 managed attachments, M07 search/
   interchange, M08 reliability/accessibility, and platform releases remain open.
   Real OS IME, screen-reader, and macOS checks have not been performed.
+
+### Divider, clipboard, and undo checkpoint — 2026-10-30
+
+- Completed M05.1–M05.5 and automated production checks in M05.7. Added divider
+  insertion with a following paragraph, text-safe editing, and schema version 5.
+  Migration rebuilds the block/link tables together; existing trees, links, and
+  deleted fragments survive. Enter in an empty list exits without an extra block.
+- Adjacent printable typing joins one undo group until a one-second pause,
+  navigation, focus change, formatting/structure, clipboard, or composition event.
+  Autosave retains those groups; page navigation/restart still clears history.
+- Added a shared `nebula_format` module and versioned block clipboard. Tests cover
+  hierarchy, Unicode clipping, bold/italic, cards, resolved/unresolved references,
+  fresh IDs and internal-target remapping, insertion before existing suffixes and
+  children, divider paste, and malformed-input rejection. Supported external HTML
+  is parsed without resource loading; limitations are documented explicitly.
+- GCC and Clang passed all six CTest entries: 17 core, 24 storage, 42 editor, and
+  33 desktop cases, plus launcher and smoke checks. The Qt/SQLite-free core passed.
+  Native Xwayland passed 42 editor and 33 desktop cases. BUG-008/BUG-009 have
+  failing-before/passing-after regressions.
+- The current 1,000-block benchmark measured 7 ms load, 4.18 ms typing p95, 18 ms
+  adjacent move, and 34,280 KiB peak RSS on the recorded Docker/host environment.
+  This single regression measurement meets the initial M01 investigation budgets;
+  it is not a large-database or end-user performance guarantee.
+- Next: M05.6 and M05.8–M05.10 reference lifecycle, wiki entry/completion, outgoing
+  navigation/history, default/custom labels, and explicit unresolved target actions.
+  Cut/paste uses copied identities; cross-page movement must preserve originals
+  transactionally. Managed attachment import/retention/manifest recovery (M06),
+  search/interchange (M07), release validation (M08), and packaging remain open.
+
+### Session handoff — 2026-10-30
+
+Work stops here at the user's request to log off for the night. The recovery and
+roadmap cleanup checkpoint is `eb26eaf`; divider/clipboard/undo work is the next
+checkpoint on `main`, accompanied by this handoff. No new feature work should
+begin as part of this shutdown.
+
+- **Milestones:** M00–M04 are Complete. M05 remains In progress with M05.6 and
+  M05.8–M05.10 open. M06 is In progress: the journal template/date workflow works,
+  but managed attachments are unfinished. M07–M10 are Not started.
+- **Current implementation:** C++17/Qt 6 Widgets/SQLite, MIT; modules are core,
+  format, storage, application/session, editor, desktop, and CLI. The JSON codec
+  now lives in `include/nebula/format/codec.hpp` and `src/format/codec.cpp`.
+  Core builds without Qt/SQLite. Workspace schema is version 5 with transactional
+  upgrades from versions 1–4; payload/clipboard JSON remains version 1.
+- **Data behavior:** normal launch asks for a workspace, defaulting to
+  `~/Document/nebula/`. Notes/properties/views persist, autosave waits 500 ms and
+  flushes before navigation/close, and failed saves retain pending edits. Undo is
+  per page, survives autosave, and ends on page navigation/restart. Trash includes
+  databases, pages, and independently recoverable deleted block fragments.
+- **Development environment:** use the existing Docker CLI/image and
+  `scripts/dev.sh`; no host Qt installation or Podman is needed. GCC/Clang/core
+  and native checks are recorded above. GUI launch needs the existing X11/Xwayland
+  socket and Xauthority. Build outputs and temporary previews remain ignored.
+- **Known limits:** card blocks do not own files. Backup copies the attachment
+  directory but has no managed-file manifest/retention verification yet. Cut/paste
+  creates copied identities; default labels, cross-page block transfer, wiki
+  completion, outgoing links/history, and explicit unresolved create/select actions
+  remain incomplete. Real OS IME/screen-reader and macOS checks are unperformed;
+  installed IBus/Orca do not establish acceptance.
+- **Resume point:** read `AGENTS.md` and this roadmap, inspect `git status` and the
+  latest commits, then continue M05.6/M05.8–M05.10 with focused tests. Start with
+  stable-ID reference lifecycle and transactional block transfer before layering
+  on wiki completion and navigation history. Preserve the local-only scope,
+  isolated toolchain, clean ordered roadmap lists, and trailer-free Git messages.
 
 ## Technical references discussed
 

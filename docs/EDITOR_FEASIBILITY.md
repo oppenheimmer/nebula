@@ -9,11 +9,10 @@ direction. It supplies continuous selection and a shared native undo history whi
 allowing the prototype to map text blocks, references, lists, and painted objects
 to application-owned values.
 
-This report records the initial feasibility evidence and measurements. On
-2026-10-30 the user moved actual OS input-method and screen-reader acceptance from
-M01.4 to M08.2. Those checks remain unperformed and are Linux release gates; they
-are not implied by automated composition/accessibility tests. Current milestone
-status and subsequent verification are tracked in [ROADMAP.md](../ROADMAP.md).
+This report records the initial feasibility evidence and measurements. Automated
+composition/accessibility tests do not establish actual OS input-method or
+screen-reader acceptance. Current milestone status, subsequent verification, and
+release gates are tracked in [ROADMAP.md](../ROADMAP.md).
 
 ## Runnable comparison
 
@@ -57,9 +56,9 @@ would add substantial implementation work.
   the sample page. Workspace-wide resolution, wiki completion, backlinks, and
   unresolved-target workflows remain production milestone work.
 
-These are investigation types and adapters. They do not define the final SQLite
-schema or full rich-text serialization format. M02 still needs the production
-application operation/storage interfaces and a deliberate undo/coalescing design.
+At this investigation stage, the prototype did not define a SQLite schema or full
+rich-text serialization format. Application/storage interfaces and typing undo
+coalescing were follow-up work.
 
 ## Test coverage
 
@@ -173,9 +172,5 @@ M08.2 manual desktop acceptance checklist:
   list/to-do state, references, and card labels, not just the editor's accessible
   name. Record findings and create reproducible bug entries where needed.
 
-Production follow-ups already covered by the roadmap include application-level
-undo and typing coalescing, lossless internal rich clipboard handling, identity-aware
-drag/drop, semantic accessibility for embedded objects, persistent workspaces,
-attachment import, full reference resolution, and macOS validation. Ordinary
-prototype key events currently create separate undo groups; this is not the final
-typing-coalescing behavior.
+The initial prototype used one undo group per key. Production features and their
+current validation belong in the roadmap rather than this historical comparison.

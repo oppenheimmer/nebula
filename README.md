@@ -96,6 +96,7 @@ scrolls the document.
 | --- | --- |
 | Create a block | Enter |
 | Soft line break inside a block | Shift+Enter |
+| Insert a divider followed by an empty paragraph | Divider in the toolbar |
 | Move a block and its children | Alt+Up/Down, or Move up/down in the toolbar |
 | Nest under the previous sibling | Tab, or Indent |
 | Leave the current parent | Shift+Tab, or Outdent |
@@ -106,7 +107,22 @@ scrolls the document.
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
 Wrapping text does not create a block. Splitting a parent gives the trailing block
 a new identity and transfers its children there; structural edits can be undone.
-Image and file cards in demo mode are layout representations, not imported files.
+Enter on an empty list/to-do block returns it to a paragraph. Consecutive typing
+forms one undo group until navigation, another command, a focus change, or a pause
+of at least one second.
+Image and file cards are layout representations; files are not imported yet.
+
+Copy/cut/paste within Nebula retains block types, nesting, bold/italic text, card
+labels, and references. New blocks receive new IDs; the first pasted block may
+merge into the existing block. Links between copied blocks point to their pasted
+counterparts. References to other targets retain their IDs. Cut/paste also creates
+pasted identities; links elsewhere continue to identify the original blocks.
+Cross-workspace targets may therefore be unavailable. HTML from other applications
+supports headings, lists, bold/italic text, and paragraphs. Other styling and URL
+links become text; images become `[image]` without fetching resources. Plain text
+keeps paragraph boundaries and normalizes line endings. Invalid Nebula clipboard
+data is rejected visibly without replacing the selection.
+The full contract is in [CLIPBOARD_FORMAT.md](docs/CLIPBOARD_FORMAT.md).
 
 Use Link… to select a page, heading, or block across databases. Ctrl+click follows
 it; the backlinks list opens the referring page/block. Targets retain their IDs

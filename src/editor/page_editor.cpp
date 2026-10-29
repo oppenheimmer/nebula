@@ -1,4 +1,5 @@
 #include "nebula/editor/page_editor.hpp"
+#include "nebula/format/codec.hpp"
 
 #include <QAbstractTextDocumentLayout>
 #include <QClipboard>
@@ -11,6 +12,7 @@
 #include <QPainter>
 #include <QTextBlock>
 #include <QTextFragment>
+#include <QTextDocumentFragment>
 #include <QTextList>
 #include <QTextObjectInterface>
 #include <QUuid>
@@ -20,6 +22,8 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include <limits>
+#include <memory>
 
 namespace nebula {
 namespace {
@@ -35,6 +39,7 @@ constexpr int CardImage = QTextFormat::UserProperty + 8;
 constexpr int RefName = QTextFormat::UserProperty + 9;
 constexpr int RefScope = QTextFormat::UserProperty + 10;
 constexpr int CardObject = QTextFormat::UserObject + 1;
+constexpr auto ClipboardFormat = "application/x-nebula-blocks+json";
 
 QString new_id() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 
@@ -93,6 +98,64 @@ QTextCharFormat run_format(const Run& run)
     return format;
 }
 
+Block read_block(const QTextBlock& qt_block, int start=0, int end=std::numeric_limits<int>::max())
+{
+    const auto format=qt_block.blockFormat();
+    Block block{format.stringProperty(Id).toStdString(),format.stringProperty(ParentId).toStdString(),
+        BlockKind(format.intProperty(Kind)),{},format.stringProperty(AssetLabel).toStdString(),format.boolProperty(Checked)};
+    for (auto it=qt_block.begin();!it.atEnd();++it) {
+        const auto fragment=it.fragment();
+        if (!fragment.isValid()) continue;
+        const auto from=std::max(start,fragment.position()), to=std::min(end,fragment.position()+fragment.length());
+        if (from>=to) continue;
+        const auto character=fragment.charFormat();
+        Run run{fragment.text().mid(from-fragment.position(),to-from).toStdString(),
+            character.fontWeight()>=QFont::Bold,character.fontItalic()};
+        if (character.hasProperty(RefTarget)) run.reference=Reference{ReferenceKind(character.intProperty(RefKind)),
+            character.stringProperty(RefTarget).toStdString(),character.stringProperty(RefName).toStdString(),character.stringProperty(RefScope).toStdString()};
+        if (character.objectType()==CardObject) run.asset=Asset{character.boolProperty(CardImage),character.stringProperty(AssetLabel).toStdString()};
+        block.runs.push_back(std::move(run));
+    }
+    return block;
+}
+
+void apply_block_format(QTextCursor& cursor,const Block& block,int level)
+{
+    if (cursor.currentList()) cursor.currentList()->remove(cursor.block());
+    QTextBlockFormat format;
+    format.setProperty(Id,QString::fromStdString(block.id));
+    format.setProperty(ParentId,QString::fromStdString(block.parent_id));
+    format.setProperty(Kind,int(block.kind)); format.setProperty(AssetLabel,QString::fromStdString(block.asset_label));
+    format.setProperty(Checked,block.checked); format.setIndent(level); format.setBottomMargin(10);
+    format.setHeadingLevel(block.kind==BlockKind::Heading?1:0); cursor.setBlockFormat(format);
+    if (block.kind==BlockKind::Bullet || block.kind==BlockKind::Todo) {
+        QTextListFormat list; list.setStyle(QTextListFormat::ListDisc); list.setIndent(level+1); cursor.createList(list);
+        if (block.kind==BlockKind::Todo) {
+            auto marked=cursor.blockFormat();
+            marked.setMarker(block.checked?QTextBlockFormat::MarkerType::Checked:QTextBlockFormat::MarkerType::Unchecked);
+            cursor.setBlockFormat(marked);
+        }
+    }
+}
+
+// Pasted HTML never fetches images, stylesheets, or other resources.
+class ClipboardDocument : public QTextDocument {
+protected:
+    QVariant loadResource(int,const QUrl&) override { return {}; }
+};
+
+Page html_fragment(const QString& html)
+{
+    ClipboardDocument document; document.setHtml(html); Page page{"clipboard",{}};
+    for (auto qt=document.begin();qt.isValid();qt=qt.next()) {
+        auto block=read_block(qt); block.id=new_id().toStdString(); block.parent_id.clear();
+        block.kind=qt.blockFormat().headingLevel()>0?BlockKind::Heading:(qt.textList()?BlockKind::Bullet:BlockKind::Paragraph);
+        for (auto& run:block.runs) { auto text=QString::fromStdString(run.text); text.replace(QChar::ObjectReplacementCharacter,"[image]"); run.text=text.toStdString(); }
+        page.blocks.push_back(std::move(block));
+    }
+    validate(page); return page;
+}
+
 } // namespace
 
 PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
@@ -141,6 +204,14 @@ void PageEditor::paintEvent(QPaintEvent* event)
     QTextEdit::paintEvent(event);
     QPainter painter(viewport());
     painter.setRenderHint(QPainter::Antialiasing);
+    auto rule=palette().color(QPalette::Text); rule.setAlpha(90);
+    painter.setPen(QPen(rule,1));
+    for (auto block=document()->begin();block.isValid();block=block.next()) {
+        if (block.blockFormat().intProperty(Kind)!=int(BlockKind::Divider)) continue;
+        const auto bounds=block_rect(block);
+        if (bounds.bottom()<0 || bounds.top()>viewport()->height()) continue;
+        painter.drawLine(QPointF(32,bounds.center().y()),QPointF(viewport()->width()-32,bounds.center().y()));
+    }
     const auto rect = active_block_rect();
     painter.setBrush(Qt::NoBrush);
     // A quiet one-pixel outline and a small shadow; leave text selection native.
@@ -175,6 +246,7 @@ void PageEditor::set_page(const Page& page)
 
 void PageEditor::write_page(const Page& page, const QString& focus_id)
 {
+    typing_position_=-1;
     validate(page);
     std::unordered_map<std::string, int> depths;
     QTextCursor cursor = textCursor();
@@ -236,35 +308,7 @@ void PageEditor::write_page(const Page& page, const QString& focus_id)
 Page PageEditor::snapshot() const
 {
     Page page{page_id_, {}};
-    for (auto qt_block = document()->begin(); qt_block.isValid(); qt_block = qt_block.next()) {
-        const auto format = qt_block.blockFormat();
-        Block block;
-        block.id = format.stringProperty(Id).toStdString();
-        block.parent_id = format.stringProperty(ParentId).toStdString();
-        block.kind = static_cast<BlockKind>(format.intProperty(Kind));
-        block.asset_label = format.stringProperty(AssetLabel).toStdString();
-        block.checked = format.boolProperty(Checked);
-        for (auto it = qt_block.begin(); !it.atEnd(); ++it) {
-            const auto fragment = it.fragment();
-            if (!fragment.isValid() || fragment.text().isEmpty())
-                continue;
-            const auto character = fragment.charFormat();
-            Run run;
-            run.text = fragment.text().toStdString();
-            run.bold = character.fontWeight() >= QFont::Bold;
-            run.italic = character.fontItalic();
-            if (character.hasProperty(RefTarget))
-                run.reference = Reference{static_cast<ReferenceKind>(character.intProperty(RefKind)),
-                                          character.stringProperty(RefTarget).toStdString(),
-                                          character.stringProperty(RefName).toStdString(),
-                                          character.stringProperty(RefScope).toStdString()};
-            if (character.objectType() == CardObject)
-                run.asset = Asset{character.boolProperty(CardImage),
-                                  character.stringProperty(AssetLabel).toStdString()};
-            block.runs.push_back(std::move(run));
-        }
-        page.blocks.push_back(std::move(block));
-    }
+    for (auto block=document()->begin();block.isValid();block=block.next()) page.blocks.push_back(read_block(block));
     return page;
 }
 
@@ -282,11 +326,13 @@ bool PageEditor::go_to_block(const QString& id)
     return false;
 }
 
-void PageEditor::mutate(const std::function<void()>& action)
+void PageEditor::mutate(const std::function<void()>& action, bool join_typing)
 {
+    typing_position_=-1;
     const auto before = snapshot();
     QTextCursor group = textCursor();
-    group.beginEditBlock();
+    if (join_typing) group.joinPreviousEditBlock();
+    else group.beginEditBlock();
     action();
     normalize(before);
     group.endEditBlock();
@@ -318,6 +364,8 @@ void PageEditor::normalize(const Page& before)
         format.setIndent(static_cast<int>(ancestors.size()));
         ancestors.push_back(id);
         const auto kind = static_cast<BlockKind>(format.intProperty(Kind));
+        if (kind==BlockKind::Divider && !block.text().isEmpty())
+            format.setProperty(Kind,int(BlockKind::Paragraph));
         if ((kind == BlockKind::Image || kind == BlockKind::Attachment)
             && !block.text().contains(QChar::ObjectReplacementCharacter)) {
             format.setProperty(Kind, static_cast<int>(BlockKind::Paragraph));
@@ -330,7 +378,7 @@ void PageEditor::normalize(const Page& before)
     }
 }
 
-void PageEditor::split_block(QTextCursor& cursor)
+void PageEditor::split_block(QTextCursor& cursor, bool exit_empty_list)
 {
     cursor.removeSelectedText();
     auto format = cursor.blockFormat();
@@ -338,6 +386,13 @@ void PageEditor::split_block(QTextCursor& cursor)
     const auto trailing_id = new_id();
     const auto original_kind = static_cast<BlockKind>(format.intProperty(Kind));
     const bool list = original_kind == BlockKind::Bullet || original_kind == BlockKind::Todo;
+    if (exit_empty_list && list && cursor.block().text().isEmpty()) {
+        if (cursor.currentList()) cursor.currentList()->remove(cursor.block());
+        format.clearProperty(QTextFormat::ObjectIndex);
+        format.setProperty(Kind,int(BlockKind::Paragraph)); format.setProperty(Checked,false);
+        format.setMarker(QTextBlockFormat::MarkerType::NoMarker); cursor.setBlockFormat(format);
+        return;
+    }
     format.setProperty(Id, trailing_id);
     format.setProperty(Kind, static_cast<int>(list ? original_kind : BlockKind::Paragraph));
     format.setHeadingLevel(0);
@@ -374,6 +429,7 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
     const auto modifiers = event->modifiers()
         & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
     if (event->matches(QKeySequence::Undo) || event->matches(QKeySequence::Redo)) {
+        typing_position_=-1;
         QTextEdit::keyPressEvent(event);
         return;
     }
@@ -389,18 +445,24 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
         outdent_current();
         return;
     }
+    const bool typing=!(modifiers & (Qt::ControlModifier|Qt::AltModifier|Qt::MetaModifier))
+        && !event->text().isEmpty() && event->text()[0].isPrint();
+    const bool join=typing && !textCursor().hasSelection() && typing_clock_.isValid()
+        && typing_clock_.elapsed()<1000 && typing_position_==textCursor().position()
+        && typing_revision_==document()->revision();
     mutate([&] {
         if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
             auto cursor = textCursor();
             if (event->modifiers() & Qt::ShiftModifier)
                 cursor.insertText(QString(QChar::LineSeparator));
             else
-                split_block(cursor);
+                split_block(cursor,true);
             setTextCursor(cursor);
         } else {
             QTextEdit::keyPressEvent(event);
         }
-    });
+    },join);
+    if (typing) { typing_position_=textCursor().position(); typing_revision_=document()->revision(); typing_clock_.restart(); }
 }
 
 void PageEditor::inputMethodEvent(QInputMethodEvent* event)
@@ -410,6 +472,53 @@ void PageEditor::inputMethodEvent(QInputMethodEvent* event)
 
 void PageEditor::insertFromMimeData(const QMimeData* source)
 {
+    if (source->hasFormat(ClipboardFormat) || source->hasHtml()) {
+        Page fragment;
+        try {
+            fragment=source->hasFormat(ClipboardFormat)?decode_document(source->data(ClipboardFormat).toStdString()):html_fragment(source->html());
+        } catch (const std::exception& e) { emit paste_rejected(QString::fromUtf8(e.what())); return; }
+        mutate([&] {
+            const auto before=snapshot(); auto cursor=textCursor(); cursor.removeSelectedText();
+            const auto destination=cursor.blockFormat().stringProperty(Id).toStdString();
+            const auto parent=cursor.blockFormat().stringProperty(ParentId).toStdString();
+            const auto level=cursor.blockFormat().indent();
+            auto tail_cursor=cursor; tail_cursor.movePosition(QTextCursor::EndOfBlock,QTextCursor::KeepAnchor);
+            const QTextDocumentFragment tail(tail_cursor); tail_cursor.removeSelectedText();
+            const bool separate=fragment.blocks[0].kind==BlockKind::Divider && !cursor.block().text().isEmpty();
+            std::unordered_map<std::string,std::string> remap;
+            for (std::size_t i=0;i<fragment.blocks.size();++i) remap[fragment.blocks[i].id]=(i==0 && !separate)?destination:new_id().toStdString();
+            std::unordered_map<std::string,int> levels; std::string continuation=destination;
+            for (std::size_t i=0;i<fragment.blocks.size();++i) {
+                auto block=fragment.blocks[i]; block.id=remap.at(block.id);
+                block.parent_id=remap.count(block.parent_id)?remap.at(block.parent_id):parent;
+                for (auto& run:block.runs) if (run.reference && run.reference->kind==ReferenceKind::Block && remap.count(run.reference->target_id))
+                    run.reference->target_id=remap.at(run.reference->target_id);
+                const auto nesting=block.parent_id==parent?level:levels.at(block.parent_id)+1; levels[block.id]=nesting;
+                if (i || separate) cursor.insertBlock(QTextBlockFormat{},QTextCharFormat{});
+                if (i || separate || cursor.block().text().isEmpty()) apply_block_format(cursor,block,nesting);
+                if (block.parent_id==parent) continuation=block.id;
+                for (const auto& run:block.runs) cursor.insertText(run.asset?QString(QChar::ObjectReplacementCharacter):QString::fromStdString(run.text),run_format(run));
+            }
+            if (cursor.blockFormat().intProperty(Kind)==int(BlockKind::Divider) && !tail.isEmpty()) {
+                const auto nesting=cursor.blockFormat().indent();
+                Block after{new_id().toStdString(),cursor.blockFormat().stringProperty(ParentId).toStdString(),BlockKind::Paragraph,{}};
+                cursor.insertBlock(); apply_block_format(cursor,after,nesting);
+                if (after.parent_id==parent) continuation=after.id;
+            }
+            const auto end=cursor.position(); const auto last_format=cursor.blockFormat();
+            cursor.insertFragment(tail); cursor.setBlockFormat(last_format);
+            cursor.setPosition(end); cursor.setCharFormat(QTextCharFormat{}); setTextCursor(cursor);
+            // Match Enter: old children follow the trailing root after a paste.
+            if (continuation!=destination) {
+                std::unordered_set<std::string> children;
+                for (const auto& block:before.blocks) if (block.parent_id==destination) children.insert(block.id);
+                for (auto qt=document()->begin();qt.isValid();qt=qt.next()) if (children.count(qt.blockFormat().stringProperty(Id).toStdString())) {
+                    auto format=qt.blockFormat(); format.setProperty(ParentId,QString::fromStdString(continuation)); QTextCursor child(qt); child.setBlockFormat(format);
+                }
+            }
+        });
+        return;
+    }
     if (!source->hasText())
         return;
     mutate([&] {
@@ -426,6 +535,31 @@ void PageEditor::insertFromMimeData(const QMimeData* source)
         }
         setTextCursor(cursor);
     });
+}
+
+QMimeData* PageEditor::createMimeDataFromSelection() const
+{
+    // Qt's lazy text MIME object has its own formats() implementation. Copy its
+    // materialized formats into an ordinary QMimeData before adding our payload.
+    std::unique_ptr<QMimeData> native(QTextEdit::createMimeDataFromSelection());
+    auto* mime=new QMimeData;
+    for (const auto& format:native->formats()) mime->setData(format,native->data(format));
+    const auto cursor=textCursor();
+    if (!cursor.hasSelection()) return mime;
+    Page fragment{page_id_,{}}; std::unordered_set<std::string> selected;
+    QStringList plain;
+    for (auto qt=document()->begin();qt.isValid() && qt.position()<=cursor.selectionEnd();qt=qt.next()) {
+        if (qt.position()+qt.length()<=cursor.selectionStart()) continue;
+        auto block=read_block(qt,cursor.selectionStart(),cursor.selectionEnd());
+        if (!selected.count(block.parent_id)) block.parent_id.clear();
+        selected.insert(block.id);
+        if ((block.kind==BlockKind::Image || block.kind==BlockKind::Attachment) && block.runs.empty()) { block.kind=BlockKind::Paragraph; block.asset_label.clear(); }
+        QString text=block.kind==BlockKind::Divider?"---":QString{};
+        for (const auto& run:block.runs) text+=QString::fromStdString(run.asset?run.asset->label:run.text);
+        plain.push_back(text.replace(QChar::LineSeparator,'\n')); fragment.blocks.push_back(std::move(block));
+    }
+    mime->setData(ClipboardFormat,QByteArray::fromStdString(encode_document(fragment)));
+    mime->setText(plain.join('\n')); return mime;
 }
 
 void PageEditor::cut() { mutate([&] { QTextEdit::cut(); }); }
@@ -523,6 +657,20 @@ void PageEditor::insert_card(bool image, const QString& label)
     });
 }
 
+void PageEditor::insert_divider()
+{
+    auto page=snapshot(); const auto current=current_block_id().toStdString();
+    auto here=std::find_if(page.blocks.begin(),page.blocks.end(),[&](const auto& block){return block.id==current;});
+    if (here==page.blocks.end()) return;
+    const auto parent=here->parent_id;
+    std::unordered_set<std::string> descendants{current}; auto end=here+1;
+    while (end!=page.blocks.end() && descendants.count(end->parent_id)) { descendants.insert(end->id); ++end; }
+    const auto following=new_id();
+    page.blocks.insert(end,{{new_id().toStdString(),parent,BlockKind::Divider,{}},
+                            {following.toStdString(),parent,BlockKind::Paragraph,{}}});
+    write_page(page,following);
+}
+
 void PageEditor::toggle_bold()
 {
     mutate([&] {
@@ -559,11 +707,18 @@ void PageEditor::cancel_drag()
 
 void PageEditor::mousePressEvent(QMouseEvent* event)
 {
+    typing_position_=-1;
     if (event->button()==Qt::LeftButton && !isReadOnly() && grip_rect().contains(event->position())) {
         grip_pressed_=true; dragging_=false; drop_valid_=false;
         dragged_id_=current_block_id(); drag_start_=event->position().toPoint(); setFocus(); event->accept(); return;
     }
     QTextEdit::mousePressEvent(event);
+}
+
+void PageEditor::focusOutEvent(QFocusEvent* event)
+{
+    typing_position_=-1;
+    QTextEdit::focusOutEvent(event);
 }
 
 void PageEditor::mouseMoveEvent(QMouseEvent* event)

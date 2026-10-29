@@ -1,4 +1,4 @@
-#include "nebula/storage/codec.hpp"
+#include "nebula/format/codec.hpp"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -142,7 +142,7 @@ Page decode_document(const std::string& json)
 {
     const auto root=parse(json); Page page{s(root["id"]),{}};
     for (const auto& entry:array(root["blocks"])) {
-        const auto obj=object(entry); Block block{s(obj["id"]),s(obj["parent"]),BlockKind(integer(obj["kind"],5))};
+        const auto obj=object(entry); Block block{s(obj["id"]),s(obj["parent"]),BlockKind(integer(obj["kind"],6))};
         decode_block(block,serialize(object(obj["payload"]))); page.blocks.push_back(std::move(block));
     }
     validate(page); return page;

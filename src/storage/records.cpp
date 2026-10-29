@@ -1,5 +1,5 @@
 #include "nebula/storage/workspace.hpp"
-#include "nebula/storage/codec.hpp"
+#include "nebula/format/codec.hpp"
 #include "sql.hpp"
 #include <algorithm>
 #include <unordered_map>

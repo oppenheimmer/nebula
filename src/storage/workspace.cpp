@@ -9,7 +9,7 @@ namespace nebula {
 namespace {
 
 constexpr int ApplicationId = 0x4e454255; // NEBU
-constexpr int SchemaVersion = 4;
+constexpr int SchemaVersion = 5;
 
 void execute(sqlite3* database, const std::string& sql)
 {
@@ -89,7 +89,7 @@ Workspace Workspace::open(const std::filesystem::path& directory)
             version = "1";
         } else if (application != std::to_string(ApplicationId)) {
             throw std::runtime_error("This folder contains a database that is not a Nebula workspace");
-        } else if (version != "1" && version != "2" && version != "3" && version != std::to_string(SchemaVersion)) {
+        } else if (version != "1" && version != "2" && version != "3" && version != "4" && version != std::to_string(SchemaVersion)) {
             throw std::runtime_error("This workspace format is not supported by this version of Nebula");
         }
         const auto id = scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
@@ -148,6 +148,32 @@ Workspace Workspace::open(const std::filesystem::path& directory)
                 ALTER TABLE deleted_blocks ADD COLUMN original_position INTEGER NOT NULL DEFAULT 0;
                 UPDATE deleted_blocks SET operation_id=id;
                 PRAGMA user_version=4;
+            )SQL");
+            version="4";
+        }
+        if (version=="4") {
+            // Rebuild both related tables in the same transaction. Keeping a
+            // copied links table avoids cascade deletion of the derived edges.
+            execute(raw,R"SQL(
+                CREATE TABLE blocks_v5(id TEXT PRIMARY KEY NOT NULL,
+                    page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                    parent_id TEXT, position INTEGER NOT NULL CHECK(position>=0),
+                    kind INTEGER NOT NULL CHECK(kind BETWEEN 0 AND 6), payload TEXT NOT NULL,
+                    UNIQUE(page_id,position), UNIQUE(page_id,id),
+                    FOREIGN KEY(page_id,parent_id) REFERENCES blocks_v5(page_id,id)
+                        DEFERRABLE INITIALLY DEFERRED);
+                INSERT INTO blocks_v5 SELECT * FROM blocks;
+                CREATE TABLE links_v5(source_page TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                    source_block TEXT NOT NULL REFERENCES blocks_v5(id) ON DELETE CASCADE,
+                    run_index INTEGER NOT NULL, target_kind INTEGER NOT NULL CHECK(target_kind IN(0,1)),
+                    target_id TEXT NOT NULL, PRIMARY KEY(source_block,run_index));
+                INSERT INTO links_v5 SELECT * FROM links;
+                DROP TABLE links;
+                DROP TABLE blocks;
+                ALTER TABLE blocks_v5 RENAME TO blocks;
+                ALTER TABLE links_v5 RENAME TO links;
+                CREATE INDEX links_target ON links(target_kind,target_id);
+                PRAGMA user_version=5;
             )SQL");
         }
         if (scalar(raw, "PRAGMA quick_check") != "ok")

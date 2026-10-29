@@ -3,14 +3,15 @@
 #include "nebula/core/document.hpp"
 
 #include <QTextEdit>
+#include <QElapsedTimer>
 #include <functional>
 
 class QTimer;
 
 namespace nebula {
 
-// Investigation adapter. Its snapshots are application-owned core values;
-// QTextDocument supplies the prototype's selection, layout and undo engine.
+// Page adapter with application-owned snapshots. QTextDocument supplies native
+// selection, layout and undo; it is not the persistent representation.
 class PageEditor : public QTextEdit {
     Q_OBJECT
 public:
@@ -29,6 +30,7 @@ public:
     void insert_reference(const QString& label, ReferenceKind kind, const QString& target_id);
     void insert_unresolved_reference(const QString& label, const QString& name, const QString& database_scope);
     void insert_card(bool image, const QString& label);
+    void insert_divider();
     void toggle_bold();
     void toggle_italic();
     void cut();
@@ -37,16 +39,19 @@ public:
 signals:
     void reference_activated(int kind, const QString& target_id);
     void unresolved_reference_activated(const QString& name, const QString& database_scope);
+    void paste_rejected(const QString& reason);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void inputMethodEvent(QInputMethodEvent* event) override;
     void insertFromMimeData(const QMimeData* source) override;
+    QMimeData* createMimeDataFromSelection() const override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
 
 private:
     std::string page_id_;
@@ -58,13 +63,16 @@ private:
     Page drop_preview_;
     QPointF drop_marker_;
     QTimer* drag_scroll_;
+    QElapsedTimer typing_clock_;
+    int typing_position_ = -1;
+    int typing_revision_ = -1;
     QRectF block_rect(const QTextBlock& block) const;
     void update_drop();
     void cancel_drag();
-    void mutate(const std::function<void()>& action);
+    void mutate(const std::function<void()>& action, bool join_typing = false);
     void normalize(const Page& before);
     void write_page(const Page& page, const QString& focus_id = {});
-    void split_block(QTextCursor& cursor);
+    void split_block(QTextCursor& cursor, bool exit_empty_list = false);
 };
 
 } // namespace nebula

@@ -163,6 +163,12 @@ int main()
             check(ref && ref->target_id.empty() && ref->unresolved_name=="Future page","Unresolved intent changed");
             page.blocks[2].runs[0].reference->target_id="ambiguous";
             rejects([&]{validate(page);});
+        }},
+        {"dividers retain identity and reject hidden text", [] {
+            auto page=tree(); page.blocks[0].kind=BlockKind::Divider; page.blocks[0].runs.clear(); validate(page);
+            check(move_subtree(page,"a",1),"Divider subtree did not move");
+            check(page.blocks[2].id=="a" && page.blocks[2].kind==BlockKind::Divider,"Divider identity changed");
+            page.blocks[2].runs={{"Hidden text"}}; rejects([&]{validate(page);});
         }}
     };
     int failures = 0;

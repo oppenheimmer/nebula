@@ -63,6 +63,11 @@ ctest --test-dir build-local --output-on-failure
 Keep Qt, SQLite development files, and any additional compiler dependencies local
 to that environment; do not install them through the host package manager.
 
+`nebula_format` contains the application-owned JSON codec shared by storage and
+the editor's versioned clipboard payload. It uses the existing Qt Core dependency
+internally, exposes standard C++ values, and has no SQLite or Widgets dependency.
+The editor does not link the storage module.
+
 ## Licensing and references
 
 The user selected MIT for Nebula's own source on 2026-10-29. The root `LICENSE`

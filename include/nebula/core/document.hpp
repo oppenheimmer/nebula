@@ -7,7 +7,7 @@
 
 namespace nebula {
 
-enum class BlockKind { Paragraph, Heading, Bullet, Todo, Image, Attachment };
+enum class BlockKind { Paragraph, Heading, Bullet, Todo, Image, Attachment, Divider };
 enum class ReferenceKind { Page, Block };
 
 struct Reference {

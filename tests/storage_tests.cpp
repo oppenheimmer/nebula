@@ -1,5 +1,5 @@
 #include "nebula/storage/workspace.hpp"
-#include "nebula/storage/codec.hpp"
+#include "nebula/format/codec.hpp"
 #include "nebula/app/page_session.hpp"
 #include <QFile>
 #include <QProcess>
@@ -46,6 +46,7 @@ private slots:
     void restoring_siblings_in_reverse_order_keeps_their_order();
     void version_three_upgrade_preserves_deleted_fragments();
     void partially_restored_sibling_still_anchors_recovery();
+    void divider_migration_preserves_tree_links_and_recovery();
 };
 void StorageTests::dates_and_types()
 {
@@ -366,6 +367,24 @@ void StorageTests::partially_restored_sibling_still_anchors_recovery()
     QCOMPARE(restored.document.blocks[0].id,std::string("a")); QCOMPARE(restored.document.blocks[1].id,std::string("b"));
     QCOMPARE(restored.document.blocks[1].runs[0].text,std::string("B edited after partial undo"));
     QCOMPARE(w.deleted_blocks().size(),std::size_t(1));
+}
+void StorageTests::divider_migration_preserves_tree_links_and_recovery()
+{
+    QTemporaryDir folder; std::string id,group;
+    {
+        auto w=Workspace::open(path(folder.filePath("source"))); const auto db=w.create_database("Notes");
+        auto page=w.create_page(db.id,"Before divider migration",{},sample_page().blocks); id=page.document.id;
+        page.document.blocks.erase(page.document.blocks.begin()+7); w.save_page(page); group=w.deleted_blocks()[0].id;
+    }
+    sql(folder.filePath("source/nebula.sqlite3"),"PRAGMA user_version=4");
+    auto w=Workspace::open(path(folder.filePath("source"))); auto page=w.load_page(id);
+    QCOMPARE(page.document.blocks[3].parent_id,std::string("list")); QCOMPARE(w.backlinks(ReferenceKind::Block,"heading").size(),std::size_t(1));
+    page.document.blocks.push_back({"divider","",BlockKind::Divider,{}}); w.save_page(page);
+    QCOMPARE(w.load_page(id).document.blocks.back().kind,BlockKind::Divider);
+    const auto restored=w.restore_deleted_blocks(group); QCOMPARE(restored.document.blocks[7].id,std::string("image"));
+    w.backup_to(path(folder.filePath("backup"))); auto copy=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
+    QCOMPARE(copy.load_page(id).document.blocks.back().kind,BlockKind::Divider);
+    QCOMPARE(copy.backlinks(ReferenceKind::Block,"heading").size(),std::size_t(1));
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

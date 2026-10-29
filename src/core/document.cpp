@@ -49,7 +49,7 @@ void validate(const Page& page)
     std::unordered_set<std::string> ids;
     std::vector<std::string> ancestors;
     for (const auto& block : page.blocks) {
-        if (int(block.kind)<0 || int(block.kind)>5)
+        if (int(block.kind)<0 || int(block.kind)>6)
             throw std::invalid_argument("Unknown block kind");
         if (block.id.empty() || !ids.insert(block.id).second)
             throw std::invalid_argument("Block IDs must be nonempty and unique");
@@ -58,6 +58,8 @@ void validate(const Page& page)
         if (!block.parent_id.empty() && ancestors.empty())
             throw std::invalid_argument("Parent must be an active ancestor in preorder");
         ancestors.push_back(block.id);
+        if (block.kind==BlockKind::Divider && !block.runs.empty())
+            throw std::invalid_argument("Divider blocks cannot contain text");
         for (const auto& run : block.runs) {
             if (run.text.find('\n') != std::string::npos || run.text.find('\r') != std::string::npos)
                 throw std::invalid_argument("Hard line breaks must be separate blocks");

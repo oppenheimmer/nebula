@@ -110,6 +110,9 @@ private slots:
     void mouse_reordered_subtree_persists_and_undoes();
     void unresolved_link_picker_does_not_create_or_bind_pages();
     void deleted_blocks_can_be_restored_from_the_window();
+    void toolbar_divider_persists_and_undoes();
+    void typing_undo_group_survives_autosave();
+    void rich_clipboard_persists_remapped_links_and_undo();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -526,6 +529,38 @@ void DesktopTests::deleted_blocks_can_be_restored_from_the_window()
     QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); auto* list=dialog->findChild<QListWidget*>("trashItems"); QCOMPARE(list->count(),1); list->setCurrentRow(0); dialog->findChild<QPushButton*>("restoreSelected")->click(); dialog->accept(); });
     window.findChild<QAction*>("restoreTrash")->trigger(); QVERIFY(w.deleted_blocks().empty());
     QVERIFY(window.open_page(p.document.id)); QCOMPARE(window.page_editor()->snapshot().blocks[1].id,std::string("recover-me"));
+}
+void DesktopTests::toolbar_divider_persists_and_undoes()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); const auto page=w.create_page(db.id,"Divider");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    click_action(window,"insertDivider"); QVERIFY(window.flush());
+    QCOMPARE(w.load_page(page.document.id).document.blocks[1].kind,BlockKind::Divider);
+    QCOMPARE(QApplication::focusWidget(),window.page_editor());
+    window.page_editor()->undo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(page.document.id).document.blocks.size(),std::size_t(1));
+}
+void DesktopTests::typing_undo_group_survives_autosave()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); const auto page=w.create_page(db.id,"Undo typing");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    auto* editor=window.page_editor(); QTest::keyClicks(editor,"one"); QVERIFY(window.flush());
+    QTest::keyClicks(editor," two"); QVERIFY(window.flush()); QCOMPARE(w.load_page(page.document.id).document.blocks[0].runs[0].text,std::string("one two"));
+    editor->undo(); QVERIFY(window.flush()); QVERIFY(w.load_page(page.document.id).document.blocks[0].runs.empty());
+    editor->redo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(page.document.id).document.blocks[0].runs[0].text,std::string("one two"));
+}
+void DesktopTests::rich_clipboard_persists_remapped_links_and_undo()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto source=w.create_page(db.id,"Source",{},{{"heading","",BlockKind::Heading,{{"Heading",true}}},{"link","",BlockKind::Paragraph,{{"Jump",false,true,Reference{ReferenceKind::Block,"heading"}}}}});
+    const auto target=w.create_page(db.id,"Target"); WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    auto* editor=window.page_editor(); auto selected=editor->textCursor(); selected.select(QTextCursor::Document); editor->setTextCursor(selected); QTest::keyClick(editor,Qt::Key_C,Qt::ControlModifier);
+    QVERIFY(window.open_page(target.document.id)); QTest::keyClick(editor,Qt::Key_V,Qt::ControlModifier); QVERIFY(window.flush());
+    const auto copied=w.load_page(target.document.id); QCOMPARE(copied.document.blocks.size(),std::size_t(2));
+    QCOMPARE(copied.document.blocks[0].kind,BlockKind::Heading); QVERIFY(copied.document.blocks[1].runs[0].italic);
+    QCOMPARE(copied.document.blocks[1].runs[0].reference->target_id,copied.document.blocks[0].id);
+    QCOMPARE(w.backlinks(ReferenceKind::Block,copied.document.blocks[0].id).size(),std::size_t(1));
+    editor->undo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(target.document.id).document.blocks.size(),std::size_t(1));
+    editor->redo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(target.document.id).document.blocks[0].id,copied.document.blocks[0].id);
 }
 
 QTEST_MAIN(DesktopTests)
