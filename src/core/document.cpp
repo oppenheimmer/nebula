@@ -122,6 +122,32 @@ bool indent(Page& page, const std::string& block_id)
     return true;
 }
 
+bool relocate_subtree(Page& page, const std::string& block_id,
+                      const std::string& before_id, const std::string& parent_id)
+{
+    validate(page);
+    const auto start=find(page,block_id), end=subtree_end(page,start);
+    for (auto i=start;i<end;++i)
+        if (page.blocks[i].id==parent_id || (!before_id.empty() && page.blocks[i].id==before_id))
+            throw std::invalid_argument("A block cannot be dropped into its own subtree");
+    Page moved=page;
+    std::vector<Block> fragment(page.blocks.begin()+start,page.blocks.begin()+end);
+    fragment.front().parent_id=parent_id;
+    moved.blocks.erase(moved.blocks.begin()+start,moved.blocks.begin()+end);
+    std::size_t position=moved.blocks.size();
+    if (!before_id.empty()) {
+        position=find(moved,before_id);
+        if (moved.blocks[position].parent_id!=parent_id)
+            throw std::invalid_argument("Drop position must be a sibling of the moved block");
+    } else if (!parent_id.empty()) position=subtree_end(moved,find(moved,parent_id));
+    moved.blocks.insert(moved.blocks.begin()+position,fragment.begin(),fragment.end());
+    validate(moved);
+    const bool changed=!std::equal(page.blocks.begin(),page.blocks.end(),moved.blocks.begin(),
+        [](const Block& a,const Block& b){return a.id==b.id && a.parent_id==b.parent_id;});
+    if (changed) page=std::move(moved);
+    return changed;
+}
+
 bool outdent(Page& page, const std::string& block_id)
 {
     validate(page);

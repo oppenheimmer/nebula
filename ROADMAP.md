@@ -444,7 +444,7 @@ Deliverables: the production block editor implementing the approach chosen in M0
   formatting, and natural cursor movement across block boundaries.
 - [ ] M05.3 Implement cross-block selection, copy/cut/paste, and defined handling
   of plain text and supported rich-text clipboard content.
-- [ ] M05.4 Implement drag reordering, keyboard-accessible move operations, and
+- [x] M05.4 Implement drag reordering, keyboard-accessible move operations, and
   basic nesting while preserving IDs and preventing invalid trees. Keep the active
   block's thin outline/subtle shadow and add grip dots as the mouse drag target;
   verify dragging a subtree, nesting, canceled drops, undo, and keyboard access.
@@ -837,6 +837,22 @@ Do not record tests as passed when they were unavailable or not run.
   ownership/import/manifest recovery, M07 search/interchange, M08 reliability,
   and Linux/macOS packaging remain unfinished. Do not infer completion from this
   checkpoint or restore the old in-memory-only README warning for workspace mode.
+
+### Grip-dot mouse reordering checkpoint — 2026-10-30
+
+- Added the requested six grip dots inside the active block's thin outline and
+  shadow, an open/closed hand cursor, a visible drop marker, horizontal nesting,
+  Escape cancellation, and edge autoscrolling. Dragging moves the whole subtree
+  and makes one undoable structural edit; ordinary text selection stays native.
+- Core relocation validates the prospective tree before changing the original,
+  preserving IDs and rejecting descendant/cycle and invalid sibling destinations.
+  Two new core cases and four editor mouse cases pass with GCC and Clang. The
+  full-window drag/save/undo regression also passes. Clang passed all six CTest
+  entries; the Qt-free core passed its 15 cases plus launcher checks. Xwayland
+  passed all 31 editor and 28 desktop cases. The native grip preview was inspected.
+- Remaining M05 work still includes dividers, rich clipboard, reference entry and
+  lifecycle/navigation, undo typing coalescing, and production accessibility/IME
+  verification. Completing mouse movement does not complete the editor milestone.
 
 ## Technical references discussed
 

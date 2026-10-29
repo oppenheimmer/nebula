@@ -56,6 +56,10 @@ struct Page {
 void validate(const Page& page);
 int depth(const Page& page, const std::string& block_id);
 bool move_subtree(Page& page, const std::string& block_id, int direction);
+// Move before a sibling, or append under parent when before_id is empty.
+// Reject cycles/invalid destinations without changing the input page.
+bool relocate_subtree(Page& page, const std::string& block_id,
+                      const std::string& before_id, const std::string& parent_id);
 bool indent(Page& page, const std::string& block_id);
 bool outdent(Page& page, const std::string& block_id);
 Page sample_page();

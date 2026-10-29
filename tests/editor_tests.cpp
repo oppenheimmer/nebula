@@ -7,6 +7,7 @@
 #include <QFontMetrics>
 #include <QInputMethodEvent>
 #include <QSignalSpy>
+#include <QScrollBar>
 #include <QTest>
 #include <QTextBlock>
 #include <unordered_set>
@@ -84,7 +85,61 @@ private slots:
     void comparison_selection_stays_in_one_widget();
     void comparison_undo_is_per_widget();
     void long_page_edit_remains_valid();
+    void grip_drag_reorders_and_undoes_a_subtree();
+    void grip_drag_can_nest_and_outdent();
+    void grip_drag_escape_and_invalid_target_do_not_edit();
+    void grip_drag_scrolls_long_documents();
 };
+
+void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
+{
+    PageEditor editor; ready(editor,sample_page());
+    editor.go_to_block("todo"); const auto target=QPoint(18,qRound(editor.active_block_rect().bottom()-2));
+    editor.go_to_block("list"); const auto grip=editor.grip_rect().center().toPoint();
+    QTest::mousePress(editor.viewport(),Qt::LeftButton,Qt::NoModifier,grip);
+    QTest::mouseMove(editor.viewport(),target);
+    QTest::mouseRelease(editor.viewport(),Qt::LeftButton,Qt::NoModifier,target);
+    auto page=editor.snapshot(); validate(page);
+    QCOMPARE(page.blocks[2].id,std::string("todo")); QCOMPARE(page.blocks[3].id,std::string("list"));
+    QCOMPARE(page.blocks[4].parent_id,std::string("list")); QCOMPARE(editor.current_block_id(),QString("list"));
+    editor.undo(); QCOMPARE(ids(editor.snapshot()),ids(sample_page()));
+    editor.redo(); QCOMPARE(editor.snapshot().blocks[3].id,std::string("list"));
+}
+void EditorTests::grip_drag_can_nest_and_outdent()
+{
+    PageEditor editor; ready(editor);
+    editor.go_to_block("a"); auto target=QPoint(editor.cursorRect().left()+50,qRound(editor.active_block_rect().center().y()));
+    editor.go_to_block("c");
+    QTest::mousePress(editor.viewport(),Qt::LeftButton,Qt::NoModifier,editor.grip_rect().center().toPoint());
+    QTest::mouseMove(editor.viewport(),target); QTest::mouseRelease(editor.viewport(),Qt::LeftButton,Qt::NoModifier,target);
+    QCOMPARE(ids(editor.snapshot()),QStringList({"a","c","b"})); QCOMPARE(editor.snapshot().blocks[1].parent_id,std::string("a"));
+    editor.go_to_block("b"); target=QPoint(18,qRound(editor.active_block_rect().bottom()-2)); editor.go_to_block("c");
+    QTest::mousePress(editor.viewport(),Qt::LeftButton,Qt::NoModifier,editor.grip_rect().center().toPoint());
+    QTest::mouseMove(editor.viewport(),target); QTest::mouseRelease(editor.viewport(),Qt::LeftButton,Qt::NoModifier,target);
+    QCOMPARE(ids(editor.snapshot()),QStringList({"a","b","c"})); QVERIFY(editor.snapshot().blocks[2].parent_id.empty());
+}
+void EditorTests::grip_drag_escape_and_invalid_target_do_not_edit()
+{
+    PageEditor editor; ready(editor,sample_page());
+    editor.go_to_block("child"); const auto invalid=QPoint(editor.cursorRect().left()+60,qRound(editor.active_block_rect().center().y()));
+    editor.go_to_block("list"); const auto grip=editor.grip_rect().center().toPoint();
+    QTest::mousePress(editor.viewport(),Qt::LeftButton,Qt::NoModifier,grip); QTest::mouseMove(editor.viewport(),invalid);
+    QTest::mouseRelease(editor.viewport(),Qt::LeftButton,Qt::NoModifier,invalid);
+    QCOMPARE(ids(editor.snapshot()),ids(sample_page())); QVERIFY(!editor.document()->isUndoAvailable());
+    QTest::mousePress(editor.viewport(),Qt::LeftButton,Qt::NoModifier,grip); QTest::mouseMove(editor.viewport(),QPoint(18,450));
+    QTest::keyClick(&editor,Qt::Key_Escape); QTest::mouseRelease(editor.viewport(),Qt::LeftButton,Qt::NoModifier,QPoint(18,450));
+    QCOMPARE(ids(editor.snapshot()),ids(sample_page())); QVERIFY(!editor.document()->isUndoAvailable());
+}
+void EditorTests::grip_drag_scrolls_long_documents()
+{
+    PageEditor editor; ready(editor,long_page(100));
+    const auto start=editor.verticalScrollBar()->value();
+    QTest::mousePress(editor.viewport(),Qt::LeftButton,Qt::NoModifier,editor.grip_rect().center().toPoint());
+    QTest::mouseMove(editor.viewport(),QPoint(18,editor.viewport()->height()-5));
+    QTRY_VERIFY_WITH_TIMEOUT(editor.verticalScrollBar()->value()>start,1000);
+    QTest::keyClick(&editor,Qt::Key_Escape); QTest::mouseRelease(editor.viewport(),Qt::LeftButton);
+    QCOMPARE(ids(editor.snapshot()),ids(long_page(100))); QVERIFY(!editor.document()->isUndoAvailable());
+}
 
 void EditorTests::load_preserves_model()
 {

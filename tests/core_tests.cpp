@@ -138,6 +138,23 @@ int main()
             auto sorted=apply_view({a,b},view); check(sorted[0].title=="Two","Numbers sorted as text");
             view.filters={{"score",Comparison::Greater,1.0},{"done",Comparison::Equal,true}};
             auto filtered=apply_view({a,b},view); check(filtered.size()==1 && filtered[0].title=="Ten","Filters did not combine");
+        }},
+        {"arbitrary subtree relocation preserves descendants", [] {
+            auto page=tree();
+            check(relocate_subtree(page,"a","b1","b"),"Move into another parent failed");
+            check(ids(page)=="b,a,a1,a2,b1,c,","Incorrect insertion position");
+            check(depth(page,"a2")==2,"Lost descendant nesting");
+            check(relocate_subtree(page,"a","",""),"Move back to root failed");
+            check(ids(page)=="b,b1,c,a,a1,a2,","Incorrect root append order");
+        }},
+        {"invalid drops leave the original tree unchanged", [] {
+            auto page=tree(); const auto before=ids(page);
+            rejects([&]{relocate_subtree(page,"a","","a1");});
+            rejects([&]{relocate_subtree(page,"b","a1","");});
+            rejects([&]{relocate_subtree(page,"a","a1","a");});
+            rejects([&]{relocate_subtree(page,"c","","missing");});
+            check(ids(page)==before,"Rejected drop changed the document");
+            check(!relocate_subtree(page,"a","b",""),"No-op move created a change");
         }}
     };
     int failures = 0;

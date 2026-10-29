@@ -5,6 +5,8 @@
 #include <QTextEdit>
 #include <functional>
 
+class QTimer;
+
 namespace nebula {
 
 // Investigation adapter. Its snapshots are application-owned core values;
@@ -17,6 +19,7 @@ public:
     Page snapshot() const;
     QString current_block_id() const;
     QRectF active_block_rect() const; // Viewport coordinates, including wrapped lines.
+    QRectF grip_rect() const;
     bool go_to_block(const QString& id);
     bool move_current(int direction);
     bool indent_current();
@@ -39,10 +42,23 @@ protected:
     void inputMethodEvent(QInputMethodEvent* event) override;
     void insertFromMimeData(const QMimeData* source) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 
 private:
     std::string page_id_;
+    bool grip_pressed_ = false;
+    bool dragging_ = false;
+    bool drop_valid_ = false;
+    QPoint drag_start_, drag_position_;
+    QString dragged_id_;
+    Page drop_preview_;
+    QPointF drop_marker_;
+    QTimer* drag_scroll_;
+    QRectF block_rect(const QTextBlock& block) const;
+    void update_drop();
+    void cancel_drag();
     void mutate(const std::function<void()>& action);
     void normalize(const Page& before);
     void write_page(const Page& page, const QString& focus_id = {});

@@ -84,6 +84,10 @@ in the comparison tab.
 
 Click a block to make it active. A thin outline with a subtle shadow identifies
 the active block; the label above the editor shows its position and nesting level.
+Drag its grip dots to move the block and its children. Drop above/below a block to
+reorder it; move the pointer to the right of its text to nest under it. The drop
+marker shows the destination, Escape cancels, and dragging near the top/bottom
+scrolls the document.
 
 | Action | Keyboard or control |
 | --- | --- |
@@ -99,8 +103,7 @@ the active block; the label above the editor shows its position and nesting leve
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
 Wrapping text does not create a block. Splitting a parent gives the trailing block
 a new identity and transfers its children there; structural edits can be undone.
-Image and file cards in demo mode are layout representations, not imported files. Mouse drag
-reordering is not available yet.
+Image and file cards in demo mode are layout representations, not imported files.
 
 Use Link… to select a page, heading, or block across databases. Ctrl+click follows
 it; the backlinks list opens the referring page/block. Targets retain their IDs

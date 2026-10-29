@@ -126,7 +126,7 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
         else
             statusBar()->showMessage("This reference target is outside the sample page", 4000);
     });
-    statusBar()->showMessage("Click a block to select it · Alt+↑/↓: move · Tab/Shift+Tab: nest · Enter: new block");
+    statusBar()->showMessage("Click a block, then drag its grip dots · Alt+↑/↓: move · Tab/Shift+Tab: nest · Enter: new block");
     refresh_selection();
     editor_->setFocus();
 }

@@ -107,6 +107,7 @@ private slots:
     void view_dialog_saves_filter_and_column_settings();
     void database_and_trash_actions_preserve_records();
     void journal_entry_preserves_the_selected_calendar_date();
+    void mouse_reordered_subtree_persists_and_undoes();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -488,6 +489,18 @@ void DesktopTests::journal_entry_preserves_the_selected_calendar_date()
     QCOMPARE(std::get<Date>(page.properties.at(date->id)).iso,std::string("2024-03-10"));
     auto reopened=Workspace::open(path(folder.path()));
     QCOMPARE(std::get<Date>(reopened.load_page(id).properties.at(date->id)).iso,std::string("2024-03-10"));
+}
+void DesktopTests::mouse_reordered_subtree_persists_and_undoes()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Drag me");
+    const auto id=page.document.id; page.document=sample_page(); page.document.id=id; w.save_page(page);
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(id));
+    auto* editor=window.page_editor(); editor->go_to_block("todo"); const auto target=QPoint(18,qRound(editor->active_block_rect().bottom()-2));
+    editor->go_to_block("list"); QTest::mousePress(editor->viewport(),Qt::LeftButton,Qt::NoModifier,editor->grip_rect().center().toPoint());
+    QTest::mouseMove(editor->viewport(),target); QTest::mouseRelease(editor->viewport(),Qt::LeftButton,Qt::NoModifier,target);
+    QVERIFY(window.flush()); const auto saved=w.load_page(id); QCOMPARE(saved.document.blocks[3].id,std::string("list"));
+    QCOMPARE(saved.document.blocks[4].parent_id,std::string("list"));
+    editor->undo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(id).document.blocks[2].id,std::string("list"));
 }
 
 QTEST_MAIN(DesktopTests)

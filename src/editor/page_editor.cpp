@@ -14,6 +14,8 @@
 #include <QTextList>
 #include <QTextObjectInterface>
 #include <QUuid>
+#include <QScrollBar>
+#include <QTimer>
 #include <QApplication>
 #include <algorithm>
 #include <unordered_map>
@@ -92,26 +94,43 @@ QTextCharFormat run_format(const Run& run)
 PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
 {
     setAccessibleName("Page block editor");
-    setAccessibleDescription("Flowing block document. Alt+Up or Down moves a block; Tab nests it.");
+    setAccessibleDescription("Flowing block document. Drag the grip dots to move a subtree. Alt+Up or Down moves a block; Tab nests it.");
     setAcceptDrops(false); // Native internal text drag needs identity-aware handling in M05.
     setTabChangesFocus(false);
     setFont(QFont("Sans Serif", 12));
     setPlaceholderText("Write a note…");
-    document()->setDocumentMargin(24);
+    document()->setDocumentMargin(32);
+    viewport()->setMouseTracking(true);
+    drag_scroll_=new QTimer(this);
+    drag_scroll_->setInterval(50);
+    connect(drag_scroll_,&QTimer::timeout,this,[this] {
+        if (!dragging_) return;
+        int amount=0;
+        if (drag_position_.y()<24) amount=-20;
+        else if (drag_position_.y()>viewport()->height()-24) amount=20;
+        if (amount) { verticalScrollBar()->setValue(verticalScrollBar()->value()+amount); update_drop(); }
+    });
     document()->documentLayout()->registerHandler(CardObject, new CardRenderer(this));
     connect(this, &QTextEdit::cursorPositionChanged, viewport(), QOverload<>::of(&QWidget::update));
+    connect(this, &QTextEdit::textChanged, viewport(), QOverload<>::of(&QWidget::update));
     set_page({"untitled", {{"first-block", "", BlockKind::Paragraph, {}}}});
 }
 
 QRectF PageEditor::active_block_rect() const
 {
-    const auto block = textCursor().block();
+    return block_rect(textCursor().block());
+}
+
+QRectF PageEditor::block_rect(const QTextBlock& block) const
+{
     const auto bounds = document()->documentLayout()->blockBoundingRect(block);
     const auto* layout = block.layout();
     const qreal line_y = layout && layout->lineCount() ? layout->lineAt(0).y() : 0;
     const qreal top = cursorRect(QTextCursor(block)).top() - line_y;
     return {8, top - 4, qreal(viewport()->width() - 16), bounds.height() + 8};
 }
+
+QRectF PageEditor::grip_rect() const { const auto rect=active_block_rect(); return {10,rect.top()+4,16,18}; }
 
 void PageEditor::paintEvent(QPaintEvent* event)
 {
@@ -129,10 +148,20 @@ void PageEditor::paintEvent(QPaintEvent* event)
     outline.setAlpha(55);
     painter.setPen(QPen(outline, 1));
     painter.drawRoundedRect(rect, 4, 4);
+    auto dots=palette().color(QPalette::Text); dots.setAlpha(isEnabled()?110:35);
+    painter.setPen(Qt::NoPen); painter.setBrush(dots);
+    const auto grip=grip_rect();
+    for (int row=0;row<3;++row) for (int column=0;column<2;++column)
+        painter.drawEllipse(QPointF(grip.left()+5+column*5,grip.top()+4+row*5),1.2,1.2);
+    if (dragging_) {
+        painter.setPen(QPen(drop_valid_?QColor("#477b9c"):QColor("#b56a65"),2));
+        painter.drawLine(drop_marker_,QPointF(viewport()->width()-10,drop_marker_.y()));
+    }
 }
 
 void PageEditor::set_page(const Page& page)
 {
+    cancel_drag();
     validate(page);
     page_id_ = page.id;
     write_page(page);
@@ -332,6 +361,10 @@ void PageEditor::split_block(QTextCursor& cursor)
 
 void PageEditor::keyPressEvent(QKeyEvent* event)
 {
+    if (grip_pressed_) {
+        if (event->key()==Qt::Key_Escape) cancel_drag();
+        event->accept(); return;
+    }
     const auto modifiers = event->modifiers()
         & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
     if (event->matches(QKeySequence::Undo) || event->matches(QKeySequence::Redo)) {
@@ -502,8 +535,74 @@ void PageEditor::toggle_italic()
     });
 }
 
+void PageEditor::cancel_drag()
+{
+    grip_pressed_=false; dragging_=false; drop_valid_=false;
+    drag_scroll_->stop(); viewport()->setCursor(Qt::IBeamCursor); viewport()->update();
+}
+
+void PageEditor::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button()==Qt::LeftButton && !isReadOnly() && grip_rect().contains(event->position())) {
+        grip_pressed_=true; dragging_=false; drop_valid_=false;
+        dragged_id_=current_block_id(); drag_start_=event->position().toPoint(); setFocus(); event->accept(); return;
+    }
+    QTextEdit::mousePressEvent(event);
+}
+
+void PageEditor::mouseMoveEvent(QMouseEvent* event)
+{
+    if (grip_pressed_) {
+        drag_position_=event->position().toPoint();
+        if (!dragging_ && (drag_position_-drag_start_).manhattanLength()>=QApplication::startDragDistance()) {
+            dragging_=true; drag_scroll_->start(); viewport()->setCursor(Qt::ClosedHandCursor);
+        }
+        if (dragging_) update_drop();
+        event->accept(); return;
+    }
+    viewport()->setCursor(grip_rect().contains(event->position())?Qt::OpenHandCursor:Qt::IBeamCursor);
+    QTextEdit::mouseMoveEvent(event);
+}
+
+void PageEditor::update_drop()
+{
+    drop_valid_=false;
+    if (!viewport()->rect().contains(drag_position_)) { viewport()->update(); return; }
+    const auto cursor=cursorForPosition(drag_position_);
+    const auto target_id=cursor.blockFormat().stringProperty(Id).toStdString();
+    auto page=snapshot();
+    const auto target=std::find_if(page.blocks.begin(),page.blocks.end(),[&](const Block& b){return b.id==target_id;});
+    if (target==page.blocks.end()) return;
+    const auto rect=block_rect(cursor.block());
+    const qreal text_left=cursorRect(QTextCursor(cursor.block())).left();
+    std::string parent=target->parent_id, before=target_id;
+    drop_marker_={rect.left()+20,rect.top()};
+    const bool nest=drag_position_.x()>text_left+24;
+    if (nest || drag_position_.y()>rect.center().y()) {
+        std::unordered_set<std::string> descendants{target_id};
+        auto end=target+1;
+        while (end!=page.blocks.end() && descendants.count(end->parent_id)) { descendants.insert(end->id); ++end; }
+        auto last=cursor.block();
+        for (auto qt=last.next();qt.isValid() && descendants.count(qt.blockFormat().stringProperty(Id).toStdString());qt=qt.next()) last=qt;
+        drop_marker_.setY(block_rect(last).bottom());
+        before=(end!=page.blocks.end() && end->parent_id==parent)?end->id:std::string{};
+        if (nest) { parent=target_id; before.clear(); drop_marker_.setX(text_left+32); }
+    }
+    try { drop_valid_=relocate_subtree(page,dragged_id_.toStdString(),before,parent); drop_preview_=std::move(page); }
+    catch (const std::invalid_argument&) { drop_valid_=false; }
+    viewport()->update();
+}
+
 void PageEditor::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (event->button()==Qt::LeftButton && grip_pressed_) {
+        if (dragging_) { drag_position_=event->position().toPoint(); update_drop(); }
+        const bool apply=dragging_ && drop_valid_;
+        const auto page=drop_preview_; const auto focus=dragged_id_;
+        cancel_drag();
+        if (apply) write_page(page,focus);
+        event->accept(); return;
+    }
     if (event->button() == Qt::LeftButton && event->modifiers() & Qt::ControlModifier) {
         auto cursor = cursorForPosition(event->position().toPoint());
         cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
