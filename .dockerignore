@@ -1,0 +1,4 @@
+# Only the recipe is needed to create the development image. Source is mounted
+# read-only at runtime, keeping Git metadata, SDK caches and builds out of context.
+*
+!Dockerfile.dev

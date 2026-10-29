@@ -1,0 +1,21 @@
+FROM debian:trixie-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential ca-certificates clang cmake ninja-build \
+        qt6-base-dev libgl1-mesa-dev libsqlite3-dev libxcb-cursor0 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=C.UTF-8 \
+    QT_QPA_PLATFORM=offscreen \
+    NEBULA_REQUIRE_SAMPLE_FONTS=1 \
+    XDG_CACHE_HOME=/tmp/nebula-cache \
+    CMAKE_GENERATOR=Ninja
+
+WORKDIR /workspace
+USER 65532:65532
+CMD ["/bin/bash"]

@@ -1,0 +1,6 @@
+/build*/
+/CMakeUserPresets.json
+*.user
+*.swp
+/.cache/
+/.tools/

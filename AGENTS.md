@@ -17,6 +17,13 @@ Do not introduce synchronization, hosted services, collaboration, accounts,
 telemetry, or runtime network dependencies. A spatial canvas is outside the agreed
 scope. Do not expand first-release scope implicitly.
 
+Development dependencies must remain isolated to this project's development
+environment. Use the existing Docker CLI with `Dockerfile.dev` and
+`scripts/dev.sh`; never install Qt or other project dependencies system-wide or
+invoke a host package manager for them. An explicitly selected project-local SDK
+is a fallback, not a global PATH/library configuration. Do not install Podman as a
+prerequisite. Keep SDKs, container build output, and tool caches out of Git.
+
 ## Architecture and dependencies
 
 - Use the agreed C++17, Qt 6 Widgets, SQLite, and CMake direction. The editor
@@ -43,8 +50,8 @@ scope. Do not expand first-release scope implicitly.
   redirect references by name.
 - Maintain conservative dependency and compiler baselines. Record the reason for
   new dependencies, their licenses, and their Linux/macOS implications.
-- Track unresolved application licensing and platform decisions in the roadmap;
-  resolve release-relevant requirements before distribution.
+- Nebula's own source uses MIT, as selected by the user. Keep third-party licensing
+  separate and record platform decisions in the roadmap before distribution.
 
 ## Data reliability
 
@@ -83,6 +90,8 @@ scope. Do not expand first-release scope implicitly.
 
 ## Validation
 
+- Add focused automated tests alongside every new feature. Cover its observable
+  behavior and preserve regression checks for defects found during implementation.
 - Validate changes proportionately. For documentation, review scope, consistency,
   local links, status accuracy, and `git diff --check`; application tests are not
   required for prose-only changes.

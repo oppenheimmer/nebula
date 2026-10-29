@@ -27,10 +27,12 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Editor | Flowing document with movable, nestable blocks; not a spatial canvas. |
 | Cross-referencing | Links to pages, headings, and blocks across databases in one workspace; backlinks and link-aware navigation/search. |
 | Language | C++17 baseline with conservative dependencies; C libraries where useful. |
+| Application license | MIT, selected by the user; dependencies retain their own licenses. |
 | Interface | Qt 6 Widgets is the preferred starting point, subject to the editor feasibility milestone. |
 | Storage | SQLite for structured records, with small versioned JSON payloads for flexible block content and view settings. |
 | Attachments | Prefer managed files beside the database; evaluate SQLite BLOBs if a single-file workspace becomes a requirement. |
 | Build | CMake; keep compiler and platform requirements explicit. |
+| Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
 | Modularity | UI-independent document core, application operations, storage interfaces, and separate desktop adapters. |
 | Portability | Linux first; introduce macOS build checks early and deliver its polished package later. |
 | Data ownership | Documented schema, migration paths, backup/restore, and portable exports. |
@@ -39,7 +41,8 @@ The following remain implementation decisions rather than settled facts:
 
 - Whether the editor uses one rich-text document per page or separate block
   components, including how selection and undo cross block boundaries.
-- Application license and the exact Qt modules and dependency versions used.
+- Release dependency pinning and third-party distribution notices. The current
+  module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 - Minimum Linux distribution/compiler baseline and macOS deployment target.
 - Linux packaging format and the eventual macOS distribution method.
 - Benchmark thresholds and supported search languages/tokenization behavior.
@@ -222,7 +225,8 @@ Milestone states: **Not started**, **In progress**, **Blocked**, **Complete**.
 Use task IDs and checkboxes for individual steps. A milestone is complete only
 when every required step and its exit criteria have supporting verification.
 Record partial progress explicitly; do not infer completion from code existing or
-from a proposed design. No application implementation has been completed yet.
+from a proposed design. An in-memory editor prototype and test/build foundation
+now exist. Production workspace storage and database views remain unimplemented.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -232,8 +236,8 @@ and changed decisions. Avoid unsupported completion percentages.
 | ID | Milestone | Dependencies | Status |
 | --- | --- | --- | --- |
 | M00 | Project definition and working conventions | None | Complete |
-| M01 | Editor feasibility and architecture decisions | M00 | Not started |
-| M02 | Modular application foundation | M01 | Not started |
+| M01 | Editor feasibility and architecture decisions | M00 | In progress |
+| M02 | Modular application foundation | M01; prototype build/core scaffolding started early | In progress |
 | M03 | Persistent workspace and recovery foundations | M02 | Not started |
 | M04 | Database-to-page workflow | M03 | Not started |
 | M05 | Complete first-release block editing | M01, M04 | Not started |
@@ -261,20 +265,20 @@ Deliverables: a runnable editor prototype, recorded comparison of editor
 approaches, and a decision describing the selected representation and interaction
 model. Prototype code is investigative and is not automatically production-ready.
 
-- [ ] M01.1 Compare a page-wide `QTextDocument` approach with separate block
+- [x] M01.1 Compare a page-wide `QTextDocument` approach with separate block
   components using the same representative editing scenarios.
-- [ ] M01.2 Demonstrate paragraph splitting/merging, cross-block selection,
+- [x] M01.2 Demonstrate paragraph splitting/merging, cross-block selection,
   navigation, formatting, inline references, clipboard operations, reordering,
   and undo/redo.
-- [ ] M01.3 Demonstrate nesting and an image/attachment representation alongside
+- [x] M01.3 Demonstrate nesting and an image/attachment representation alongside
   text; investigate how embedded controls participate in selection and focus.
 - [ ] M01.4 Check Unicode, input-method composition, keyboard access, and basic
   accessibility with real toolkit behavior.
-- [ ] M01.5 Exercise a long document; define reproducible fixtures and measurable
+- [x] M01.5 Exercise a long document; define reproducible fixtures and measurable
   interaction/memory thresholds for subsequent regression checks.
-- [ ] M01.6 Record the chosen editor approach, model-to-widget mapping, undo
+- [x] M01.6 Record the chosen editor approach, model-to-widget mapping, undo
   ownership, limitations, and reasons for accepting or revisiting Qt Widgets.
-- [ ] M01.7 Resolve the application license and initial toolkit/module baseline;
+- [x] M01.7 Resolve the application license and initial toolkit/module baseline;
   record remaining platform constraints explicitly.
 
 Exit criteria: the selected design demonstrates the essential editing interactions
@@ -282,12 +286,21 @@ without a known fundamental selection, input-method, or undo limitation. Remaini
 issues have concrete follow-up tasks or bug entries. Record validation conditions
 and results instead of judging feasibility from screenshots alone.
 
+Progress evidence: `nebula_prototype` contains both editor approaches, backed by
+core and Qt interaction tests. [EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md)
+records the provisional page-wide editor decision, measured fixture/budgets,
+regressions, and remaining validation. M01.4 has automated Unicode, synthetic
+composition, keyboard/mouse, font fallback, and accessible-text checks; real OS
+input-method and screen-reader sessions remain outstanding, so M01 is not complete.
+The user selected MIT. Development now uses a Docker image rather than host Qt
+packages, as required in the subsequent environment clarification.
+
 ### M02 — Modular application foundation
 
 Deliverables: a buildable desktop shell, core/application/storage module boundaries,
 and a repeatable developer workflow.
 
-- [ ] M02.1 Establish CMake targets and the C++17 baseline; document dependencies
+- [x] M02.1 Establish CMake targets and the C++17 baseline; document dependencies
   and supported Linux compiler configurations.
 - [ ] M02.2 Implement the initial UI-independent document types and invariants,
   including permanent IDs, typed references, hierarchy validation, and deterministic
@@ -296,7 +309,7 @@ and a repeatable developer workflow.
   undo/redo without duplicating editing rules in individual views.
 - [ ] M02.4 Add workspace navigation, database/page placeholders, and platform
   adapters for paths, dialogs, menus, and shortcuts.
-- [ ] M02.5 Establish meaningful automated core tests and documented build/check
+- [x] M02.5 Establish meaningful automated core tests and documented build/check
   commands; exercise both GCC and Clang where available.
 - [ ] M02.6 Introduce an early macOS compile/smoke check when a runner or machine
   is available; record any infrastructure limitation rather than claiming a pass.
@@ -304,6 +317,12 @@ and a repeatable developer workflow.
 Exit criteria: a fresh checkout builds and launches on the chosen Linux baseline;
 core tests run without a GUI. Platform assumptions and the status of the early
 macOS check are documented.
+
+Dependency exception: the CMake targets, initial core values/tree operations, and
+test harness were needed to investigate M01, so that scaffolding was started
+before M01's manual desktop validation is complete. This does not complete the
+production core, application command/undo architecture, workspace shell, or macOS
+checks. [README.md](README.md) documents the Docker build/test and GUI commands.
 
 ### M03 — Persistent workspace and recovery foundations
 
@@ -513,8 +532,57 @@ These are anticipated risks, not encountered bugs.
 
 ## Bug log
 
-No implementation bugs have been encountered or verified yet; implementation has
-not started. Do not turn risk-register entries into bug reports without evidence.
+The following defects were observed during prototype implementation. Anticipated
+problems remain in the risk register until reproduced.
+
+### BUG-001 — Splitting a parent detached its children
+
+- **Milestone/state/impact:** M01; fixed and verified. A structural edit flattened
+  descendants, changing the intended hierarchy.
+- **Environment/reproduction:** Qt 6.8.3, RHEL 9.8; open the sample, place the cursor
+  inside block `list`, and press Enter. The subsequent `child` block became a root.
+- **Expected:** the trailing split receives a new ID and retains the existing
+  children; undo restores the original tree and identities.
+- **Cause:** inserting a new sibling closed the original ancestor in preorder;
+  generic normalization then promoted the children to the root.
+- **Resolution:** `PageEditor::split_block` reparents direct children to the trailing
+  block within the same undo group; deeper descendants retain their relationships.
+- **Verification:** `splitting_parent_keeps_children_with_trailing_block` first
+  reproduced the failure and then passed after the fix. The surrounding core and
+  interaction suites also passed. The regression remains in `tests/editor_tests.cpp`.
+
+### BUG-002 — Development image lacked sample-script fonts
+
+- **Milestone/state/impact:** M01/M02; fixed and verified. Japanese text and the
+  sample emoji appeared as missing-glyph boxes in the Docker GUI preview.
+- **Environment/reproduction:** Debian 13 development image with Qt 6.8.2 and only
+  DejaVu fonts; launch the sample through Xwayland.
+- **Expected:** sample Japanese, Arabic, and emoji characters render using fallback
+  fonts while their stored UTF-8 text remains unchanged.
+- **Cause:** the image lacked CJK and emoji font coverage; passing text round-trip
+  tests did not establish rendering coverage.
+- **Resolution:** install Noto CJK and Noto Color Emoji inside the development
+  image, with a UTF-8 locale. No host fonts or Qt packages are installed.
+- **Verification:** `container_font_baseline_renders_sample_scripts` reproduced the
+  missing Japanese glyph and is mandatory in the image. It is explicitly skipped
+  outside that configured font baseline. Native preview and suite results are
+  recorded in the feasibility report.
+
+### BUG-003 — Undo of a structural rewrite moved focus to the first block
+
+- **Milestone/state/impact:** M01; fixed and verified. After converting a later
+  block's type and undoing, the next command could affect the first block instead.
+- **Environment/reproduction:** Qt 6.8.2 in the Docker image; focus the sample's
+  `reference` block, convert it to a heading, undo, and convert it to a bullet.
+- **Expected:** undo restores the edited block and the caret remains there, so the
+  subsequent command still acts on `reference`.
+- **Cause:** structural rewrite/normalization groups began with a fresh document
+  cursor at position zero instead of the user's current cursor.
+- **Resolution:** begin those edit groups with `textCursor()`, preserving the
+  native undo engine's starting position.
+- **Verification:** `block_kind_conversion_preserves_content_and_references`
+  reproduced the wrong target, then passed with an explicit focus-restoration
+  assertion after the fix. Compiler/native suite results are in the report.
 
 For each future defect, record:
 
@@ -557,6 +625,16 @@ milestone, evidence, and the resulting action.
 - **G11 — Backlinks are derived:** the inline reference is authoritative. Index
   rebuilds must preserve the document's intended references, including unresolved
   and unavailable targets, without silently binding them by name.
+- **G12 — Host toolchains can mix incompatible libraries:** the initial RHEL build
+  picked a Linuxbrew linker and newer GLib/fontconfig libraries, producing glibc
+  symbol errors. An isolated Docker toolchain avoids that mixture. Host SDK checks
+  used the system toolchain explicitly; no global PATH settings were changed.
+- **G13 — Text integrity and glyph rendering are different checks:** UTF-8 and
+  synthetic composition tests passed even when the container lacked CJK fonts.
+  The development image now has an explicit font baseline and regression check.
+- **G14 — Native display checks need explicit access:** the container GUI shares
+  only the X11/Xwayland socket and its authorization file. Headless tests use the
+  offscreen backend. Neither establishes real screen-reader or OS IME validation.
 
 ## Work log
 
@@ -564,6 +642,7 @@ milestone, evidence, and the resulting action.
 | --- | --- | --- | --- |
 | 2026-10-29 | M00 | Recorded the accepted discussion in this roadmap and added project management instructions. Repository inspection found no application files or commits. Document review and structural checks passed: 11 milestone definitions/table entries, 61 unique task IDs, matching exit criteria, accurate completion states, balanced code fences, and clean whitespace. Application tests are not applicable to this documentation-only change. | Begin M01 when implementation is requested; record prototype evidence before finalizing the editor design. |
 | 2026-10-29 | M00, M01–M03, M05, M07–M08 | Reviewed Zim's repository and official linking, backlinks, page-navigation, and search documentation. Added cross-referencing scope, data/index responsibilities, lifecycle rules, tasks, acceptance criteria, and management guidance. Document review, whitespace checks, and structural validation passed: 11 milestones, 67 unique tasks, and all 61 earlier task IDs/statuses preserved. Application tests are not applicable; implementation remains unstarted. | Begin M01 when implementation is requested, including validation of typed inline references in the editor prototype. |
+| 2026-10-29 | M01, M02 | Began execution with a C++17/Qt prototype, a Qt-independent document/tree module, 10 core and 27 interaction/comparison cases plus a launch check, two editor approaches, and measurement commands. The user selected MIT and required Docker-based dependency isolation; added the development image/wrapper and management guidance. Fixed BUG-001 through BUG-003 with regression checks. Detailed compiler, native/offscreen, and measurement evidence is in the feasibility report. | Finish M01.4 with real OS IME and screen-reader validation, then continue the production module/command foundation in M02. Storage and database milestones remain not started. |
 
 Future entries should record the steps changed, checks actually performed and
 their outcomes, relevant commits, encountered bugs, and the next concrete action.
