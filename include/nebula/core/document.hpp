@@ -11,8 +11,14 @@ enum class BlockKind { Paragraph, Heading, Bullet, Todo, Image, Attachment };
 enum class ReferenceKind { Page, Block };
 
 struct Reference {
+    Reference(ReferenceKind type=ReferenceKind::Page, std::string target={},
+              std::string unresolved={}, std::string scope={})
+        : kind(type),target_id(std::move(target)),unresolved_name(std::move(unresolved)),
+          database_scope(std::move(scope)) {}
     ReferenceKind kind = ReferenceKind::Page;
     std::string target_id;
+    std::string unresolved_name;
+    std::string database_scope;
 };
 
 struct Asset {

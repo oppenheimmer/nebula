@@ -9,14 +9,15 @@ direction. It supplies continuous selection and a shared native undo history whi
 allowing the prototype to map text blocks, references, lists, and painted objects
 to application-owned values.
 
-M01 remains **In progress**. Automated interaction, Unicode/composition-event,
-font, and accessible-text checks have run. Real OS input-method sessions and
-screen-reader use have not been validated. Those M01.4 checks must be recorded
-before treating the feasibility milestone as complete.
+This report records the initial feasibility evidence and measurements. On
+2026-10-30 the user moved actual OS input-method and screen-reader acceptance from
+M01.4 to M08.2. Those checks remain unperformed and are Linux release gates; they
+are not implied by automated composition/accessibility tests. Current milestone
+status and subsequent verification are tracked in [ROADMAP.md](../ROADMAP.md).
 
 ## Runnable comparison
 
-`nebula_prototype` has two tabs loaded with the same sample content:
+`nebula_prototype --demo --compare-editors` exposes two tabs with the same sample:
 
 - **Page-wide document:** a single native editor with stable block metadata,
   hierarchy operations, inline runs/references, and object representations.
@@ -163,7 +164,7 @@ known optimization target before M08, despite meeting the initial budgets here.
   libraries with the system glibc and failed to link. Explicit system-toolchain
   selection fixed that investigation. The Docker environment avoids the mixture.
 
-Outstanding M01.4 checklist:
+M08.2 manual desktop acceptance checklist:
 
 - [ ] Use an actual OS IME: start and change a composition, select a candidate,
   commit/cancel it, and verify Enter, cursor movement, selection, and undo around

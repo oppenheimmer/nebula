@@ -9,4 +9,6 @@ std::string encode_value(const PropertyValue& value);
 PropertyValue decode_value(const std::string& json);
 std::string encode_view(const View& view);
 void decode_view(View& view, const std::string& json);
+std::string encode_document(const Page& page);
+Page decode_document(const std::string& json);
 } // namespace nebula

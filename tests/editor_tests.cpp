@@ -89,6 +89,7 @@ private slots:
     void grip_drag_can_nest_and_outdent();
     void grip_drag_escape_and_invalid_target_do_not_edit();
     void grip_drag_scrolls_long_documents();
+    void unresolved_reference_keeps_scope_and_emits_intent();
 };
 
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
@@ -139,6 +140,19 @@ void EditorTests::grip_drag_scrolls_long_documents()
     QTRY_VERIFY_WITH_TIMEOUT(editor.verticalScrollBar()->value()>start,1000);
     QTest::keyClick(&editor,Qt::Key_Escape); QTest::mouseRelease(editor.viewport(),Qt::LeftButton);
     QCOMPARE(ids(editor.snapshot()),ids(long_page(100))); QVERIFY(!editor.document()->isUndoAvailable());
+}
+void EditorTests::unresolved_reference_keeps_scope_and_emits_intent()
+{
+    PageEditor editor; ready(editor); editor.go_to_block("a");
+    editor.insert_unresolved_reference("Future page","Future page","journal");
+    const auto page=editor.snapshot(); validate(page);
+    QCOMPARE(page.blocks[0].runs[0].reference->unresolved_name,std::string("Future page"));
+    QCOMPARE(page.blocks[0].runs[0].reference->database_scope,std::string("journal"));
+    QSignalSpy unresolved(&editor,&PageEditor::unresolved_reference_activated); QSignalSpy resolved(&editor,&PageEditor::reference_activated);
+    at(editor,2); const auto point=editor.cursorRect().center();
+    QTest::mouseClick(editor.viewport(),Qt::LeftButton,Qt::ControlModifier,point);
+    QCOMPARE(unresolved.count(),1); QCOMPARE(resolved.count(),0); QCOMPARE(unresolved[0][0].toString(),QString("Future page"));
+    editor.undo(); QCOMPARE(editor.toPlainText(),QString("alpha\nbravo\ncharlie"));
 }
 
 void EditorTests::load_preserves_model()

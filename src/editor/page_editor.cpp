@@ -32,6 +32,8 @@ constexpr int Checked = QTextFormat::UserProperty + 5;
 constexpr int RefKind = QTextFormat::UserProperty + 6;
 constexpr int RefTarget = QTextFormat::UserProperty + 7;
 constexpr int CardImage = QTextFormat::UserProperty + 8;
+constexpr int RefName = QTextFormat::UserProperty + 9;
+constexpr int RefScope = QTextFormat::UserProperty + 10;
 constexpr int CardObject = QTextFormat::UserObject + 1;
 
 QString new_id() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
@@ -78,7 +80,9 @@ QTextCharFormat run_format(const Run& run)
         format.setAnchorHref("nebula:" + QString::fromStdString(run.reference->target_id));
         format.setProperty(RefKind, static_cast<int>(run.reference->kind));
         format.setProperty(RefTarget, QString::fromStdString(run.reference->target_id));
-        format.setForeground(QColor("#236b9a"));
+        format.setProperty(RefName, QString::fromStdString(run.reference->unresolved_name));
+        format.setProperty(RefScope, QString::fromStdString(run.reference->database_scope));
+        format.setForeground(QColor(run.reference->target_id.empty()?"#a16b3b":"#236b9a"));
         format.setFontUnderline(true);
     }
     if (run.asset) {
@@ -251,7 +255,9 @@ Page PageEditor::snapshot() const
             run.italic = character.fontItalic();
             if (character.hasProperty(RefTarget))
                 run.reference = Reference{static_cast<ReferenceKind>(character.intProperty(RefKind)),
-                                          character.stringProperty(RefTarget).toStdString()};
+                                          character.stringProperty(RefTarget).toStdString(),
+                                          character.stringProperty(RefName).toStdString(),
+                                          character.stringProperty(RefScope).toStdString()};
             if (character.objectType() == CardObject)
                 run.asset = Asset{character.boolProperty(CardImage),
                                   character.stringProperty(AssetLabel).toStdString()};
@@ -526,6 +532,16 @@ void PageEditor::toggle_bold()
     });
 }
 
+void PageEditor::insert_unresolved_reference(const QString& label, const QString& name, const QString& scope)
+{
+    if (name.isEmpty()) return;
+    mutate([&] {
+        auto cursor=textCursor();
+        Run run{label.toStdString(),false,false,Reference{ReferenceKind::Page,"",name.toStdString(),scope.toStdString()}};
+        cursor.insertText(label,run_format(run)); cursor.setCharFormat(QTextCharFormat{}); setTextCursor(cursor);
+    });
+}
+
 void PageEditor::toggle_italic()
 {
     mutate([&] {
@@ -608,7 +624,9 @@ void PageEditor::mouseReleaseEvent(QMouseEvent* event)
         cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
         const auto format = cursor.charFormat();
         if (format.hasProperty(RefTarget)) {
-            emit reference_activated(format.intProperty(RefKind), format.stringProperty(RefTarget));
+            if (!format.stringProperty(RefName).isEmpty())
+                emit unresolved_reference_activated(format.stringProperty(RefName),format.stringProperty(RefScope));
+            else emit reference_activated(format.intProperty(RefKind), format.stringProperty(RefTarget));
             event->accept();
             return;
         }

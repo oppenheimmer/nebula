@@ -14,6 +14,7 @@ struct DatabaseCloser {
 };
 
 struct LinkEdge { std::string source_page, source_block, source_title, target_id; ReferenceKind kind; };
+struct DeletedBlockGroup { std::string id, page_id, page_title, label; };
 
 class Workspace {
 public:
@@ -29,11 +30,14 @@ public:
     PropertyDefinition add_property(const std::string& database, const std::string& name, PropertyKind kind);
     std::vector<PropertyDefinition> properties(const std::string& database) const;
     PageRecord create_page(const std::string& database, const std::string& title,
-                          const std::map<std::string,PropertyValue>& properties = {});
+                          const std::map<std::string,PropertyValue>& properties = {},
+                          const std::vector<Block>& initial_blocks = {});
     PageRecord load_page(const std::string& id) const;
     std::vector<PageRecord> pages(const std::string& database, bool include_trashed = false) const;
     void save_page(PageRecord& page); // Optimistic revision check; updates revision only after commit.
     void trash_page(const std::string& id, bool trashed);
+    std::vector<DeletedBlockGroup> deleted_blocks() const;
+    PageRecord restore_deleted_blocks(const std::string& id);
     void save_view(View& view);
     std::vector<View> views(const std::string& database) const;
     std::vector<LinkEdge> backlinks(ReferenceKind kind, const std::string& id) const;

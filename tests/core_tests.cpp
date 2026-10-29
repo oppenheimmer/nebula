@@ -155,6 +155,14 @@ int main()
             rejects([&]{relocate_subtree(page,"c","","missing");});
             check(ids(page)==before,"Rejected drop changed the document");
             check(!relocate_subtree(page,"a","b",""),"No-op move created a change");
+        }},
+        {"unresolved references preserve intent separately from identity", [] {
+            auto page=tree(); page.blocks[0].runs[0].reference=Reference{ReferenceKind::Page,"","Future page","database"}; validate(page);
+            move_subtree(page,"a",1);
+            const auto& ref=page.blocks[2].runs[0].reference;
+            check(ref && ref->target_id.empty() && ref->unresolved_name=="Future page","Unresolved intent changed");
+            page.blocks[2].runs[0].reference->target_id="ambiguous";
+            rejects([&]{validate(page);});
         }}
     };
     int failures = 0;

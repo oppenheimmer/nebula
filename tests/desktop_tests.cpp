@@ -108,6 +108,8 @@ private slots:
     void database_and_trash_actions_preserve_records();
     void journal_entry_preserves_the_selected_calendar_date();
     void mouse_reordered_subtree_persists_and_undoes();
+    void unresolved_link_picker_does_not_create_or_bind_pages();
+    void deleted_blocks_can_be_restored_from_the_window();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -501,6 +503,29 @@ void DesktopTests::mouse_reordered_subtree_persists_and_undoes()
     QVERIFY(window.flush()); const auto saved=w.load_page(id); QCOMPARE(saved.document.blocks[3].id,std::string("list"));
     QCOMPARE(saved.document.blocks[4].parent_id,std::string("list"));
     editor->undo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(id).document.blocks[2].id,std::string("list"));
+}
+void DesktopTests::unresolved_link_picker_does_not_create_or_bind_pages()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); const auto p=w.create_page(db.id,"Source");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(p.document.id));
+    QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->findChild<QLineEdit*>("unresolvedName")->setText("Future"); dialog->findChild<QPushButton*>("insertUnresolved")->click(); });
+    window.findChild<QAction*>("insertLink")->trigger(); QVERIFY(window.flush());
+    QCOMPARE(w.pages(db.id).size(),std::size_t(1)); const auto ref=w.load_page(p.document.id).document.blocks[0].runs[0].reference;
+    QVERIFY(ref); QVERIFY(ref->target_id.empty()); QCOMPARE(ref->database_scope,db.id);
+    const auto same=w.create_page(db.id,"Future");
+    QVERIFY(w.backlinks(ReferenceKind::Page,same.document.id).empty());
+    window.page_editor()->unresolved_reference_activated("Future",QString::fromStdString(db.id));
+    QCOMPARE(window.page_editor()->snapshot().id,p.document.id); QCOMPARE(w.pages(db.id).size(),std::size_t(2));
+}
+void DesktopTests::deleted_blocks_can_be_restored_from_the_window()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); auto p=w.create_page(db.id,"Recover");
+    p.document.blocks.push_back({"recover-me","",BlockKind::Paragraph,{{"Deleted content"}}}); w.save_page(p);
+    p.document.blocks.pop_back(); w.save_page(p); QCOMPARE(w.deleted_blocks().size(),std::size_t(1));
+    WorkspaceWindow window(w); show_window(window);
+    QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); auto* list=dialog->findChild<QListWidget*>("trashItems"); QCOMPARE(list->count(),1); list->setCurrentRow(0); dialog->findChild<QPushButton*>("restoreSelected")->click(); dialog->accept(); });
+    window.findChild<QAction*>("restoreTrash")->trigger(); QVERIFY(w.deleted_blocks().empty());
+    QVERIFY(window.open_page(p.document.id)); QCOMPARE(window.page_editor()->snapshot().blocks[1].id,std::string("recover-me"));
 }
 
 QTEST_MAIN(DesktopTests)

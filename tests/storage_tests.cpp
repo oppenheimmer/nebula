@@ -38,6 +38,14 @@ private slots:
     void session_retains_failed_edits_and_blocks_navigation();
     void command_line_backup_and_restore();
     void killed_process_before_and_after_commit();
+    void unresolved_references_never_bind_by_title();
+    void deleted_subtrees_survive_restart_and_restore();
+    void partial_undo_then_restore_preserves_existing_edits();
+    void restore_requires_the_deleted_parent_and_page();
+    void version_two_upgrade_preserves_notes();
+    void restoring_siblings_in_reverse_order_keeps_their_order();
+    void version_three_upgrade_preserves_deleted_fragments();
+    void partially_restored_sibling_still_anchors_recovery();
 };
 void StorageTests::dates_and_types()
 {
@@ -128,6 +136,7 @@ void StorageTests::invalid_save_rolls_back_everything()
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.save_page(p));
     auto saved=w.load_page(p.document.id); QCOMPARE(saved.title,std::string("Keep title"));
     QCOMPARE(saved.revision,std::int64_t(1)); QVERIFY(saved.properties.empty()); QCOMPARE(p.revision,std::int64_t(1));
+    QVERIFY(w.deleted_blocks().empty());
     saved.properties[n.id]=std::string("wrong");
     QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.save_page(saved));
     saved.properties.clear(); saved.document.blocks[0].parent_id="missing";
@@ -246,6 +255,117 @@ void StorageTests::killed_process_before_and_after_commit()
         QCOMPARE(page.revision,mode=="commit"?std::int64_t(2):std::int64_t(1));
         if (mode=="pending") QVERIFY_THROWS_EXCEPTION(std::runtime_error,sql(folder.filePath("nebula.sqlite3"),"SELECT * FROM interrupted_marker"));
     }
+}
+void StorageTests::unresolved_references_never_bind_by_title()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("source"))); const auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Source"); page.document.blocks[0].runs={{"A future page",true,false,Reference{ReferenceKind::Page,"","Future",db.id}}};
+    w.save_page(page); w.rebuild_links(); auto same_name=w.create_page(db.id,"Future");
+    const auto ref=w.load_page(page.document.id).document.blocks[0].runs[0].reference;
+    QVERIFY(ref); QVERIFY(ref->target_id.empty()); QCOMPARE(ref->unresolved_name,std::string("Future")); QCOMPARE(ref->database_scope,db.id);
+    QVERIFY(w.backlinks(ReferenceKind::Page,same_name.document.id).empty()); QVERIFY(w.backlinks(ReferenceKind::Page,"").empty());
+    const auto encoded=encode_document(page.document); QCOMPARE(encode_document(decode_document(encoded)),encoded);
+    w.backup_to(path(folder.filePath("backup"))); auto restored=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
+    QCOMPARE(restored.load_page(page.document.id).document.blocks[0].runs[0].reference->unresolved_name,std::string("Future"));
+}
+void StorageTests::deleted_subtrees_survive_restart_and_restore()
+{
+    QTemporaryDir folder; std::string id,group; Page original;
+    {
+        auto w=Workspace::open(path(folder.filePath("source"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Restore subtree",{},sample_page().blocks); id=page.document.id;
+        original=page.document;
+        page.document.blocks.erase(page.document.blocks.begin()+2,page.document.blocks.begin()+4); w.save_page(page);
+        const auto groups=w.deleted_blocks(); QCOMPARE(groups.size(),std::size_t(1)); group=groups[0].id;
+    }
+    auto w=Workspace::open(path(folder.filePath("source"))); const auto restored=w.restore_deleted_blocks(group);
+    QCOMPARE(encode_document(restored.document),encode_document(original)); QVERIFY(w.deleted_blocks().empty());
+    QCOMPARE(w.backlinks(ReferenceKind::Page,id).size(),std::size_t(1));
+    auto p=w.load_page(id); p.document.blocks.erase(p.document.blocks.begin()+7); w.save_page(p);
+    const auto image_group=w.deleted_blocks()[0].id;
+    w.backup_to(path(folder.filePath("backup"))); auto backup=Workspace::open(path(folder.filePath("backup")));
+    const auto image=backup.restore_deleted_blocks(image_group);
+    QCOMPARE(image.document.blocks[7].asset_label,std::string("Sample image representation"));
+}
+void StorageTests::partial_undo_then_restore_preserves_existing_edits()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Partial undo",{},{{"a","",BlockKind::Paragraph,{{"Parent"}}},{"b","a",BlockKind::Paragraph,{{"Child"}}},{"c","a",BlockKind::Paragraph,{{"Last child"}}},{"d","",BlockKind::Paragraph,{{"Keep"}}}});
+    const auto original=page.document; page.document.blocks.erase(page.document.blocks.begin(),page.document.blocks.begin()+3); w.save_page(page);
+    const auto group=w.deleted_blocks()[0].id;
+    page.document.blocks.insert(page.document.blocks.begin(),original.blocks.begin(),original.blocks.begin()+2); page.document.blocks[1].runs[0].text="Edited restored child"; w.save_page(page);
+    QCOMPARE(w.deleted_blocks().size(),std::size_t(1)); const auto restored=w.restore_deleted_blocks(group);
+    QCOMPARE(restored.document.blocks.size(),std::size_t(4)); QCOMPARE(restored.document.blocks[1].runs[0].text,std::string("Edited restored child"));
+    QCOMPARE(restored.document.blocks[2].id,std::string("c")); QVERIFY(w.deleted_blocks().empty());
+}
+void StorageTests::restore_requires_the_deleted_parent_and_page()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Dependencies",{},{{"a","",BlockKind::Paragraph,{{"Parent"}}},{"b","a",BlockKind::Paragraph,{{"Child"}}},{"c","",BlockKind::Paragraph,{{"Keep"}}}});
+    page.document.blocks.erase(page.document.blocks.begin()+1); w.save_page(page); const auto child=w.deleted_blocks()[0].id;
+    page.document.blocks.erase(page.document.blocks.begin()); w.save_page(page); const auto parent=w.deleted_blocks()[1].id;
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.restore_deleted_blocks(child));
+    w.trash_page(page.document.id,true); QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.restore_deleted_blocks(parent)); w.trash_page(page.document.id,false);
+    w.restore_deleted_blocks(parent); const auto restored=w.restore_deleted_blocks(child);
+    QCOMPARE(restored.document.blocks[1].parent_id,std::string("a"));
+}
+void StorageTests::version_two_upgrade_preserves_notes()
+{
+    QTemporaryDir folder; std::string id;
+    { auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); id=w.create_page(db.id,"Older notes").document.id; }
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE deleted_blocks; PRAGMA user_version=2");
+    auto w=Workspace::open(path(folder.path())); QCOMPARE(w.load_page(id).title,std::string("Older notes")); QVERIFY(w.deleted_blocks().empty());
+}
+void StorageTests::restoring_siblings_in_reverse_order_keeps_their_order()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Order",{},{{"a","",BlockKind::Paragraph,{{"A"}}},{"b","",BlockKind::Paragraph,{{"B"}}},{"c","",BlockKind::Paragraph,{{"C"}}}});
+    page.document.blocks.erase(page.document.blocks.begin(),page.document.blocks.begin()+2); w.save_page(page);
+    const auto groups=w.deleted_blocks(); QCOMPARE(groups.size(),std::size_t(2));
+    w.restore_deleted_blocks(groups[1].id); const auto restored=w.restore_deleted_blocks(groups[0].id);
+    QCOMPARE(restored.document.blocks[0].id,std::string("a")); QCOMPARE(restored.document.blocks[1].id,std::string("b"));
+}
+void StorageTests::version_three_upgrade_preserves_deleted_fragments()
+{
+    QTemporaryDir folder; std::string page_id,group_id,workspace_id;
+    {
+        auto w=Workspace::open(path(folder.path())); workspace_id=w.id(); const auto db=w.create_database("Notes");
+        auto page=w.create_page(db.id,"Legacy recovery",{},{{"a","",BlockKind::Paragraph,{{"Keep deleted text",true}}},{"b","",BlockKind::Paragraph,{{"Next sibling"}}}});
+        page_id=page.document.id; page.document.blocks.erase(page.document.blocks.begin()); w.save_page(page);
+        group_id=w.deleted_blocks()[0].id;
+    }
+    sql(folder.filePath("nebula.sqlite3"),R"SQL(
+        BEGIN;
+        CREATE TABLE legacy_deleted_blocks(id TEXT PRIMARY KEY NOT NULL,
+            page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+            parent_id TEXT NOT NULL, anchor_id TEXT NOT NULL, fragment TEXT NOT NULL,
+            restored INTEGER NOT NULL DEFAULT 0 CHECK(restored IN(0,1)),
+            removed_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+        INSERT INTO legacy_deleted_blocks SELECT id,page_id,parent_id,anchor_id,fragment,restored,removed_at FROM deleted_blocks;
+        DROP TABLE deleted_blocks;
+        ALTER TABLE legacy_deleted_blocks RENAME TO deleted_blocks;
+        CREATE INDEX deleted_blocks_page ON deleted_blocks(page_id,restored);
+        PRAGMA user_version=3;
+        COMMIT;
+    )SQL");
+    auto w=Workspace::open(path(folder.path())); QCOMPARE(w.id(),workspace_id);
+    QCOMPARE(w.deleted_blocks()[0].id,group_id);
+    const auto restored=w.restore_deleted_blocks(group_id); QCOMPARE(restored.document.id,page_id);
+    QCOMPARE(restored.document.blocks[0].id,std::string("a")); QCOMPARE(restored.document.blocks[1].id,std::string("b"));
+    QCOMPARE(restored.document.blocks[0].runs[0].text,std::string("Keep deleted text")); QVERIFY(restored.document.blocks[0].runs[0].bold);
+    QVERIFY(w.deleted_blocks().empty());
+}
+void StorageTests::partially_restored_sibling_still_anchors_recovery()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Partial sibling",{},{{"a","",BlockKind::Paragraph,{{"A"}}},{"b","",BlockKind::Paragraph,{{"B"}}},{"child","b",BlockKind::Paragraph,{{"Child"}}},{"c","",BlockKind::Paragraph,{{"C"}}}});
+    const auto original=page.document; page.document.blocks.erase(page.document.blocks.begin(),page.document.blocks.begin()+3); w.save_page(page);
+    const auto groups=w.deleted_blocks(); QCOMPARE(groups.size(),std::size_t(2));
+    page.document.blocks.insert(page.document.blocks.begin(),original.blocks[1]);
+    page.document.blocks[0].runs[0].text="B edited after partial undo"; w.save_page(page);
+    const auto restored=w.restore_deleted_blocks(groups[0].id);
+    QCOMPARE(restored.document.blocks[0].id,std::string("a")); QCOMPARE(restored.document.blocks[1].id,std::string("b"));
+    QCOMPARE(restored.document.blocks[1].runs[0].text,std::string("B edited after partial undo"));
+    QCOMPARE(w.deleted_blocks().size(),std::size_t(1));
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

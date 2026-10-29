@@ -9,7 +9,7 @@ namespace nebula {
 namespace {
 
 constexpr int ApplicationId = 0x4e454255; // NEBU
-constexpr int SchemaVersion = 2;
+constexpr int SchemaVersion = 4;
 
 void execute(sqlite3* database, const std::string& sql)
 {
@@ -89,7 +89,7 @@ Workspace Workspace::open(const std::filesystem::path& directory)
             version = "1";
         } else if (application != std::to_string(ApplicationId)) {
             throw std::runtime_error("This folder contains a database that is not a Nebula workspace");
-        } else if (version != "1" && version != std::to_string(SchemaVersion)) {
+        } else if (version != "1" && version != "2" && version != "3" && version != std::to_string(SchemaVersion)) {
             throw std::runtime_error("This workspace format is not supported by this version of Nebula");
         }
         const auto id = scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
@@ -127,6 +127,27 @@ Workspace Workspace::open(const std::filesystem::path& directory)
                     target_id TEXT NOT NULL, PRIMARY KEY(source_block,run_index));
                 CREATE INDEX links_target ON links(target_kind,target_id);
                 PRAGMA user_version=2;
+            )SQL");
+            version="2";
+        }
+        if (version=="2") {
+            execute(raw,R"SQL(
+                CREATE TABLE deleted_blocks(id TEXT PRIMARY KEY NOT NULL,
+                    page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+                    parent_id TEXT NOT NULL, anchor_id TEXT NOT NULL, fragment TEXT NOT NULL,
+                    restored INTEGER NOT NULL DEFAULT 0 CHECK(restored IN(0,1)),
+                    removed_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%dT%H:%M:%fZ','now')));
+                CREATE INDEX deleted_blocks_page ON deleted_blocks(page_id,restored);
+                PRAGMA user_version=3;
+            )SQL");
+            version="3";
+        }
+        if (version=="3") {
+            execute(raw,R"SQL(
+                ALTER TABLE deleted_blocks ADD COLUMN operation_id TEXT NOT NULL DEFAULT '';
+                ALTER TABLE deleted_blocks ADD COLUMN original_position INTEGER NOT NULL DEFAULT 0;
+                UPDATE deleted_blocks SET operation_id=id;
+                PRAGMA user_version=4;
             )SQL");
         }
         if (scalar(raw, "PRAGMA quick_check") != "ok")

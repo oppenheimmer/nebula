@@ -81,7 +81,8 @@ std::string encode_block(const Block& block)
     QJsonArray runs;
     for (const auto& run : block.runs) {
         QJsonObject out{{"text", q(run.text)}, {"bold", run.bold}, {"italic", run.italic}};
-        if (run.reference) out["reference"] = QJsonObject{{"kind", int(run.reference->kind)}, {"target", q(run.reference->target_id)}};
+        if (run.reference) out["reference"] = QJsonObject{{"kind", int(run.reference->kind)}, {"target", q(run.reference->target_id)},
+            {"unresolved_name",q(run.reference->unresolved_name)},{"scope",q(run.reference->database_scope)}};
         if (run.asset) out["asset"] = QJsonObject{{"image", run.asset->image}, {"label", q(run.asset->label)}};
         runs.append(out);
     }
@@ -97,6 +98,8 @@ void decode_block(Block& block, const std::string& json)
         if (run.contains("reference")) {
             const auto ref = object(run["reference"]);
             out.reference = Reference{static_cast<ReferenceKind>(integer(ref["kind"], 1)), s(ref["target"])};
+            if (ref.contains("unresolved_name")) out.reference->unresolved_name=s(ref["unresolved_name"]);
+            if (ref.contains("scope")) out.reference->database_scope=s(ref["scope"]);
         }
         if (run.contains("asset")) {
             const auto asset = object(run["asset"]);
@@ -127,5 +130,21 @@ void decode_view(View& view, const std::string& json)
             read_value(object(filter["value"]))});
     }
     view.sort_property = s(obj["sort"]); view.ascending = flag(obj["ascending"]);
+}
+std::string encode_document(const Page& page)
+{
+    validate(page); QJsonArray blocks;
+    for (const auto& block:page.blocks) blocks.append(QJsonObject{{"id",q(block.id)},
+        {"parent",q(block.parent_id)},{"kind",int(block.kind)},{"payload",parse(encode_block(block))}});
+    return serialize({{"version",1},{"id",q(page.id)},{"blocks",blocks}});
+}
+Page decode_document(const std::string& json)
+{
+    const auto root=parse(json); Page page{s(root["id"]),{}};
+    for (const auto& entry:array(root["blocks"])) {
+        const auto obj=object(entry); Block block{s(obj["id"]),s(obj["parent"]),BlockKind(integer(obj["kind"],5))};
+        decode_block(block,serialize(object(obj["payload"]))); page.blocks.push_back(std::move(block));
+    }
+    validate(page); return page;
 }
 } // namespace nebula

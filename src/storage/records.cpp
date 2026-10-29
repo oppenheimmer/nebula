@@ -19,11 +19,43 @@ void insert_blocks(sqlite3* db, const Page& page) {
             .bind(5,int(block.kind)).bind(6,encode_block(block)).done();
         for (std::size_t r = 0; r < block.runs.size(); ++r) {
             const auto& ref = block.runs[r].reference;
-            if (!ref) continue;
+            if (!ref || ref->target_id.empty()) continue;
             Statement edge(db, "INSERT INTO links(source_page,source_block,run_index,target_kind,target_id) VALUES(?,?,?,?,?)");
             edge.bind(1,page.id).bind(2,block.id).bind(3,std::int64_t(r)).bind(4,int(ref->kind)).bind(5,ref->target_id).done();
         }
     }
+}
+void archive_removed(sqlite3* db,const Page& previous,const Page& next) {
+    std::unordered_set<std::string> live,removed;
+    for (const auto& block:next.blocks) live.insert(block.id);
+    for (const auto& block:previous.blocks) if (!live.count(block.id)) removed.insert(block.id);
+    const auto operation=removed.empty()?std::string{}:sql::id(db);
+    for (std::size_t i=0;i<previous.blocks.size();++i) {
+        const auto& root=previous.blocks[i];
+        if (!removed.count(root.id) || removed.count(root.parent_id)) continue;
+        Page fragment{previous.id,{root}}; fragment.blocks[0].parent_id.clear();
+        std::unordered_set<std::string> descendants{root.id},included{root.id};
+        auto end=i+1;
+        while (end<previous.blocks.size() && descendants.count(previous.blocks[end].parent_id)) {
+            const auto& child=previous.blocks[end++]; descendants.insert(child.id);
+            if (removed.count(child.id) && included.count(child.parent_id)) { fragment.blocks.push_back(child); included.insert(child.id); }
+        }
+        std::string anchor;
+        for (auto j=end;j<previous.blocks.size();++j)
+            if (previous.blocks[j].parent_id==root.parent_id && live.count(previous.blocks[j].id)) { anchor=previous.blocks[j].id; break; }
+        Statement add(db,"INSERT INTO deleted_blocks(id,page_id,parent_id,anchor_id,fragment,operation_id,original_position) VALUES(?,?,?,?,?,?,?)");
+        add.bind(1,sql::id(db)).bind(2,previous.id).bind(3,root.parent_id).bind(4,anchor).bind(5,encode_document(fragment))
+            .bind(6,operation).bind(7,std::int64_t(i)).done();
+    }
+    Statement groups(db,"SELECT id,fragment FROM deleted_blocks WHERE page_id=? AND NOT restored"); groups.bind(1,next.id);
+    std::vector<std::string> completed;
+    while (groups.row()) {
+        const auto fragment=decode_document(groups.text(1));
+        if (std::all_of(fragment.blocks.begin(),fragment.blocks.end(),[&](const auto& block){return live.count(block.id);})) {
+            completed.push_back(groups.text(0));
+        }
+    }
+    for (const auto& id:completed) { Statement done(db,"UPDATE deleted_blocks SET restored=1 WHERE id=?"); done.bind(1,id).done(); }
 }
 } // namespace
 Database Workspace::create_database(const std::string& name)
@@ -68,11 +100,14 @@ std::vector<PropertyDefinition> Workspace::properties(const std::string& databas
     return result;
 }
 PageRecord Workspace::create_page(const std::string& database, const std::string& title,
-                                 const std::map<std::string,PropertyValue>& values)
+                                 const std::map<std::string,PropertyValue>& values,
+                                 const std::vector<Block>& initial_blocks)
 {
     sql::Transaction transaction(database_.get());
     const auto page_id = sql::id(database_.get());
     PageRecord page{{page_id, {{sql::id(database_.get()), "", BlockKind::Paragraph, {}}}}, database, title, values, 1, false};
+    if (!initial_blocks.empty()) page.document.blocks=initial_blocks;
+    validate(page.document);
     const auto defs=properties(database);
     for (const auto& entry:values) {
         const auto found=std::find_if(defs.begin(),defs.end(),[&](const auto& def){return def.id==entry.first;});
@@ -125,9 +160,11 @@ void Workspace::save_page(PageRecord& page)
         validate_value(def->kind,value);
     }
     sql::Transaction transaction(database_.get());
+    const auto previous=load_page(page.document.id);
     Statement update(database_.get(), "UPDATE pages SET database_id=?,title=?,trashed=?,revision=revision+1,modified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND revision=?");
     update.bind(1,page.database_id).bind(2,page.title).bind(3,page.trashed).bind(4,page.document.id).bind(5,page.revision).done();
     sql::changed(database_.get());
+    archive_removed(database_.get(),previous.document,page.document);
     Statement remove(database_.get(), "DELETE FROM blocks WHERE page_id=?"); remove.bind(1,page.document.id).done();
     insert_blocks(database_.get(),page.document);
     Statement clear(database_.get(), "DELETE FROM property_values WHERE page_id=?"); clear.bind(1,page.document.id).done();
@@ -141,6 +178,67 @@ void Workspace::trash_page(const std::string& id, bool trashed)
 {
     Statement update(database_.get(), "UPDATE pages SET trashed=?,revision=revision+1,modified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?");
     update.bind(1,trashed).bind(2,id).done(); sql::changed(database_.get());
+}
+std::vector<DeletedBlockGroup> Workspace::deleted_blocks() const
+{
+    Statement query(database_.get(),"SELECT t.id,t.page_id,p.title,t.fragment FROM deleted_blocks t JOIN pages p ON p.id=t.page_id WHERE NOT t.restored ORDER BY t.removed_at,t.rowid");
+    std::vector<DeletedBlockGroup> result;
+    while (query.row()) {
+        const auto fragment=decode_document(query.text(3));
+        std::string label=fragment.blocks[0].asset_label;
+        if (label.empty()) for (const auto& run:fragment.blocks[0].runs) label+=run.text;
+        result.push_back({query.text(0),query.text(1),query.text(2),label.empty()?"Empty block":label});
+    }
+    return result;
+}
+PageRecord Workspace::restore_deleted_blocks(const std::string& id)
+{
+    std::string page_id,parent,anchor,payload,operation;
+    std::int64_t original_position=0;
+    {
+        Statement query(database_.get(),"SELECT page_id,parent_id,anchor_id,fragment,operation_id,original_position FROM deleted_blocks WHERE id=? AND NOT restored"); query.bind(1,id);
+        if (!query.row()) throw std::runtime_error("Deleted blocks are already restored or unavailable");
+        page_id=query.text(0); parent=query.text(1); anchor=query.text(2); payload=query.text(3);
+        operation=query.text(4); original_position=query.number(5);
+    }
+    auto page=load_page(page_id);
+    const auto dbs=databases();
+    if (page.trashed || std::none_of(dbs.begin(),dbs.end(),[&](const auto& db){return db.id==page.database_id;}))
+        throw std::runtime_error("Restore the page and its database before restoring these blocks");
+    const auto fragment=decode_document(payload);
+    auto locate=[&](const std::string& block_id) { return std::find_if(page.document.blocks.begin(),page.document.blocks.end(),[&](const auto& block){return block.id==block_id;}); };
+    // A later sibling root may be live even if its children are still deleted.
+    // Prefer it over the fallback live anchor so restoration order is irrelevant.
+    {
+        Statement siblings(database_.get(),"SELECT fragment FROM deleted_blocks WHERE operation_id=? AND parent_id=? AND original_position>? ORDER BY original_position");
+        siblings.bind(1,operation).bind(2,parent).bind(3,original_position);
+        while (siblings.row()) {
+            const auto sibling=decode_document(siblings.text(0));
+            const auto found=locate(sibling.blocks[0].id);
+            if (found!=page.document.blocks.end() && found->parent_id==parent) { anchor=found->id; break; }
+        }
+    }
+    for (std::size_t i=0;i<fragment.blocks.size();++i) {
+        auto block=fragment.blocks[i];
+        if (locate(block.id)!=page.document.blocks.end()) continue;
+        if (i==0) block.parent_id=parent;
+        auto position=page.document.blocks.size();
+        if (!block.parent_id.empty()) {
+            const auto parent_block=locate(block.parent_id);
+            if (parent_block==page.document.blocks.end()) throw std::runtime_error("Restore the deleted parent block first");
+            std::unordered_set<std::string> descendants{parent_block->id};
+            auto end=parent_block+1;
+            while (end!=page.document.blocks.end() && descendants.count(end->parent_id)) { descendants.insert(end->id); ++end; }
+            position=std::size_t(end-page.document.blocks.begin());
+        }
+        std::string before=i==0?anchor:std::string{};
+        if (i) for (auto j=i+1;j<fragment.blocks.size();++j)
+            if (fragment.blocks[j].parent_id==block.parent_id && locate(fragment.blocks[j].id)!=page.document.blocks.end()) { before=fragment.blocks[j].id; break; }
+        const auto next=locate(before);
+        if (next!=page.document.blocks.end() && next->parent_id==block.parent_id) position=std::size_t(next-page.document.blocks.begin());
+        page.document.blocks.insert(page.document.blocks.begin()+position,std::move(block));
+    }
+    validate(page.document); save_page(page); return page;
 }
 void Workspace::save_view(View& view)
 {
@@ -182,6 +280,7 @@ std::vector<View> Workspace::views(const std::string& database) const
 }
 std::vector<LinkEdge> Workspace::backlinks(ReferenceKind kind, const std::string& id) const
 {
+    if (id.empty()) return {};
     Statement query(database_.get(), "SELECT l.source_page,l.source_block,p.title,l.target_id,l.target_kind FROM links l JOIN pages p ON p.id=l.source_page JOIN databases d ON d.id=p.database_id WHERE NOT p.trashed AND NOT d.trashed AND ((l.target_kind=? AND l.target_id=?) OR (?=0 AND l.target_kind=1 AND l.target_id IN (SELECT id FROM blocks WHERE page_id=?))) ORDER BY p.title,l.source_block,l.run_index");
     query.bind(1,int(kind)).bind(2,id).bind(3,int(kind)).bind(4,id); std::vector<LinkEdge> result;
     while (query.row()) result.push_back({query.text(0),query.text(1),query.text(2),query.text(3),ReferenceKind(query.number(4))});
@@ -197,7 +296,7 @@ void Workspace::rebuild_links()
         for (const auto& block : page.document.blocks)
             for (std::size_t i=0; i<block.runs.size(); ++i) {
                 const auto& ref = block.runs[i].reference;
-                if (!ref) continue;
+                if (!ref || ref->target_id.empty()) continue;
                 Statement edge(database_.get(),"INSERT INTO links(source_page,source_block,run_index,target_kind,target_id) VALUES(?,?,?,?,?)");
                 edge.bind(1,page.document.id).bind(2,block.id).bind(3,std::int64_t(i)).bind(4,int(ref->kind)).bind(5,ref->target_id).done();
             }

@@ -27,6 +27,7 @@ public:
     void set_block_kind(BlockKind kind);
     void toggle_checked();
     void insert_reference(const QString& label, ReferenceKind kind, const QString& target_id);
+    void insert_unresolved_reference(const QString& label, const QString& name, const QString& database_scope);
     void insert_card(bool image, const QString& label);
     void toggle_bold();
     void toggle_italic();
@@ -35,6 +36,7 @@ public:
 
 signals:
     void reference_activated(int kind, const QString& target_id);
+    void unresolved_reference_activated(const QString& name, const QString& database_scope);
 
 protected:
     void paintEvent(QPaintEvent* event) override;

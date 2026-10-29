@@ -75,6 +75,9 @@ prerequisite. Keep SDKs, container build output, and tool caches out of Git.
   dependencies; record a reason if work changes their order or scope.
 - Update affected checkboxes, milestone status, and the work log with the change.
   Use Not started, In progress, Blocked, or Complete; avoid invented percentages.
+- When rescheduling tasks, move their full requirements into the destination
+  milestone and renumber the affected lists in execution order. Remove old-location
+  pointers; record the scheduling decision once in the work log.
 - Keep progress updates, completed-check results, encountered bugs, and remaining
   milestone work in `ROADMAP.md`. Keep `README.md` focused on the project,
   setup, usage, and material data-handling limitations; do not add progress snippets.

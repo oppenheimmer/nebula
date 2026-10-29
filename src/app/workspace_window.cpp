@@ -167,6 +167,9 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         } catch (const std::exception& e) { error(this,e); refresh_table(); }
     });
     connect(page_editor(),&PageEditor::reference_activated,this,[this](int kind,const QString& id){ follow_reference(ReferenceKind(kind),s(id)); });
+    connect(page_editor(),&PageEditor::unresolved_reference_activated,this,[this](const QString& name,const QString&){
+        statusBar()->showMessage("Unresolved link: "+name+". Select its text and use Link… to choose a target.",8000);
+    });
     connect(backlinks_,&QListWidget::itemActivated,this,[this](QListWidgetItem* item){ open_page(s(item->data(Qt::UserRole).toString()),s(item->data(Qt::UserRole+1).toString())); });
     if (workspace_.databases(true).empty()) {
         const auto db=workspace_.create_database("Journal");
@@ -327,13 +330,28 @@ void WorkspaceWindow::edit_view(bool create)
 }
 void WorkspaceWindow::show_trash()
 {
+    if (!flush()) return;
     QDialog dialog(this); dialog.setWindowTitle("Restore from trash"); auto* layout=new QVBoxLayout(&dialog); auto* list=new QListWidget(&dialog); list->setObjectName("trashItems"); layout->addWidget(list);
     for (const auto& db:workspace_.databases(true)) {
         if (db.trashed) { auto* item=new QListWidgetItem("Database: "+q(db.name),list); item->setData(Qt::UserRole,q(db.id)); item->setData(Qt::UserRole+1,true); }
         for (const auto& page:workspace_.pages(db.id,true)) if (page.trashed) { auto* item=new QListWidgetItem(q(db.name)+" / "+q(page.title),list); item->setData(Qt::UserRole,q(page.document.id)); }
     }
+    for (const auto& group:workspace_.deleted_blocks()) {
+        auto* item=new QListWidgetItem("Blocks in "+q(group.page_title)+": "+q(group.label).left(60),list);
+        item->setData(Qt::UserRole,q(group.id)); item->setData(Qt::UserRole+2,"blocks");
+    }
     auto* restore=new QPushButton("Restore selected",&dialog); restore->setObjectName("restoreSelected"); layout->addWidget(restore);
-    connect(restore,&QPushButton::clicked,&dialog,[&]{ if (auto* item=list->currentItem()) { if (item->data(Qt::UserRole+1).toBool()) workspace_.trash_database(s(item->data(Qt::UserRole).toString()),false); else workspace_.trash_page(s(item->data(Qt::UserRole).toString()),false); delete item; } });
+    connect(restore,&QPushButton::clicked,&dialog,[&]{
+        if (auto* item=list->currentItem()) {
+            try {
+                const auto id=s(item->data(Qt::UserRole).toString());
+                if (item->data(Qt::UserRole+2).toString()=="blocks") workspace_.restore_deleted_blocks(id);
+                else if (item->data(Qt::UserRole+1).toBool()) workspace_.trash_database(id,false);
+                else workspace_.trash_page(id,false);
+                delete item;
+            } catch (const std::exception& e) { error(&dialog,e); }
+        }
+    });
     auto* close=new QDialogButtonBox(QDialogButtonBox::Close,&dialog); layout->addWidget(close); connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::accept); dialog.exec(); refresh_databases();
 }
 void WorkspaceWindow::insert_link()
@@ -345,6 +363,13 @@ void WorkspaceWindow::insert_link()
         for (const auto& block:page.document.blocks) { auto* child=new QTreeWidgetItem(item,{block_text(block)}); child->setData(0,Qt::UserRole,q(block.id)); child->setData(0,Qt::UserRole+1,int(ReferenceKind::Block)); child->setData(0,Qt::UserRole+2,block_text(block)); }
     }
     auto* label=new QLineEdit(&dialog); label->setPlaceholderText("Optional custom label"); layout->addWidget(label);
+    auto* unresolved=new QLineEdit(&dialog); unresolved->setObjectName("unresolvedName"); unresolved->setPlaceholderText("Name of an unresolved page (does not create it)"); layout->addWidget(unresolved);
+    auto* keep_unresolved=new QPushButton("Insert unresolved link",&dialog); keep_unresolved->setObjectName("insertUnresolved"); layout->addWidget(keep_unresolved);
+    connect(keep_unresolved,&QPushButton::clicked,&dialog,[&]{
+        if (!unresolved->text().trimmed().isEmpty()) {
+            const auto name=unresolved->text().trimmed(); page_editor()->insert_unresolved_reference(label->text().isEmpty()?name:label->text(),name,q(database_id_)); dialog.accept();
+        }
+    });
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem()) { page_editor()->insert_reference(label->text().isEmpty()?item->data(0,Qt::UserRole+2).toString():label->text(),ReferenceKind(item->data(0,Qt::UserRole+1).toInt()),item->data(0,Qt::UserRole).toString()); dialog.accept(); } }); dialog.exec();
 }

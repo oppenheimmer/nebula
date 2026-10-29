@@ -61,8 +61,8 @@ void validate(const Page& page)
         for (const auto& run : block.runs) {
             if (run.text.find('\n') != std::string::npos || run.text.find('\r') != std::string::npos)
                 throw std::invalid_argument("Hard line breaks must be separate blocks");
-            if (run.reference && run.reference->target_id.empty())
-                throw std::invalid_argument("Resolved references need a target ID");
+            if (run.reference && (run.reference->target_id.empty()==run.reference->unresolved_name.empty()))
+                throw std::invalid_argument("References need either a target ID or an unresolved name");
             if (run.reference && (int(run.reference->kind)<0 || int(run.reference->kind)>1))
                 throw std::invalid_argument("Unknown reference kind");
             if (run.asset && run.asset->label.empty())

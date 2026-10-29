@@ -36,7 +36,7 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Build | CMake; keep compiler and platform requirements explicit. |
 | Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
 | Modularity | UI-independent document core, application operations, storage interfaces, and separate desktop adapters. |
-| Portability | Linux first; introduce macOS build checks early and deliver its polished package later. |
+| Portability | Linux first; compile/smoke and packaging verification on macOS are required in M10. |
 | Data ownership | Documented schema, migration paths, backup/restore, and portable exports. |
 
 The following remain implementation decisions rather than settled facts:
@@ -203,9 +203,9 @@ The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`
 UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
 Initialization occurs in a transaction; reopening preserves that identity.
 Unrelated databases and unsupported versions are rejected without modifying their
-contents. **Version 1 stores no pages or notes.** Version 2 now migrates that
-bootstrap to persistent databases, pages, block payloads, properties, views, and
-derived link edges. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
+contents. **Version 1 stores no pages or notes.** The current version 4 format
+adds persistent databases, pages, block payloads, properties, views, derived link
+edges, and deleted-block recovery. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
 schema, JSON versions, ownership, autosave/undo boundaries, and backup contract.
 The prototype notice applies only to explicit in-memory demo mode.
 
@@ -235,7 +235,7 @@ recovery/restore verification.
   in search and saved database views.
 - A documented, installable Linux release that works offline.
 
-The macOS release follows the Linux release, with build checks introduced earlier.
+The macOS release follows the Linux release and begins with build and smoke checks.
 Calendar and other database presentations are possible later extensions. Advanced
 relations, formulas, and broader Notion feature parity are not first-release
 commitments. A spatial canvas, synchronization, shared workspaces, and a hosted
@@ -262,16 +262,16 @@ including material data-handling limitations, rather than a running progress log
 | ID | Milestone | Dependencies | Status |
 | --- | --- | --- | --- |
 | M00 | Project definition and working conventions | None | Complete |
-| M01 | Editor feasibility and architecture decisions | M00 | In progress |
-| M02 | Modular application foundation | M01; prototype build/core scaffolding started early | In progress |
-| M03 | Persistent workspace and recovery foundations | M02; identity bootstrap started early at user request | In progress |
-| M04 | Database-to-page workflow | M03; primary workflow implemented while broader recovery work continues | Complete |
+| M01 | Editor feasibility and architecture decisions | M00 | Complete |
+| M02 | Modular application foundation | M01 | Complete |
+| M03 | Persistent workspace and recovery foundations | M02 | Complete |
+| M04 | Database-to-page workflow | M03 | Complete |
 | M05 | Complete first-release block editing | M01, M04 | In progress |
-| M06 | Attachments and diary workflow | M03, M05; diary template pulled forward with database UI | In progress |
+| M06 | Attachments and diary workflow | M03, M05 | In progress |
 | M07 | Search and portable interchange | M04, M06 | Not started |
 | M08 | Reliability, accessibility, and performance | M04–M07 | Not started |
 | M09 | Linux release | M08 | Not started |
-| M10 | macOS release | Early checks in M02; release after M09 | Not started |
+| M10 | macOS release | M09 | Not started |
 
 ### M00 — Project definition and working conventions
 
@@ -298,8 +298,9 @@ model. Prototype code is investigative and is not automatically production-ready
   and undo/redo.
 - [x] M01.3 Demonstrate nesting and an image/attachment representation alongside
   text; investigate how embedded controls participate in selection and focus.
-- [ ] M01.4 Check Unicode, input-method composition, keyboard access, and basic
-  accessibility with real toolkit behavior.
+- [x] M01.4 Verify Unicode, synthetic input-method composition, keyboard access,
+  font fallback, and the accessible text interface through automated real-toolkit
+  checks.
 - [x] M01.5 Exercise a long document; define reproducible fixtures and measurable
   interaction/memory thresholds for subsequent regression checks.
 - [x] M01.6 Record the chosen editor approach, model-to-widget mapping, undo
@@ -312,14 +313,13 @@ without a known fundamental selection, input-method, or undo limitation. Remaini
 issues have concrete follow-up tasks or bug entries. Record validation conditions
 and results instead of judging feasibility from screenshots alone.
 
-Progress evidence: `nebula_prototype` contains both editor approaches, backed by
+Completion evidence: `nebula_prototype` contains both editor approaches, backed by
 core and Qt interaction tests. [EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md)
 records the provisional page-wide editor decision, measured fixture/budgets,
-regressions, and remaining validation. M01.4 has automated Unicode, synthetic
-composition, keyboard/mouse, font fallback, and accessible-text checks; real OS
-input-method and screen-reader sessions remain outstanding, so M01 is not complete.
-The user selected MIT. Development now uses a Docker image rather than host Qt
-packages, as required in the subsequent environment clarification.
+regressions, and remaining validation. Automated checks cover Unicode, synthetic
+composition, keyboard/mouse interaction, font fallback, and accessible text.
+The application uses MIT and a Docker development environment with isolated Qt
+dependencies.
 
 ### M02 — Modular application foundation
 
@@ -337,27 +337,19 @@ and a repeatable developer workflow.
   adapters for paths, dialogs, menus, and shortcuts.
 - [x] M02.5 Establish meaningful automated core tests and documented build/check
   commands; exercise both GCC and Clang where available.
-- [ ] M02.6 Introduce an early macOS compile/smoke check when a runner or machine
-  is available; record any infrastructure limitation rather than claiming a pass.
-- [x] M02.7 Ask for a workspace location at startup, suggest `~/Document/nebula/`,
+- [x] M02.6 Ask for a workspace location at startup, suggest `~/Document/nebula/`,
   support browse/type/cancel and an explicit path, and preserve the selected host
   location through Docker launches. Test full-window focus and block controls.
 
 Exit criteria: a fresh checkout builds and launches on the chosen Linux baseline;
-core tests run without a GUI. Platform assumptions and the status of the early
-macOS check are documented.
+core tests run without a GUI, and platform assumptions are documented.
 
-Dependency exception: the CMake targets, initial core values/tree operations, and
-test harness were needed to investigate M01, so that scaffolding was started
-before M01's manual desktop validation is complete. The subsequent persistent
-workflow adds the application/session/storage boundaries and workspace shell.
-The macOS compile/smoke check remains unavailable and M02 is not complete.
+Completion evidence: GCC/Clang Docker builds, Qt-free core tests, native window
+interaction, workspace navigation, and application/storage ownership pass their
+checks. The normal window contains one block editor; the comparison baseline
+requires `--compare-editors`. Full-window tests cover toolbar clicks, shortcut
+routing, Enter, nesting feedback, and the active block outline.
 [README.md](README.md) documents the Docker build/test and GUI commands.
-The user requested a functional location picker while evaluating the prototype,
-so the path/dialog adapter and reusable application window were added before the
-rest of M02.4. The normal window contains one block editor; the comparison baseline
-requires `--compare-editors`. Native-window tests exercise toolbar clicks,
-shortcut routing, Enter, nesting feedback, and the active block outline.
 
 ### M03 — Persistent workspace and recovery foundations
 
@@ -366,41 +358,38 @@ records, and an initial backup/restore path.
 
 - [x] M03.1 Define and document tables, relationships, typed property storage,
   rich-text/reference payload versions, derived link edges, and schema versioning.
-- [x] M03.2 Implement create/open/close operations, storage adapters, transactions,
-  and validation of persisted document relationships.
-- [x] M03.3 Implement autosave with visible persistence state and actionable write
-  errors; define commit/durability behavior and the pending-edit window.
-- [x] M03.4 Implement versioned migrations and safe behavior for unsupported newer
-  workspace formats; verify preservation of existing data.
-- [ ] M03.5 Implement trash and restore semantics for pages/blocks, including how
-  links and attachment references behave.
-- [x] M03.6 Implement database snapshot backup and restore; reserve the manifest
-  and attachment inclusion mechanism completed in M06.
-- [x] M03.7 Verify interrupted operations, reopening, rollback, migration, and
-  backup/restore using representative persisted fixtures.
-- [ ] M03.8 Persist resolved and unresolved inline references; maintain a rebuildable
-  index of source/target page and block relationships. Verify consistency across
-  commits, undo/redo, trash, and restoration without resolving targets by title.
-- [x] M03.9 Create/open a versioned workspace identity database and attachments
+- [x] M03.2 Create/open a versioned workspace identity database and attachments
   directory at the chosen location. Test reopening, process restart, unsupported
   versions, unrelated files/databases, invalid attachment paths, and read-only
-  errors. This bootstrap does not persist the sample editor's page content.
+  errors.
+- [x] M03.3 Implement create/open/close operations, storage adapters, transactions,
+  and validation of persisted document relationships.
+- [x] M03.4 Implement versioned migrations and safe behavior for unsupported newer
+  workspace formats; verify preservation of existing data.
+- [x] M03.5 Implement autosave with visible persistence state and actionable write
+  errors; define commit/durability behavior and the pending-edit window.
+- [x] M03.6 Persist resolved and unresolved inline references; maintain a rebuildable
+  index of source/target page and block relationships. Verify consistency across
+  commits, undo/redo, trash, and restoration without resolving targets by title.
+- [x] M03.7 Implement trash and restore semantics for pages/blocks, including how
+  links and attachment references behave.
+- [x] M03.8 Implement database snapshot backup and restore; reserve the manifest
+  and attachment inclusion mechanism completed in M06.
+- [x] M03.9 Verify interrupted operations, reopening, rollback, migration, and
+  backup/restore using representative persisted fixtures.
 
-Dependency exception: M03.9 was pulled forward to make the user-requested folder
-selection concrete and durable. M03.1/M03.2/M03.4 were subsequently implemented
-with the version 2 schema and tested migration, rather than treating the original
-identity bootstrap as production note persistence.
-
-Current implementation: version 2 stores application-owned block JSON and typed
+Current implementation: version 4 stores application-owned block JSON and typed
 properties, with deferred same-page parent foreign keys, global block IDs,
 transactional page/index replacement, and optimistic revisions. `PageSession`
 owns pending values and save failures; the Qt adapter owns per-page undo. Autosave
 waits 500 ms and flushes before navigation/close. Tests exercise failed writes,
 revision conflicts, killed writers before/after commit, migration rollback, and
-read-only-source backup/restore. M03.5 remains partial: database/page trash works,
-but deleted blocks are only recoverable by the current editor's undo. M03.8 has
-resolved references and a rebuildable index; unresolved-name reference persistence
-is still pending. M03 is not complete.
+read-only-source backup/restore. Deleted-block fragments retain content, IDs,
+hierarchy, and sibling order across restart; restoration preserves already returned
+edits. Unresolved references retain their intended names and database scope without
+binding by title. GCC/Clang tests verify migrations from versions 1–3, recovery,
+and index rebuilding. Native window tests verify the restore and link controls.
+Managed attachment ownership and complete file recovery remain M06 deliverables.
 
 Exit criteria: supported records survive closing/reopening; failed operations do
 not leave partial logical edits; migrations and database backup/restore preserve
@@ -430,9 +419,7 @@ Completion evidence: GCC and Clang offscreen suites and native Xwayland tests pa
 for all five steps, including the actual view dialog, database/trash controls,
 typed table edits, multiple views over shared IDs, navigation, autosave, and reopen.
 Storage tests reopen saved numeric filters and sorting and verify page identities.
-The native workspace window was also inspected. This work proceeds with M01's manual
-IME/screen-reader and M02's macOS checks still outstanding; those gates have not
-been treated as passes.
+The native workspace window was also inspected.
 
 ### M05 — Complete first-release block editing
 
@@ -527,7 +514,11 @@ and a release candidate with known limitations documented.
 - [ ] M08.1 Exercise crash/interruption scenarios, failed writes, migration errors,
   trash restoration, and backup restoration across the complete workflow.
 - [ ] M08.2 Recheck keyboard navigation, focus, screen-reader semantics, clipboard,
-  Unicode, and input-method composition in the integrated application.
+  Unicode, and input-method composition in the integrated application. Use an
+  actual OS IME to check candidate selection, composition updates, commit/cancel,
+  and Enter/cursor/selection/undo at block boundaries. Check screen-reader
+  navigation/selection for headings, lists, to-do
+  state, references, and asset labels. Record IME, reader, desktop, Qt, and results.
 - [ ] M08.3 Benchmark long pages and large databases against the thresholds agreed
   in M01; investigate bottlenecks using measured evidence.
 - [ ] M08.4 Verify storage invariants and regression coverage for actual defects;
@@ -564,15 +555,18 @@ actual delivered features and remaining issues.
 Deliverables: a macOS application bundle using the same core and workspace format,
 with platform integration and distribution instructions.
 
-- [ ] M10.1 Resolve issues found by early macOS checks and choose the supported OS
+- [ ] M10.1 Compile and smoke-test the core, storage, and desktop targets on
+  a real macOS runner or machine, using a project/runner-scoped SDK. Run applicable
+  tests and record OS/architecture, compiler, Qt, and actual outcomes.
+- [ ] M10.2 Resolve issues found by M10.1 and choose the supported OS
   and architecture baseline.
-- [ ] M10.2 Adapt menus, Command-key shortcuts, file dialogs, application paths,
+- [ ] M10.3 Adapt menus, Command-key shortcuts, file dialogs, application paths,
   and bundle resources without moving document rules into platform code.
-- [ ] M10.3 Verify text/input-method behavior, accessibility, attachments, and the
+- [ ] M10.4 Verify text/input-method behavior, accessibility, attachments, and the
   complete database/page workflow on macOS.
-- [ ] M10.4 Verify backup/export transfer between Linux and macOS while preserving
+- [ ] M10.5 Verify backup/export transfer between Linux and macOS while preserving
   data; this is manual portability, not synchronization.
-- [ ] M10.5 Package the application, document signing/distribution requirements for
+- [ ] M10.6 Package the application, document signing/distribution requirements for
   the selected channel, and record release checks and limitations.
 
 Exit criteria: the macOS package completes the agreed offline workflow and passes
@@ -590,7 +584,7 @@ These are anticipated risks, not encountered bugs.
 | R03 | Attachment files and database references may diverge after interruption or backup. | Define import ordering, reconciliation, retention, and a consistent backup manifest. | Open |
 | R04 | Search tokenization may be unsuitable for some writing systems. | Define supported behavior and test representative language fixtures in M07. | Open |
 | R05 | Large documents or databases may expose rendering/query bottlenecks. | Establish workloads and thresholds in M01; measure again in M08. | Open |
-| R06 | Linux assumptions may make the macOS port expensive. | Keep platform adapters narrow and start compile/smoke checks in M02. | Open |
+| R06 | Linux assumptions may make the macOS port expensive. | Keep platform adapters narrow and begin the macOS milestone with compile/smoke checks. | Open |
 | R07 | Dependency licensing or platform requirements may constrain distribution. | Resolve the license/module baseline in M01 and validate packaging requirements before release. | Open |
 | R08 | Autosave or migration failures may lose data or falsely report that it was saved. | Define durability semantics, expose failures, and test recovery and migrations. | Open |
 | R09 | References may be redirected by duplicate/reused titles, or backlinks may become stale after edits/imports. | Use permanent target IDs, explicit unresolved states, a rebuildable derived link index, and lifecycle/round-trip checks. | Open |
@@ -699,6 +693,22 @@ problems remain in the risk register until reproduced.
   database, avoiding name-based exclusions entirely.
 - **Verification:** `unrelated_database_is_not_modified` first failed with this
   fixture, then passed after the fix, checking rejection and unchanged file bytes.
+
+### BUG-007 — Restoring deleted siblings in reverse order reordered them
+
+- **Milestone/state/impact:** M03; fixed and verified with GCC. Recovering B before
+  A from the original sequence A, B, C produced B, A, C.
+- **Environment/reproduction:** Qt 6.8.2 / SQLite 3.46.1 in Docker; save removal
+  of sibling blocks A and B, then restore B followed by A from deleted-block trash.
+  Expected the original A, B, C order with unchanged identities and content.
+- **Cause:** both fragments used surviving block C as their only insertion anchor.
+- **Resolution:** schema version 4 stores a shared deletion operation identity and
+  original positions; restoration prefers a later recovered sibling as its anchor.
+  A partially recovered sibling also anchors insertion while its children remain
+  in trash, preserving edits made after a partial undo.
+- **Verification:** `restoring_siblings_in_reverse_order_keeps_their_order`
+  reproduced the defect and passes after the fix. The partial-undo case also
+  failed before broadening the anchor lookup. Final checks are recorded below.
 
 For each future defect, record:
 
@@ -853,6 +863,39 @@ Do not record tests as passed when they were unavailable or not run.
 - Remaining M05 work still includes dividers, rich clipboard, reference entry and
   lifecycle/navigation, undo typing coalescing, and production accessibility/IME
   verification. Completing mouse movement does not complete the editor milestone.
+
+### Dependency and validation schedule correction — 2026-10-30
+
+At the user's direction, actual OS IME/screen-reader acceptance belongs to M08.2
+and macOS compile/smoke checks begin M10. Tasks were moved into their destination
+lists and renumbered in execution order, with no transfer notices left behind.
+M01/M02 satisfy their automated/Linux scope; the later checks remain unperformed.
+The M03 list also follows implementation order from schema/workspace setup through
+record operations, migrations, autosave, references, recovery, and verification.
+
+### Deleted-block recovery and unresolved references checkpoint — 2026-10-30
+
+- Completed M03 with schema version 4, transactional deleted-subtree archives,
+  restoration after restart/backup, parent/page/database prerequisites, and
+  preservation of edits after partial undo. Recovery records the deletion operation
+  and original positions so independent sibling restores keep their order.
+- Unresolved links retain intended names and database scope in canonical JSON;
+  they render distinctly and never bind to another page by matching its title.
+  The picker inserts unresolved links without creating pages; their activation
+  explains how to choose a target. Index rebuilds include only resolved edges.
+- GCC and Clang passed all six CTest entries: 16 core, 23 storage, 32 editor, and
+  30 desktop cases, plus launcher and smoke checks. The migration fixtures preserve
+  workspace identity, saved notes, version 3 recovery fragments, and rich content.
+  Xwayland passed 32 editor and 30 desktop cases, including the actual unresolved
+  picker and block restore dialog. BUG-007 has failing-before/passing-after tests
+  for reverse sibling restoration and a partially recovered sibling.
+- The roadmap now has 69 unique tasks in sequential milestone lists, valid local
+  links, balanced fences, and clean whitespace. Scheduling history is confined to
+  the work log; the README remains setup/usage documentation.
+- Next: finish M05 block types, rich clipboard and typing undo grouping, followed
+  by the wiki/reference navigation workflow. M06 managed attachments, M07 search/
+  interchange, M08 reliability/accessibility, and platform releases remain open.
+  Real OS IME, screen-reader, and macOS checks have not been performed.
 
 ## Technical references discussed
 

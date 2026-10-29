@@ -1,10 +1,14 @@
-# Workspace format, version 2
+# Workspace format, version 4
 
 A workspace contains `nebula.sqlite3` and `attachments/`. The database has SQLite
-application ID `0x4e454255` and `user_version = 2`. The application refuses unknown
+application ID `0x4e454255` and `user_version = 4`. The application refuses unknown
 versions. Version 1 contained only workspace identity; upgrading to version 2
-adds the following tables in one transaction and preserves that identity. Failed
-migrations roll back. Managed attachment paths and database files cannot be
+adds the persistent record tables in one transaction and preserves that identity.
+Version 3 adds deleted-block recovery. Version 4 records deletion operation IDs and
+original positions to preserve sibling order when fragments are restored in a
+different order. Versions 1–3 migrate transactionally; existing version 3 fragments
+retain their content and original parent/next-sibling anchors.
+Failed migrations roll back. Managed attachment paths and database files cannot be
 symlinks.
 
 | Table | Canonical responsibility |
@@ -17,6 +21,7 @@ symlinks.
 | `property_values` | Page/property pair and typed JSON value. |
 | `saved_views` | Permanent ID, database, name, and versioned presentation/query settings. |
 | `links` | Rebuildable source page/block/run to target page/block edges, indexed by target identity. |
+| `deleted_blocks` | Deleted subtree fragments, original parent/next sibling, deletion operation ID, original position, page, timestamp, and restored state; saved atomically with page edits. |
 
 Block kinds are paragraph (0), heading (1), bullet (2), to-do (3), image card (4),
 and attachment card (5). Positions are unique within a page. The block vector is
@@ -28,7 +33,11 @@ and representations; they do not establish managed attachment ownership.
 
 Block payload JSON version 1 contains `version`, `runs`, `asset_label`, and
 `checked`. Every run has UTF-8 `text`, `bold`, and `italic`. An optional `reference`
-contains `kind` (page 0 or block 1) and permanent `target`. An optional `asset`
+contains `kind` (page 0 or block 1) and either permanent `target`, or an
+`unresolved_name` with optional database `scope`. Exactly one target form is valid.
+Absent name/scope fields in older version 1 payloads mean empty strings. Unresolved
+names are never bound by title during load, rendering, indexing, or navigation.
+An optional `asset`
 contains `image` and `label`. Soft breaks use U+2028; hard paragraph boundaries are
 separate blocks. QTextDocument/HTML serialization is never authoritative. Unknown
 payload versions and malformed or mistyped fields fail explicitly.
@@ -74,8 +83,13 @@ cleared on page navigation; it does not survive restart.
 Database/page trash preserves IDs and stored content. Links retain permanent
 targets, including unavailable targets. Backlinks exclude trashed source pages
 and databases and aggregate links to blocks on a target page. The derived index
-can be rebuilt from canonical runs. Unresolved-name references and independently
-restorable deleted blocks require further format/application work in M03/M05.
+can be rebuilt from canonical runs. Deleting saved block identities archives their
+typed content and hierarchy in the same transaction. Restore inserts only missing
+identities, preserving already restored/edited blocks. Fragments from one deletion
+retain their relative sibling order even when restored in reverse order. The page, database, and an
+external original parent must be restored first. Undo followed by save marks fully
+returned fragments restored. Recovery persists across restart and backup; this is
+deleted-block recovery, not version history for every text change inside a block.
 
 `nebula_workspace backup SOURCE NEW_DESTINATION` uses SQLite's online backup API
 with a read-only source connection, then copies the attachment directory. It

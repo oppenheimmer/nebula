@@ -49,6 +49,9 @@ Double-click table cells to edit titles or typed properties. New view/Edit view
 configure filters, sorting, and visible columns over the same pages. A new workspace
 includes a Journal database with Entry date, Mood, and Tags. Journal entry asks for
 the intended calendar date. Trash and Restore preserve page/database identities.
+Restore also lists deleted block fragments after restart. Restore a trashed page,
+database, or missing parent first; restoring a fragment preserves edits to blocks
+that are already present.
 
 Edits save after a 500 ms pause, before navigating to another page, and when closing
 the window. The status distinguishes pending edits, successful saves, and failures.
@@ -108,7 +111,9 @@ Image and file cards in demo mode are layout representations, not imported files
 Use Link… to select a page, heading, or block across databases. Ctrl+click follows
 it; the backlinks list opens the referring page/block. Targets retain their IDs
 through renaming and trash/restore. The link picker disambiguates page names by
-database. Wiki syntax and unresolved-name links are tracked in the roadmap.
+database. The picker can insert an unresolved page name without creating it;
+creating another page with that title does not silently bind the link. Wiki syntax
+and the complete unresolved-target workflow are tracked in the roadmap.
 
 ## Backup and restore
 

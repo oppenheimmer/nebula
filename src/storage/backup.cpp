@@ -17,7 +17,7 @@ Workspace Workspace::read_only(const std::filesystem::path& directory)
     if (opened!=SQLITE_OK) throw std::runtime_error("Cannot read backup database");
     if (sql::scalar(raw,"PRAGMA application_id")!=std::to_string(0x4e454255)) throw std::runtime_error("Not a Nebula workspace");
     const auto version=sql::scalar(raw,"PRAGMA user_version");
-    if (version!="1" && version!="2") throw std::runtime_error("Unsupported backup format");
+    if (version!="1" && version!="2" && version!="3" && version!="4") throw std::runtime_error("Unsupported backup format");
     if (sql::scalar(raw,"PRAGMA quick_check")!="ok") throw std::runtime_error("Backup integrity check failed");
     const auto id=sql::scalar(raw,"SELECT workspace_id FROM workspace_meta WHERE id=1");
     return Workspace(root,id,std::move(db));
