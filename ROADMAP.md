@@ -5,17 +5,18 @@ Last updated: 2026-10-29 (Asia/Tokyo)
 ## Project goal
 
 Build a portable desktop note-taking and diary application inspired by Notion's
-block editing and database organization. The primary interface is a database view:
-each entry is a page with editable properties and a flowing document of movable
-blocks. Users should be able to write naturally, organize entries through typed
-properties, and keep their data usable for the long term.
+block editing and database organization and Zim Desktop Wiki's interconnected
+notes. The primary interface is a database view: each entry is a page with editable
+properties and a flowing document of movable blocks. Users should be able to write
+naturally, organize entries through typed properties, cross-reference documents,
+and keep their data usable for the long term.
 
 The application is **always local and single-user**. Linux is the first release
 target; macOS is a planned subsequent target. The architecture must be modular,
 with a documented storage format and conservative C/C++ dependencies.
 
-This describes the behavior we intend to build, not Notion's internal architecture
-or a promise of full Notion compatibility.
+This describes the behavior we intend to build, not either application's internal
+architecture or a promise of full Notion or Zim format compatibility.
 
 ## Agreed scope and design direction
 
@@ -24,6 +25,7 @@ or a promise of full Notion compatibility.
 | Runtime | Local desktop application; no server, account, synchronization, or collaboration service. |
 | Organization | User-defined databases containing pages; saved views share the underlying pages. |
 | Editor | Flowing document with movable, nestable blocks; not a spatial canvas. |
+| Cross-referencing | Links to pages, headings, and blocks across databases in one workspace; backlinks and link-aware navigation/search. |
 | Language | C++17 baseline with conservative dependencies; C libraries where useful. |
 | Interface | Qt 6 Widgets is the preferred starting point, subject to the editor feasibility milestone. |
 | Storage | SQLite for structured records, with small versioned JSON payloads for flexible block content and view settings. |
@@ -42,6 +44,8 @@ The following remain implementation decisions rather than settled facts:
 - Linux packaging format and the eventual macOS distribution method.
 - Benchmark thresholds and supported search languages/tokenization behavior.
 - Exact rich-text payload schema and supported Markdown import/export subset.
+- Exact wiki-link escaping rules and interchange syntax for duplicate page titles,
+  custom labels, heading/block targets, and unresolved references.
 
 ### Options considered
 
@@ -59,6 +63,57 @@ Qt currently recommends Qt Quick for new interfaces. The Widgets preference is a
 project-specific choice based on C++ use and desktop text/table editing, not a
 claim that Widgets is Qt's preferred new-interface technology.
 
+### Zim-inspired document cross-referencing
+
+[Zim Desktop Wiki](https://github.com/zim-desktop-wiki/zim-desktop-wiki) is an
+additional product reference for connected notes. Its documentation describes
+[page links, custom link labels, and heading/object anchors](https://zim-wiki.org/manual/Help/Links.html),
+a [backlinks pane](https://zim-wiki.org/manual/Plugins/BackLinks_Pane.html), and
+[incoming/outgoing link searches](https://zim-wiki.org/manual/Help/Searching.html).
+Its [page navigation](https://zim-wiki.org/manual/Help/Pages.html) also supports
+starting a new page from a destination that does not yet exist.
+
+The following is Nebula's planned adaptation of those ideas, using its own block
+model and keeping database views as the primary organization method:
+
+- **Page references:** insert a link using a picker or by typing `[[Page title]]`.
+  Offer completion across the workspace and show the database context when titles
+  collide. Require selection of a specific target when a name is ambiguous.
+- **Display labels:** allow readable custom labels, for example
+  `[[Page title|reading notes]]`. A default label follows the current target title;
+  an explicitly customized label stays unchanged when the target is renamed.
+- **Heading and block references:** link to a precise location in the same page or
+  another page. The picker can show heading text, but the persisted reference uses
+  the target block's permanent ID. Resolve a moved block through its current page.
+- **Backlinks and outgoing links:** show which pages reference the current page,
+  include source context, and navigate to the referring block. Aggregate references
+  to a page's blocks into its backlinks while allowing the exact target to be shown.
+- **Navigation:** support keyboard-accessible following of references and back/
+  forward history that restores the previous page position.
+- **Unresolved references:** preserve intended names and any database scope, show
+  an unresolved state, and offer an explicit create-or-select-target action. New
+  target creation selects a destination database; merely displaying or following
+  an unresolved link must not silently create a page.
+- **Lifecycle:** resolved references retain their identity through renaming and
+  moves within the workspace. Trashed or missing targets remain identifiable;
+  restore reconnects the original target. Reusing a deleted page's title must not
+  redirect existing references to the new page.
+- **Link-aware queries:** provide incoming/outgoing reference filters in search
+  and database views, using selected page identities rather than title matching.
+- **Interchange:** preserve structured targets and labels in lossless exports.
+  Markdown export maps supported links to exported filenames/anchors and reports
+  targets outside the export or references the chosen format cannot preserve.
+
+For example, a Journal entry can link to a project page in another database and
+to a particular meeting-note heading. The project page then lists the journal
+entry as a backlink, and renaming the project does not break either reference.
+
+Zim is a behavioral reference; this plan keeps the selected C++/Qt/SQLite stack.
+Zim notebook import, its namespace/path resolution rules, cross-workspace links,
+and visual graph browsing are possible later investigations, not first-release
+commitments. First-release cross-referencing works entirely within a local
+workspace.
+
 ## Product and data model
 
 | Concept | Responsibility |
@@ -71,6 +126,8 @@ claim that Widgets is Qt's preferred new-interface technology.
 | Property value | Typed value attached to a page; suitable for correct filtering and sorting. |
 | View | Saved filters, sorting, visible properties, and presentation settings over the same pages. |
 | Attachment | Managed file identity and metadata, referenced by blocks. |
+| Link reference | Inline reference with a target page or block ID and optional custom label; unresolved references retain their intended name/scope separately. |
+| Link index | Rebuildable incoming/outgoing edges derived from canonical inline references, with source page/block context for navigation. |
 
 A Journal database might contain Title, Entry date, Mood, and Tags. Opening a row
 opens its page. A future calendar can show those same pages without duplicating
@@ -79,6 +136,10 @@ their contents.
 Document invariants:
 
 - Page and block identifiers survive renaming and reordering.
+- Internal references resolve by target identity, not by display title. Block
+  targets resolve through their current owning page when moved.
+- Backlinks are derived from explicit references. Rebuilding an index must not
+  change targets, create documents, or bind unresolved names automatically.
 - Parent relationships form a valid tree; moving a block cannot create a cycle.
 - Sibling order is explicit, deterministic, and updated atomically.
 - A paragraph is normally one block. Visual line wrapping never changes storage.
@@ -111,8 +172,12 @@ opening a window and must not depend on Qt GUI types.
 
 SQLite tables should hold page membership, property definitions and typed values,
 block relationships/order, attachment metadata, and view definitions. Small JSON
-payloads can hold rich-text runs and block-specific presentation data. Search
-indexes are derived data that can be rebuilt; FTS5 is the starting candidate.
+payloads can hold rich-text runs, typed inline references, and block-specific
+presentation data. Inline references are authoritative; a derived SQLite link
+index supports backlinks and outgoing-link queries without scanning all note text.
+Keep persisted link edges consistent with committed content changes and provide a
+rebuild path. Full-text search indexes are also derived data; FTS5 is the starting
+candidate. Link queries operate on structured references rather than text matches.
 
 The preferred workspace layout contains the database and an `attachments/`
 directory. Import copies files into managed storage so moving the original file
@@ -136,10 +201,13 @@ recovery/restore verification.
 - Paragraphs, headings, lists, checkboxes, links, images, attachments, and dividers.
 - Block reordering and basic nesting, natural text selection/navigation, clipboard
   operations, inline formatting, and coherent undo/redo.
+- Wiki-style page/heading/block references, target completion, custom labels,
+  backlinks/outgoing links, navigation history, and unresolved-target handling.
 - Journal templates and an explicit entry-date property.
 - Autosave, trash/restoration, backup, and restore.
 - Full-text search, Markdown interchange, and a versioned lossless JSON export
-  with attachment handling.
+  with attachment and internal-reference handling; incoming/outgoing link filters
+  in search and saved database views.
 - A documented, installable Linux release that works offline.
 
 The macOS release follows the Linux release, with build checks introduced earlier.
@@ -196,7 +264,8 @@ model. Prototype code is investigative and is not automatically production-ready
 - [ ] M01.1 Compare a page-wide `QTextDocument` approach with separate block
   components using the same representative editing scenarios.
 - [ ] M01.2 Demonstrate paragraph splitting/merging, cross-block selection,
-  navigation, formatting, clipboard operations, reordering, and undo/redo.
+  navigation, formatting, inline references, clipboard operations, reordering,
+  and undo/redo.
 - [ ] M01.3 Demonstrate nesting and an image/attachment representation alongside
   text; investigate how embedded controls participate in selection and focus.
 - [ ] M01.4 Check Unicode, input-method composition, keyboard access, and basic
@@ -221,7 +290,8 @@ and a repeatable developer workflow.
 - [ ] M02.1 Establish CMake targets and the C++17 baseline; document dependencies
   and supported Linux compiler configurations.
 - [ ] M02.2 Implement the initial UI-independent document types and invariants,
-  including permanent IDs, hierarchy validation, and deterministic ordering.
+  including permanent IDs, typed references, hierarchy validation, and deterministic
+  ordering.
 - [ ] M02.3 Define application operations, storage interfaces, and ownership of
   undo/redo without duplicating editing rules in individual views.
 - [ ] M02.4 Add workspace navigation, database/page placeholders, and platform
@@ -241,7 +311,7 @@ Deliverables: versioned SQLite storage, workspace lifecycle, persistence of core
 records, and an initial backup/restore path.
 
 - [ ] M03.1 Define and document tables, relationships, typed property storage,
-  rich-text payload versions, and schema versioning.
+  rich-text/reference payload versions, derived link edges, and schema versioning.
 - [ ] M03.2 Implement create/open/close operations, storage adapters, transactions,
   and validation of persisted document relationships.
 - [ ] M03.3 Implement autosave with visible persistence state and actionable write
@@ -254,10 +324,14 @@ records, and an initial backup/restore path.
   and attachment inclusion mechanism completed in M06.
 - [ ] M03.7 Verify interrupted operations, reopening, rollback, migration, and
   backup/restore using representative persisted fixtures.
+- [ ] M03.8 Persist resolved and unresolved inline references; maintain a rebuildable
+  index of source/target page and block relationships. Verify consistency across
+  commits, undo/redo, trash, and restoration without resolving targets by title.
 
 Exit criteria: supported records survive closing/reopening; failed operations do
 not leave partial logical edits; migrations and database backup/restore preserve
-the tested data. Tests distinguish pending edits from confirmed saved data.
+the tested data. Tests distinguish pending edits from confirmed saved data. Link
+index rebuilds reproduce the references in persisted content.
 
 ### M04 — Database-to-page workflow
 
@@ -293,13 +367,25 @@ Deliverables: the production block editor implementing the approach chosen in M0
 - [ ] M05.5 Integrate consistent undo/redo for text and structural edits with
   autosave; document undo boundaries and whether history survives restart.
 - [ ] M05.6 Implement page/block link resolution using permanent IDs and predictable
-  behavior when a target is in trash or unavailable.
+  behavior when a target is in trash or unavailable. Preserve targets across page
+  renames, database moves, heading edits, and block moves between pages.
 - [ ] M05.7 Recheck Unicode, composition input, accessibility, and the long-document
   scenarios from M01 against the production editor.
+- [ ] M05.8 Add wiki-style link entry, completion and a target picker for pages,
+  headings, and blocks, with duplicate-title disambiguation and custom labels.
+- [ ] M05.9 Add backlinks/outgoing-link navigation with source context and exact
+  block destinations; provide keyboard access and back/forward position history.
+- [ ] M05.10 Surface unresolved references and explicit create-or-select-target
+  actions, including the destination database for a new page. Keep default and
+  custom label behavior consistent through renames and undo/redo.
 
 Exit criteria: the M01 interaction scenarios pass with persisted documents. Text
 wrapping does not alter block structure; structural edits preserve identity and
-can be undone coherently. Missing first-release behavior is tracked explicitly.
+can be undone coherently. A journal page can reference a page and heading in
+another database, navigate to them and back, and expose the corresponding backlink.
+Renaming or moving targets preserves references; ambiguous/unresolved references
+require an explicit target choice. Missing first-release behavior is tracked
+explicitly.
 
 ### M06 — Attachments and diary workflow
 
@@ -330,17 +416,24 @@ Deliverables: searchable notes and documented export/import formats.
 - [ ] M07.2 Define and test search/tokenization behavior for supported languages;
   search results should navigate to the relevant page or block.
 - [ ] M07.3 Implement a documented Markdown import/export subset with explicit
-  handling of unsupported formatting and attachment references.
+  handling of unsupported formatting, attachment references, internal link paths/
+  anchors, and targets outside the exported set.
 - [ ] M07.4 Implement versioned JSON export/import that preserves the supported
-  model, including IDs, properties, blocks, views, and attachment references/files.
+  model, including IDs, properties, blocks, views, internal reference targets/
+  labels/unresolved states, and attachment references/files.
 - [ ] M07.5 Define import validation and identity-collision behavior; malformed or
-  partially supported input must not silently overwrite existing data.
+  partially supported input must not silently overwrite existing data. Remap
+  internal references consistently if imported identities must change.
 - [ ] M07.6 Verify semantic round trips through the lossless format and test the
   documented Markdown limitations with representative fixtures.
+- [ ] M07.7 Add incoming/outgoing link filters to search and saved database views,
+  including references to blocks on a selected page; verify structured link queries
+  independently of full-text matches.
 
 Exit criteria: edits and deletions appear correctly in search; rebuilding produces
 equivalent results. A full export imported into a fresh workspace preserves the
-supported model and attachments. Markdown limitations are visible and documented.
+supported model, reference relationships, and attachments, with equivalent backlinks
+after rebuilding derived indexes. Markdown limitations are visible and documented.
 
 ### M08 — Reliability, accessibility, and performance
 
@@ -357,6 +450,9 @@ and a release candidate with known limitations documented.
   check that attachments and derived indexes remain consistent.
 - [ ] M08.5 Document the workspace format, recovery procedure, export limitations,
   supported environments, and unresolved release issues.
+- [ ] M08.6 Verify references/backlinks through duplicate titles, renames, moves,
+  heading changes, target trash/restore, reuse of deleted titles, undo/redo, backup
+  restore, import identity remapping, and derived-index rebuilding.
 
 Exit criteria: required checks have recorded outcomes; supported saved data
 survives the documented recovery scenarios; no unresolved release-blocking defect
@@ -413,6 +509,7 @@ These are anticipated risks, not encountered bugs.
 | R06 | Linux assumptions may make the macOS port expensive. | Keep platform adapters narrow and start compile/smoke checks in M02. | Open |
 | R07 | Dependency licensing or platform requirements may constrain distribution. | Resolve the license/module baseline in M01 and validate packaging requirements before release. | Open |
 | R08 | Autosave or migration failures may lose data or falsely report that it was saved. | Define durability semantics, expose failures, and test recovery and migrations. | Open |
+| R09 | References may be redirected by duplicate/reused titles, or backlinks may become stale after edits/imports. | Use permanent target IDs, explicit unresolved states, a rebuildable derived link index, and lifecycle/round-trip checks. | Open |
 
 ## Bug log
 
@@ -454,12 +551,19 @@ milestone, evidence, and the resulting action.
   formats, compiler baselines, and platform assumptions also affect longevity.
 - **G09 — Always local is a product boundary:** modularity does not imply future
   synchronization or a server architecture.
+- **G10 — Titles are labels, not identities:** duplicate names require explicit
+  target selection; renaming a heading must preserve its target identity. Display
+  labels and persistent targets have different responsibilities.
+- **G11 — Backlinks are derived:** the inline reference is authoritative. Index
+  rebuilds must preserve the document's intended references, including unresolved
+  and unavailable targets, without silently binding them by name.
 
 ## Work log
 
 | Date (Asia/Tokyo) | Milestone | Change and evidence | Follow-up |
 | --- | --- | --- | --- |
 | 2026-10-29 | M00 | Recorded the accepted discussion in this roadmap and added project management instructions. Repository inspection found no application files or commits. Document review and structural checks passed: 11 milestone definitions/table entries, 61 unique task IDs, matching exit criteria, accurate completion states, balanced code fences, and clean whitespace. Application tests are not applicable to this documentation-only change. | Begin M01 when implementation is requested; record prototype evidence before finalizing the editor design. |
+| 2026-10-29 | M00, M01–M03, M05, M07–M08 | Reviewed Zim's repository and official linking, backlinks, page-navigation, and search documentation. Added cross-referencing scope, data/index responsibilities, lifecycle rules, tasks, acceptance criteria, and management guidance. Document review, whitespace checks, and structural validation passed: 11 milestones, 67 unique tasks, and all 61 earlier task IDs/statuses preserved. Application tests are not applicable; implementation remains unstarted. | Begin M01 when implementation is requested, including validation of typed inline references in the editor prototype. |
 
 Future entries should record the steps changed, checks actually performed and
 their outcomes, relevant commits, encountered bugs, and the next concrete action.
@@ -467,6 +571,11 @@ Do not record tests as passed when they were unavailable or not run.
 
 ## Technical references discussed
 
+- [Zim Desktop Wiki repository](https://github.com/zim-desktop-wiki/zim-desktop-wiki)
+- [Zim page links and heading/object anchors](https://zim-wiki.org/manual/Help/Links.html)
+- [Zim backlinks pane](https://zim-wiki.org/manual/Plugins/BackLinks_Pane.html)
+- [Zim page navigation and creation](https://zim-wiki.org/manual/Help/Pages.html)
+- [Zim incoming/outgoing link search](https://zim-wiki.org/manual/Help/Searching.html)
 - [Qt rich-text processing](https://doc.qt.io/qt-6/richtext.html)
 - [Qt rich-text document structure](https://doc.qt.io/qt-6/richtext-structure.html)
 - [Qt model/view programming](https://doc.qt.io/qt-6/model-view-programming.html)

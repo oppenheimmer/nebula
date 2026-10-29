@@ -4,8 +4,9 @@
 
 Nebula is an always-local, single-user desktop note-taking and diary application.
 Database entries open as pages containing flowing, movable blocks. Linux is the
-initial release target; macOS follows. Read `ROADMAP.md` before planning or changing
-the project, and keep work aligned with the current user request.
+initial release target; macOS follows. Zim Desktop Wiki is an additional behavioral
+reference for document links and backlinks. Read `ROADMAP.md` before planning or
+changing the project, and keep work aligned with the current user request.
 
 The roadmap describes intended work; it is not blanket authorization to implement
 all milestones during a documentation or discussion task. User instructions take
@@ -32,6 +33,14 @@ scope. Do not expand first-release scope implicitly.
   distinction between visual wrapping and paragraph boundaries.
 - Keep view settings separate from page contents. Database views operate on the
   same underlying pages rather than creating copies.
+- Keep cross-referencing local to the workspace, including links across databases.
+  Resolve page, heading, and block references by stable IDs; titles and custom
+  display labels must not become persistent identities. Disambiguate duplicate
+  titles and preserve unresolved or unavailable targets explicitly.
+- Derive backlinks from canonical inline references through a rebuildable link
+  index. Preserve reference behavior across renames, moves, trash/restore, undo,
+  and import/export identity remapping. Indexing must not create pages or silently
+  redirect references by name.
 - Maintain conservative dependency and compiler baselines. Record the reason for
   new dependencies, their licenses, and their Linux/macOS implications.
 - Track unresolved application licensing and platform decisions in the roadmap;
