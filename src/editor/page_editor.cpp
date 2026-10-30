@@ -3,11 +3,14 @@
 
 #include <QAbstractItemView>
 #include <QAbstractTextDocumentLayout>
+#include <QAction>
 #include <QApplication>
 #include <QCache>
 #include <QClipboard>
 #include <QCompleter>
 #include <QContextMenuEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QImageReader>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
@@ -15,7 +18,9 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPointer>
+#include <QScopedValueRollback>
 #include <QScrollBar>
 #include <QSet>
 #include <QTextBlock>
@@ -27,6 +32,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUuid>
+#include <QVBoxLayout>
 #include <algorithm>
 #include <limits>
 #include <map>
@@ -353,8 +359,15 @@ Page html_fragment(const QString& html)
 PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
 {
     setAccessibleName("Page block editor");
-    setAccessibleDescription(
-        "Flowing block document. Drag the grip dots to move a subtree. Alt+Up or Down moves a block; Tab nests it.");
+    setAccessibleDescription("Flowing block document. F8 opens block details, including type, nesting, task state, "
+                             "references and asset labels. "
+                             "Drag the grip dots to move a subtree. Alt+Up or Down moves a block; Tab nests it.");
+    auto* details = new QAction("Block details", this);
+    details->setObjectName("blockDetails");
+    details->setShortcut(Qt::Key_F8);
+    details->setShortcutContext(Qt::WidgetShortcut);
+    addAction(details);
+    connect(details, &QAction::triggered, this, &PageEditor::show_block_details);
     setAcceptDrops(false); // Native internal text drag needs identity-aware handling in M05.
     setTabChangesFocus(false);
     setFont(QFont("Sans Serif", 12));
@@ -383,6 +396,10 @@ PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
     // Repaint only the previous and current active block instead of the viewport.
     connect(this, &QTextEdit::cursorPositionChanged, this, &PageEditor::update_active_region);
     connect(this, &QTextEdit::textChanged, this, &PageEditor::update_active_region);
+    connect(this, &QTextEdit::textChanged, this, [this] {
+        if (!preedit_update_)
+            emit content_changed();
+    });
     connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] {
         painted_active_ = {};
         viewport()->update();
@@ -962,8 +979,11 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
     const bool navigation_key = key == Qt::Key_Left || key == Qt::Key_Right || key == Qt::Key_Up ||
                                 key == Qt::Key_Down || key == Qt::Key_Home || key == Qt::Key_End ||
                                 key == Qt::Key_PageUp || key == Qt::Key_PageDown;
-    if (modifier_key || navigation_key || event->matches(QKeySequence::Copy) ||
-        event->matches(QKeySequence::SelectAll)) {
+    const bool input_mode_key = (key >= Qt::Key_Kanji && key <= Qt::Key_Hangul_Special) || key == Qt::Key_Multi_key ||
+                                key == Qt::Key_Mode_switch;
+    const bool function_key = key >= Qt::Key_F1 && key <= Qt::Key_F35;
+    if (modifier_key || navigation_key || input_mode_key || function_key || key == Qt::Key_Escape ||
+        event->matches(QKeySequence::Copy) || event->matches(QKeySequence::SelectAll)) {
         // An empty QTextCursor edit group still emits textChanged. Navigation
         // and shortcut modifiers must not create pending edits/autosave revisions.
         // Alt+arrows below are structural commands and still need their own undo.
@@ -997,6 +1017,11 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
         return;
     }
     if (event->key() == Qt::Key_Backtab || (event->key() == Qt::Key_Tab && modifiers == Qt::ShiftModifier)) {
+        outdent_current();
+        return;
+    }
+    if (key == Qt::Key_Backspace && modifiers == Qt::NoModifier && !isReadOnly() && !textCursor().hasSelection() &&
+        textCursor().positionInBlock() == 0 && !textCursor().blockFormat().stringProperty(ParentId).isEmpty()) {
         outdent_current();
         return;
     }
@@ -1062,7 +1087,17 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
 
 void PageEditor::inputMethodEvent(QInputMethodEvent* event)
 {
-    mutate([&] { QTextEdit::inputMethodEvent(event); });
+    typing_position_ = -1;
+    // Qt reports visual preedit changes through textChanged too. Keep native
+    // UI notifications, but exclude these from canonical edits/autosave (BUG-024).
+    const bool edits = !event->commitString().isEmpty() || event->replacementLength() != 0 ||
+                       (textCursor().hasSelection() && !event->preeditString().isEmpty());
+    if (!isReadOnly() && edits)
+        mutate([&] { QTextEdit::inputMethodEvent(event); });
+    else {
+        QScopedValueRollback<bool> preedit(preedit_update_, true);
+        QTextEdit::inputMethodEvent(event);
+    }
     if (!event->commitString().isEmpty())
         process_wiki_input();
 }
@@ -1793,6 +1828,68 @@ void PageEditor::mouseReleaseEvent(QMouseEvent* event)
     QTextEdit::mouseReleaseEvent(event);
 }
 
+void PageEditor::show_block_details()
+{
+    // Inspect only the current block. Keep the native text offsets, selection and
+    // undo history intact instead of expanding embedded objects in accessible text.
+    const auto current = textCursor().block();
+    const auto block = read_block(current);
+    QStringList lines;
+    const auto kind = block.kind == BlockKind::Heading      ? "Heading level 1"
+                      : block.kind == BlockKind::Bullet     ? "Bullet list item"
+                      : block.kind == BlockKind::Todo       ? (block.checked ? "Task checked" : "Task unchecked")
+                      : block.kind == BlockKind::Image      ? "Image"
+                      : block.kind == BlockKind::Attachment ? "Attachment"
+                      : block.kind == BlockKind::Divider    ? "Divider"
+                                                            : "Paragraph";
+    lines << QString("%1. Block %2 of %3. Nesting level %4.")
+                 .arg(kind)
+                 .arg(current.blockNumber() + 1)
+                 .arg(document()->blockCount())
+                 .arg(current.blockFormat().indent());
+    if (block.runs.empty() && !block.asset_label.empty())
+        lines << QString::fromStdString(block.asset_label);
+    for (const auto& run : block.runs) {
+        if (run.asset)
+            lines << QString("%1: %2").arg(run.asset->image ? "Image" : "Attachment",
+                                           QString::fromStdString(run.asset->label));
+        else
+            lines << QString::fromStdString(run.text);
+        if (run.reference) {
+            const auto& reference = *run.reference;
+            lines << QString("%1 %2 reference: %3")
+                         .arg(reference.target_id.empty() ? "Unresolved" : "Local",
+                              reference.kind == ReferenceKind::Page ? "page" : "block",
+                              reference.target_id.empty() ? QString::fromStdString(reference.unresolved_name)
+                                                          : QString("Ctrl+Enter follows this reference"));
+        }
+    }
+    // Reuse the dialog so AT-SPI clients retain valid objects between readings.
+    if (!details_dialog_) {
+        auto* dialog = new QDialog(window());
+        details_dialog_ = dialog;
+        dialog->setWindowTitle("Block details");
+        auto* layout = new QVBoxLayout(dialog);
+        auto* text = new QPlainTextEdit(dialog);
+        text->setObjectName("blockDetailsText");
+        text->setAccessibleName("Block details");
+        text->setReadOnly(true);
+        text->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+        text->setTabChangesFocus(true);
+        layout->addWidget(text);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+        connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        dialog->resize(540, 320);
+    }
+    auto* text = details_dialog_->findChild<QPlainTextEdit*>("blockDetailsText");
+    text->setPlainText(lines.join('\n'));
+    text->setFocus();
+    details_dialog_->exec();
+    window()->activateWindow();
+    setFocus(Qt::OtherFocusReason);
+}
+
 void PageEditor::contextMenuEvent(QContextMenuEvent* event)
 {
     QMenu menu(this);
@@ -1804,6 +1901,8 @@ void PageEditor::contextMenuEvent(QContextMenuEvent* event)
     menu.addAction("Paste", this, &PageEditor::paste);
     menu.addAction("Paste plain text\tCtrl+Shift+V", this, &PageEditor::paste_plain_text);
     menu.addAction("Select all", this, &QTextEdit::selectAll);
+    menu.addSeparator();
+    menu.addAction("Block details\tF8", this, &PageEditor::show_block_details);
     menu.exec(event->globalPos());
 }
 

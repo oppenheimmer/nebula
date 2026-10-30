@@ -1,6 +1,6 @@
 # Pin the official base manifest and signed package snapshot; refresh with tests.
 ARG BASE_IMAGE=debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} AS development
 COPY packaging/debian.sources /etc/apt/sources.list.d/debian.sources
 
 RUN apt-get update \
@@ -23,3 +23,27 @@ ENV LANG=C.UTF-8 \
 WORKDIR /workspace
 USER 65532:65532
 CMD ["/bin/bash"]
+
+# Optional OS input/accessibility validation. Ordinary development/runtime images
+# do not acquire a display server, input engine, reader or speech/audio service.
+FROM development AS desktop-check
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb xauth openbox dbus-x11 ibus ibus-anthy orca xdotool python3-pyatspi \
+        speech-dispatcher speech-dispatcher-espeak-ng pulseaudio pulseaudio-utils locales \
+    && localedef -i en_US -f UTF-8 en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+ARG TEST_UID=1000
+ARG TEST_GID=1000
+# D-Bus needs a real passwd entry, even when all writable state is temporary.
+RUN getent group "${TEST_GID}" >/dev/null || groupadd --gid "${TEST_GID}" nebula-test
+RUN useradd --uid "${TEST_UID}" --gid "${TEST_GID}" --no-create-home \
+        --home-dir /tmp/nebula-desktop-home --shell /bin/sh nebula-test
+ENV HOME=/tmp/nebula-desktop-home \
+    XDG_CONFIG_HOME=/tmp/nebula-desktop-home/config \
+    XDG_CACHE_HOME=/tmp/nebula-desktop-home/cache \
+    XDG_RUNTIME_DIR=/tmp/nebula-desktop-runtime \
+    LANG=en_US.UTF-8 QT_QPA_PLATFORM=xcb QT_IM_MODULE=ibus QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
+USER ${TEST_UID}:${TEST_GID}
+
+FROM development AS default

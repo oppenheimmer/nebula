@@ -42,8 +42,7 @@ the optional project-local SDK workflow are described in
 checks install, removal, editing, search, export, backup/restore and TLS in an
 isolated runtime container. It does not install host packages. The artifact and
 installation/data-recovery instructions are in [INSTALL.md](docs/INSTALL.md).
-This preview is not a published release; actual OS IME/reader acceptance remains
-open.
+This preview is not a published release.
 
 ## Run
 
@@ -87,6 +86,8 @@ deletion.
 Edits save after a 500 ms pause, before navigating to another page, and when closing
 the window. The status distinguishes pending edits, successful saves, and failures.
 Ctrl+S saves immediately. A forced kill or power loss can lose edits still pending.
+IME candidates enter the note only after committing the composition;
+preedit updates and cancellation alone do not create a save.
 On failure, edits remain visible and closing asks whether
 to keep the window open or discard pending changes. If the page changed elsewhere,
 Workspace → Keep my version as a new page saves your edits as a separate copy. Undo
@@ -156,7 +157,7 @@ scrolls the document.
 | Insert a divider followed by an empty paragraph | Divider in the toolbar |
 | Move a block and its children | Alt+Up/Down, or Move up/down in the toolbar |
 | Nest under the previous sibling | Tab, or Indent |
-| Leave the current parent | Shift+Tab, or Outdent |
+| Leave the current parent | Shift+Tab, Backspace at the block's start with no selection, or Outdent |
 | Bold / italic | Ctrl+B / Ctrl+I |
 | Paste only plain text | Ctrl+Shift+V, or Paste plain text in the context menu |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
@@ -165,11 +166,17 @@ scrolls the document.
 | Follow a sample block reference | Ctrl+click the link |
 | Follow the reference at the editor cursor | Ctrl+Enter, or Navigate → Follow reference at cursor |
 | Return to the previous position / go forward | Alt+Left / Alt+Right |
+| Read the active block's type, nesting, task state, references and asset labels | F8, or Block details in the context menu |
+
+Block details opens selectable, read-only text for keyboard and screen-reader use.
+Escape returns to the editor with its selection and undo history preserved.
 
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
 Moving and nesting keep the caret and selection where they were. Wrapping text does
-not create a block. Joining two blocks with Backspace/Delete does not add a recovery
-entry, since their text is still on the page. Splitting a parent gives the trailing
+not create a block. Backspace at the start of a nested block moves it and its
+children out one level without removing text. Joining two blocks with
+Backspace/Delete does not add a recovery entry, since their text is still on the
+page. Splitting a parent gives the trailing
 block a new identity and transfers its children there; structural edits can be
 undone. Enter on an empty list/to-do block returns it to a paragraph. Consecutive
 typing forms one undo group until navigation, another command, a focus change, or a
@@ -283,6 +290,8 @@ UndefinedBehaviorSanitizer.
 ./scripts/dev.sh format --check
 ./scripts/dev.sh stress 20
 ./scripts/dev.sh test-native
+./scripts/dev.sh build-desktop-image
+./scripts/dev.sh test-desktop
 ./scripts/dev.sh run --smoke-test
 ./scripts/dev.sh run --screenshot /build/prototype.png
 ./scripts/dev.sh benchmark single
@@ -307,6 +316,10 @@ uploaded. `./scripts/dev.sh portability bundle` creates the Linux fixture;
 `portability verify` checks the three downloaded `portability-*` artifact folders
 under ignored `build-portability-inputs/`. These checks do not establish supported
 BSD desktop releases.
+`test-desktop` uses a separate optional image with a private Xvfb/Openbox desktop,
+IBus/Anthy and Orca/AT-SPI. It sends real X11 input through the OS input engine and
+checks the reader's speech output and selection, without accessing the host's
+display, audio or session bus. Its logs stay in the ignored build folder.
 See [DEPENDENCIES.md](docs/DEPENDENCIES.md) for isolation and baseline limits.
 
 `fuzz` uses Clang with coverage-guided libFuzzer, ASan and UBSan for each parser

@@ -233,3 +233,27 @@ reset_calls
 if bash "$launcher" portability invalid >/dev/null 2>&1; then fail 'invalid portability mode accepted'; fi
 compgen -G "$NEBULA_TEST_CALLS/*" >/dev/null && fail 'invalid mode must fail before Docker'
 printf 'PASS: offline portability fixtures and mode validation\n'
+
+reset_calls
+bash "$launcher" build-desktop-image
+count_calls 1
+load_call 0
+has_argument desktop-check || fail 'desktop image must select the optional stage'
+has_argument "TEST_UID=$(id -u)" || fail 'desktop image needs the invoking UID'
+has_argument "TEST_GID=$(id -g)" || fail 'desktop image needs the invoking GID'
+reset_calls
+bash "$launcher" test-desktop
+count_calls 1
+load_call 0
+has_argument nebula-desktop-check:debian13 || fail 'desktop check image lost'
+has_argument --network=none || fail 'desktop services must stay offline'
+has_argument --read-only || fail 'desktop image must stay read-only'
+has_argument --pids-limit=512 || fail 'desktop service PID budget lost'
+has_argument DISPLAY="$DISPLAY" && fail 'desktop checks must not use the host display'
+[[ "${call[*]}" != *'/tmp/.X11-unix'* ]] || fail 'desktop checks must not mount the host display'
+printf 'PASS: isolated OS desktop image and services\n'
+
+reset_calls
+if bash "$launcher" test-desktop unexpected >/dev/null 2>&1; then fail 'desktop check accepted extra arguments'; fi
+compgen -G "$NEBULA_TEST_CALLS/*" >/dev/null && fail 'invalid desktop mode must fail before Docker'
+printf 'PASS: desktop argument validation\n'

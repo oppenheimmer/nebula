@@ -43,18 +43,20 @@ architecture or a promise of full Notion or Zim format compatibility.
 
 The following remain implementation decisions rather than settled facts:
 
-- Remaining OS input-method/accessibility validation of the selected page-wide
-  rich-text adapter, including whether those checks require architectural changes.
+- Desktop/input-method/accessibility coverage beyond the recorded Linux
+  IBus/Anthy/Orca profile, including native desktop acceptance on each BSD.
 - Release dependency pinning and third-party distribution notices. The current
   module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
-- Minimum Linux distribution/compiler baseline and FreeBSD/OpenBSD version
-  baselines (amd64).
-- Linux packaging format and the FreeBSD and OpenBSD distribution methods.
+- Supported FreeBSD/OpenBSD version, compiler and dependency baselines (amd64).
+  The selected Linux package target is Debian 13 amd64.
+- Final Linux release verification/version and the FreeBSD/OpenBSD packaging
+  and distribution methods.
 - Portable performance expectations beyond the recorded reference machine;
   budgets are in [PERFORMANCE.md](docs/PERFORMANCE.md) and search behavior in
   [SEARCH.md](docs/SEARCH.md).
-- Cross-platform verification of the defined lossless interchange and Markdown
-  subset; contracts are in [INTERCHANGE.md](docs/INTERCHANGE.md),
+- Native desktop/package verification of interchange workflows on each BSD;
+  cross-system backup/JSON transfer is verified in M10.6. Contracts are in
+  [INTERCHANGE.md](docs/INTERCHANGE.md),
   [MARKDOWN.md](docs/MARKDOWN.md) and
   [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
@@ -262,8 +264,8 @@ now exist, with a workspace chooser and persistent SQLite database-to-page workf
 Content persistence, autosave, typed properties, and saved table views are
 implemented, including the interactive wiki workflow and managed attachments.
 Local search, structured reference queries, Markdown conversion and lossless JSON
-interchange and pasted-link previews are implemented. Reliability and release
-validation remain unfinished.
+interchange and pasted-link previews are implemented. Release validation remains
+unfinished.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -282,7 +284,7 @@ including material data-handling limitations, rather than a running progress log
 | M05 | Complete first-release block editing | M01, M04 | Complete |
 | M06 | Attachments and diary workflow | M03, M05 | Complete |
 | M07 | Search and portable interchange | M04, M06 | Complete |
-| M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
+| M08 | Reliability, accessibility, and performance | M04–M07 | Complete |
 | M09 | Linux release | M08 | In progress |
 | M10 | FreeBSD and OpenBSD releases (amd64) | M09 | In progress |
 | M11 | Thorough code audit and simplification | M00–M10 complete | Not started |
@@ -556,7 +558,7 @@ and a release candidate with known limitations documented.
 
 - [x] M08.1 Exercise crash/interruption scenarios, failed writes, migration errors,
   trash restoration, and backup restoration across the complete workflow.
-- [ ] M08.2 Recheck keyboard navigation, focus, screen-reader semantics, clipboard,
+- [x] M08.2 Recheck keyboard navigation, focus, screen-reader semantics, clipboard,
   Unicode, and input-method composition in the integrated application. Use an
   actual OS IME to check candidate selection, composition updates, commit/cancel,
   and Enter/cursor/selection/undo at block boundaries. Check screen-reader
@@ -596,6 +598,12 @@ and a release candidate with known limitations documented.
 Exit criteria: required checks have recorded outcomes; supported saved data
 survives the documented recovery scenarios; no unresolved release-blocking defect
 remains. Performance meets the agreed thresholds on recorded hardware/fixtures.
+
+Completion evidence: the recorded reliability/performance checks plus real Linux
+IBus/Anthy composition, Orca speech/selection through F8 block details, full native
+interaction suites and controlled Xvfb/Xwayland focus stress. BUG-023–BUG-025 have
+focused regressions; detailed environments, results and coverage limits are in
+the final M08 work-log checkpoint. BSD desktop acceptance remains M10.5.
 
 ### M09 — Linux release
 
@@ -640,7 +648,7 @@ instructions. Other BSD systems and architectures are outside this milestone.
 - [ ] M10.5 Verify text/input-method behavior, accessibility and the complete
   database/page workflow on each BSD desktop. Record actual IME, screen-reader,
   display and Qt results separately, including unavailable checks.
-- [ ] M10.6 Verify backup/export transfer among Linux, FreeBSD amd64 and OpenBSD
+- [x] M10.6 Verify backup/export transfer among Linux, FreeBSD amd64 and OpenBSD
   amd64 while preserving notes, IDs, references and attachment bytes; this is
   manual portability, not synchronization.
 - [ ] M10.7 Select native packaging and installation methods for each BSD,
@@ -937,7 +945,8 @@ problems remain in the risk register until reproduced.
 
 ### BUG-014 — Intermittent native search shortcut check
 
-- **Milestone/state:** M07/M08; Investigating. One native suite run reported
+- **Milestone/state:** M07/M08; Closed as a validation issue after controlled
+  native stress. One earlier native suite run reported
   a failed search shortcut assertion while other builds were running.
 - **Environment/reproduction:** RHEL 9.8 Xwayland display, Debian 13 container,
   Qt 6.8.2/GCC 14.2.0. Run native editor/desktop checks alongside Clang/core builds.
@@ -953,7 +962,11 @@ problems remain in the risk register until reproduced.
   M08 before treating this as resolved; the passing retry alone is not a fix claim.
 - **Latest verification:** a second captured native run, with the explicit
   activation/focus preconditions, passed all 52 editor and 60 desktop cases.
-  Stress verification of the intermittent failure remains pending.
+  At that checkpoint, stress verification of the intermittent failure remained pending.
+- **Final verification:** the original workflow passed 20 repetitions on RHEL
+  Xwayland and another 20 on private Xvfb/Openbox, with explicit focus/activation
+  preconditions. The original timing cause remains unconfirmed; no product
+  defect or product-fix claim is inferred. See the M08.2 checkpoint.
 
 ### BUG-015 — Block restoration fell through to page restoration
 
@@ -1033,7 +1046,8 @@ problems remain in the risk register until reproduced.
 
 ### BUG-019 — Intermittent native outgoing-link activation check
 
-- **Milestone/state:** M08.2; Investigating. A test failure; no product defect
+- **Milestone/state:** M08.2; Closed as a validation issue after controlled
+  native stress. An earlier test failure; no product defect
   or data loss is established.
 - **Environment/reproduction:** RHEL 9.8 Xwayland, Qt 6.8.2/Debian 13 Docker.
   `test-native` ran alongside Clang/ASan/core checks. The existing
@@ -1042,9 +1056,14 @@ problems remain in the risk register until reproduced.
 - **Expected/actual:** selecting an existing target resolves only the second
   reference. That run left it unresolved. The full native retry passed all 60
   desktop behavior cases without a product change to the picker.
-- **Diagnosis/resolution:** not established; activation/focus timing is a
-  candidate as in BUG-014. M08.2 must check native activation preconditions and
-  repeat the workflow. A passing retry is not claimed as a fix.
+- **Initial diagnosis:** not established; activation/focus timing was a candidate
+  as in BUG-014. M08.2 needed native activation preconditions and repeated checks.
+  The initial passing retry was not claimed as a fix.
+- **Final verification:** added explicit activation/list-focus preconditions;
+  the exact unresolved-choice and outgoing-link workflows each passed 20
+  repetitions on RHEL Xwayland and 20 on private Xvfb/Openbox. The original cause
+  remains unconfirmed; this closes validation without claiming a picker defect
+  was found or fixed. See the M08.2 checkpoint.
 
 ### BUG-020 — Reused read-only export falsely reports a corrupt search index
 
@@ -1108,6 +1127,67 @@ problems remain in the risk register until reproduced.
 - **Verification:** the new presence check failed before the fix; after inclusion,
   the complete isolated offline package check passes, including reinstall/removal
   preservation, window editing/search, interchange, backup/restore and TLS.
+
+### BUG-023 — Read-only block details did not support keyboard selection
+
+- **Milestone/state:** M08.2; Fixed and verified. Reproduced in the resumed, uncommitted accessibility
+  implementation. The existing committed editor is unaffected.
+- **Environment/reproduction:** Debian 13 optional desktop image, Qt 6.8.2,
+  GCC 14.2.0, Xvfb/Openbox/Orca 48.1; open F8 Block details and press
+  Ctrl+Home, Shift+End. The reader sees text, but no selection is exported.
+- **Expected/actual:** keyboard navigation/selection must work in the read-only
+  text field. The focused offscreen regression also fails `keyboard_selection`;
+  later F8 invocations lose activation after closing the dialog with Escape.
+- **Diagnosis:** Qt's read-only plain-text field defaults to mouse selection.
+  Keyboard selection needs an explicit text interaction flag. Dialog return also
+  needs the same explicit window/editor activation used by other modal commands.
+- **Resolution/verification:** enable keyboard selection, reuse the dialog for
+  AT-SPI lifetime stability and restore editor activation/focus. Qt, real Orca
+  and native-window regressions pass; final results are in the M08.2 work-log
+  entry. The failing regression is retained in `tests/desktop_tests.cpp`;
+  its pre-fix output is in ignored `build-container-gcc/details-before.log`.
+
+### BUG-024 — IME preedit and mode keys marked unchanged pages dirty
+
+- **Milestone/state:** M08.2; Fixed and verified. Reproduced during real OS desktop acceptance.
+  Unnecessary saves advance revisions and can invalidate workspace move undo;
+  no lost note content was observed.
+- **Environment/reproduction:** Debian 13, Qt 6.8.2, IBus 1.5.32/Anthy,
+  Xvfb/Openbox. The full native desktop suite's cancelled/invalid-image import
+  check observed revision 2 instead of 1 without a document edit. A focused
+  synthetic preedit regression then reproduced one `textChanged` signal for
+  unchanged canonical text (ignored `build-container-gcc/ime-before.log`).
+- **Diagnosis:** non-editing input events and IME mode/function/Escape keys opened
+  empty edit groups, as in BUG-011/G21. A second focused check showed that Qt
+  also emits native `textChanged` for visual preedit updates themselves, without
+  canonical edits; simply removing the group did not prevent false saves.
+- **Resolution/verification:** distinguish canonical edits from native display
+  notifications in the editor adapter and bind autosave to the canonical signal.
+  Keep native selection/cursor notifications and group commits/replacement
+  deletion normally; dispatch mode/function/Escape keys without an edit group.
+  Focused preedit/update/cancel, replacement deletion/undo, mode-key and real-IME
+  unchanged-revision checks pass. Results are in the M08.2 checkpoint.
+
+### BUG-025 — Backspace at a nested block's start did not leave its parent
+
+- **Milestone/state:** M05.2/M08.2; Fixed and verified after the user's report.
+- **Environment/reproduction:** Debian 13 development container, Qt 6.8.2,
+  GCC 14.2.0. Nest a block below a parent, place the caret at offset zero with
+  no selection and press Backspace. The user expects one level of outdent;
+  the block remains nested. Empty blocks behave the same way.
+- **Diagnosis:** the editor delegated this key to QTextEdit, which changed visual
+  indentation without changing Nebula's parent identity. Normalization correctly
+  restored indentation from that unchanged identity, leaving the block stuck.
+- **Resolution:** route unmodified Backspace at the start of a nested editable
+  block through the existing subtree outdent operation. Retain text, block type,
+  IDs, descendants and sibling order; keep normal deletion/selection behavior
+  elsewhere and group the outdent for undo/redo.
+- **Verification:** the new focused regression first failed on unchanged block
+  order (`build-container-gcc/backspace-before.log`, ignored). Empty/nonempty
+  paragraph, heading, bullet and checked-task cases pass, including successive
+  outdents, descendants, formatting, identity and undo/redo. Persisted-window
+  checks retain backlinks, create no trash and survive reopen; native Xwayland
+  checks pass. Final compiler/sanitizer results are in the work-log checkpoint.
 
 For each future defect, record:
 
@@ -1238,6 +1318,21 @@ milestone, evidence, and the resulting action.
   image explicitly includes `/usr/share/doc/nebula/*` before installation so local
   documentation checks exercise the actual files. That include applies only to
   the verification image.
+
+- **G31 — Read-only Qt text needs explicit keyboard selection (2026-10-30,
+  M08.2):** the first Block details regression could read the field but could not
+  select a line with Shift+End (BUG-023). Set `TextSelectableByKeyboard` alongside
+  mouse selection. Keep reusable dialog objects valid for AT-SPI clients and wait
+  for the reader's actual focus announcement before testing the next keystroke.
+- **G32 — Native text-change signals include visual composition (2026-10-30,
+  M08.2):** after removing empty edit groups, a focused Qt 6.8.2 check still saw
+  `textChanged` for preedit without canonical text changes (BUG-024). Autosave
+  must observe canonical edits; preserve native display/cursor/selection signals.
+- **G33 — Reader debug files can buffer successful speech (2026-10-30,
+  M08.2):** Orca 48.1 opens its debug file with block buffering. A live assertion
+  timed out although the requested focus speech appeared in the file on exit.
+  Its private test-user customization sets line buffering for that log only;
+  speech generation and the installed reader remain unchanged.
 
 ## Suggestions
 
@@ -2806,6 +2901,27 @@ begin as part of this shutdown.
   It includes the installed documentation fix. Actual native transfer outcomes
   will be recorded after dispatch; M10.6 remains unchecked until then.
 
+### Native cross-system transfer closure — 2026-10-30
+
+- Completed M10.6 at revision `7724481`: [native run 41042093069](https://github.com/oppenheimmer/nebula/actions/runs/41042093069)
+  passed all six jobs. Linux, FreeBSD 14.5 amd64 and OpenBSD 8.0 amd64 each
+  produced a synthetic backup/JSON bundle, then each consumer verified all three
+  origins. All six directed cross-OS paths and all three same-OS controls passed
+  fresh restore/import, exact canonical JSON equality and attachment byte checks.
+- Both supported-version native guests additionally passed core-only 2/2 and
+  full 15/15 CTest groups with warnings-as-errors and default routes removed.
+  FreeBSD: 14.5-RELEASE GENERIC, Clang 21.1.8, CMake 3.31.12, SQLite 3.53.4,
+  Qt 6.11.2_1, OpenSSL 3.0.21. OpenBSD: 8.0 GENERIC.MP#2, Clang 22.1.6,
+  CMake 4.3.5, SQLite 3.53.2, Qt 6.11.2p1, LibreSSL 4.4.0. The TLS certificate
+  and hostname regression passed independently on both providers.
+- Native Qt tests used offscreen rendering and skipped the container-specific
+  multilingual font fixture. These results close manual data portability, not
+  BSD desktop/IME/reader or native packaging acceptance. M10.3–M10.5/M10.7
+  remain In progress; no unsupported OS is selected as a release baseline.
+- Local Clang full checks also passed 15/15 at the transfer implementation
+  checkpoint. The optional OS desktop validation being developed next will need
+  its own fresh build, reader evidence and regressions before completion.
+
 ### Post-milestone audit scheduled — 2026-10-30
 
 - At the user's request, added M11 after completion of all existing milestones.
@@ -2818,6 +2934,83 @@ begin as part of this shutdown.
   status. Prose links/fences across 17 Markdown files, 83 unique ordered task IDs
   and `git diff --check` passed. Application tests are not required for this
   documentation-only scheduling change.
+
+### Linux OS input/accessibility and nested Backspace closure — 2026-10-30
+
+- Resumed the uncommitted M08.2 implementation after reading README/roadmap and
+  inspecting status. Preserved its optional desktop-image work and independently
+  confirmed native transfer run 41042093069 at `7724481` succeeded in all six
+  jobs before recording M10.6 complete. M11 was separately committed/pushed as
+  `a6b4e45`, using configured authorship and no attribution trailers.
+- Completed M08.2 and M08 on the recorded Linux profile. The optional image
+  builds from the pinned recipe as
+  `sha256:fbf5a48c71385692c68fe72f5b06c74203a13c504640f6d389d00e223432a4ff`.
+  Actual components: Debian 13 amd64, Qt 6.8.2/GCC 14.2.0, Xvfb 21.1.16,
+  Openbox 3.6.1, IBus 1.5.32, ibus-anthy 1.5.17/Anthy 0.4, Orca 48.1,
+  AT-SPI 2.56.2, Speech Dispatcher 0.12.0 and PulseAudio 17.0. Runtime checks use
+  network=none, a private display/bus/null audio sink, a read-only source/root
+  filesystem and temporary test-user state. No host dependencies were installed.
+- Real XTest keys traverse IBus: preedit updates, candidate selection and exact
+  candidate commit, cancellation, Enter/split, boundary selection/merge,
+  clipboard and commit/structural undo/redo pass while IDs persist. Preedit-only
+  flush leaves the saved revision unchanged. BUG-024 required an editor-owned
+  canonical-change signal: Qt's native text-change signal also describes visual
+  composition. Autosave now ignores preedit and mode/function/Escape keys without
+  suppressing native display/cursor/selection notifications. Empty replacement
+  deletion remains a real grouped edit with a regression.
+- F8/context-menu Block details exposes type, nesting, checked state, references
+  and card labels as selectable read-only text. It preserves note text, the
+  editor's selection, undo and saved revision. Real Orca speech and AT-SPI checks
+  pass for headings, nested bullets, tasks, reference text/type, image/file labels,
+  editor selection and focus restoration after every inspection. Fixed BUG-023
+  with keyboard-selection flags, a reusable dialog and focus restoration.
+- The private native profile passed 58 editor and 61 desktop cases, excluding
+  setup/cleanup and the two separately exercised real-IME/reader cases. Search,
+  unresolved-target choice and outgoing/backlink keyboard navigation each passed
+  20 private-desktop repetitions. After explicit user approval for host display
+  access, the same three workflows each passed another 20 repetitions on RHEL
+  Xwayland. BUG-014/BUG-019 close as validation issues; their original timing
+  causes remain unconfirmed, with no picker/product-defect fix inferred.
+- The user's subsequent Backspace report reproduced BUG-025: native visual
+  unindent left the application parent ID unchanged, then normalization restored
+  nesting. Backspace at offset zero with no selection now invokes the existing
+  subtree outdent. Empty/nonempty paragraph, heading, bullet and checked-task
+  fixtures cover two levels, preserved IDs/formatting/children and separate
+  undo/redo steps. The real workspace test verifies save, backlinks, no recovery
+  fragments, undo/redo and reopening. Final targeted Xwayland editor/window
+  checks pass, including ordinary root merging and the IME/dialog regressions.
+- GCC, Clang and ASan/UBSan verified all 15 CTest groups across full runs and
+  focused reruns. The new Backspace test initially sent its second key after redo
+  without establishing the caret precondition; it now checks consecutive outdents
+  before undo/redo. Only that failed editor group was rebuilt/repeated on all
+  three configurations, and each passed. Other groups had passed the final full
+  runs. Leak detection remains off. Earlier pre-fix keyboard-selection/preedit/
+  mode-key/Backspace failures are retained in ignored build logs.
+- Harness corrections: bounded subprocess waits, fresh and line-buffered real
+  Orca logs, and separate comparisons for editor normalization versus original
+  persisted card representation. These prevent false failures without changing
+  reader speech or requiring a no-op save. The new CI desktop job reproduces this
+  isolated profile; its real-runner result follows the push, not an assumption
+  from local success.
+- Rebuilt the Debian `0.1.0~dev1` preview with the final application changes.
+  The complete isolated package check passed installation/reinstallation/removal
+  preservation, 62 window behavior cases (the two real-OS cases are exercised in
+  the separate desktop profile), nine preview/TLS cases, editing/search,
+  Markdown/JSON, managed bytes and backup/restore. Artifact:
+  `build-container-gcc/packages/nebula-0.1.0~dev1-x86_64.deb`, SHA-256
+  `bc9fdc65ff28a6cecbeda20ddd49d4b4f0e5a93edb9e58a955a64939d1c5b55c`.
+  It stays ignored and is not a published release. Later work-log bookkeeping
+  is not embedded retrospectively in that package.
+- Formatter, Bash/POSIX-shell/Python syntax, prose links/fences across 17 Markdown
+  files, 83 unique ordered milestone task IDs, 25 unique bug IDs, status/scope
+  consistency and `git diff --check` pass.
+- Limits: speech was verified from the real reader/dispatcher through a private
+  null sink, without subjective audio-quality acceptance. The native editor is a
+  text field; block semantics use F8. Other IMEs/compositors and both BSD desktops
+  remain outside this Linux profile. The final Backspace guard was verified after
+  that full OS profile with focused native regressions. Existing performance
+  budgets remain recorded; no new performance claim is made. M09.4 and
+  M10.3–M10.5/M10.7 remain open; M11 waits for all preceding milestones.
 
 ## Technical references discussed
 

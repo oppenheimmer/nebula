@@ -467,7 +467,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         refresh_table();
     });
     connect(autosave_, &QTimer::timeout, this, [this] { flush(); });
-    connect(page_editor(), &QTextEdit::textChanged, this, &WorkspaceWindow::mark_pending);
+    connect(page_editor(), &PageEditor::content_changed, this, &WorkspaceWindow::mark_pending);
     new PastedLinkPreview(page_editor(), statusBar(), this);
     connect(page_editor(), &QTextEdit::cursorPositionChanged, this, &WorkspaceWindow::update_attachment_actions);
     connect(page_editor(), &QTextEdit::cursorPositionChanged, this, &WorkspaceWindow::update_trash_actions);

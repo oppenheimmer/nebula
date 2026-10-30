@@ -6,6 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: ./scripts/dev.sh build-desktop-image
+      - run: ./scripts/dev.sh test-desktop
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 60

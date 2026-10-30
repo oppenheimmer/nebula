@@ -9,6 +9,8 @@ compiler=${2:-gcc}
 usage() {
     cat <<'HELP'
 Usage: ./scripts/dev.sh build-image
+       ./scripts/dev.sh build-desktop-image
+       ./scripts/dev.sh test-desktop
        ./scripts/dev.sh test [gcc|clang|core|asan]
        ./scripts/dev.sh stress [REPEATS]
        ./scripts/dev.sh fuzz [SECONDS_PER_TARGET]
@@ -70,6 +72,11 @@ fi
 if [[ "$command_name" == build-image ]]; then
     exec docker build --file "$project_dir/Dockerfile.dev" --tag "$image" "$project_dir"
 fi
+if [[ "$command_name" == build-desktop-image ]]; then
+    exec docker build --file "$project_dir/Dockerfile.dev" --target desktop-check \
+        --build-arg "TEST_UID=$(id -u)" --build-arg "TEST_GID=$(id -g)" \
+        --tag nebula-desktop-check:debian13 "$project_dir"
+fi
 
 case "$command_name" in
     test)
@@ -106,6 +113,10 @@ case "$command_name" in
         [[ $# == 1 || ( $# == 2 && $2 == --check ) ]] || { usage >&2; exit 2; }
         compiler=gcc
         ;;
+    test-desktop)
+        [[ $# == 1 ]] || { usage >&2; exit 2; }
+        compiler=gcc; image=nebula-desktop-check:debian13
+        ;;
     run|test-native|shell|backup|restore|export-md|import-md|export-json|import-json) compiler=gcc ;;
     *) usage >&2; exit 2 ;;
 esac
@@ -117,15 +128,27 @@ fi
 
 build_dir="$project_dir/build-container-$compiler"
 mkdir -p "$build_dir"
+pid_limit=256; tmp_size=256m
+if [[ "$command_name" == test-desktop ]]; then pid_limit=512; tmp_size=512m; fi
 run=(docker run --rm --init --network=none --cap-drop=ALL
-     --security-opt=no-new-privileges --pids-limit=256
+     --security-opt=no-new-privileges --pids-limit="$pid_limit"
      --user "$(id -u):$(id -g)" --read-only
-     --tmpfs /tmp:rw,nosuid,nodev,size=256m,mode=1777
+     --tmpfs "/tmp:rw,nosuid,nodev,size=$tmp_size,mode=1777"
      --mount "$(mount_spec "$project_dir" /workspace readonly)"
      --mount "$(mount_spec "$build_dir" /build)"
      --workdir /workspace)
 
 case "$command_name" in
+    test-desktop)
+        exec "${run[@]}" "$image" sh -ec '
+            cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \
+                -DNEBULA_BUILD_EDITOR=ON -DNEBULA_WERROR=ON -DNEBULA_SANITIZE=OFF -DNEBULA_LIBFUZZER=OFF
+            cmake --build /build --parallel 4 --target desktop_tests editor_tests
+            mkdir -p "$HOME" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME"
+            chmod 700 "$HOME" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME"
+            exec xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" \
+                dbus-run-session -- sh /workspace/scripts/desktop-check.sh'
+        ;;
     portability)
         exec "${run[@]}" --env "NEBULA_PORTABILITY_MODE=$mode" "$image" sh -ec '
             cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \

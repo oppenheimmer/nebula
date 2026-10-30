@@ -7,6 +7,7 @@
 #include <QClipboard>
 #include <QFontMetrics>
 #include <QInputMethodEvent>
+#include <QKeyEvent>
 #include <QMimeData>
 #include <QScrollBar>
 #include <QSignalSpy>
@@ -74,6 +75,7 @@ private slots:
     void enter_continues_lists_and_resets_checkbox();
     void shift_enter_keeps_identity();
     void backspace_merges_and_undo_restores_identity();
+    void backspace_at_nested_block_start_outdents_subtree();
     void delete_merges_and_undo_restores_identity();
     void paste_normalizes_line_endings_and_ids();
     void keyboard_selection_spans_blocks();
@@ -136,6 +138,13 @@ void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
     QTest::keyClick(&editor, Qt::Key_Left, Qt::ShiftModifier);
     QTest::keyClick(&editor, Qt::Key_C, Qt::ControlModifier);
     QTest::keyClick(&editor, Qt::Key_Home, Qt::ControlModifier);
+    // QTest's ASCII key mapper cannot generate these native IME mode keys.
+    for (const auto key : {Qt::Key_Zenkaku_Hankaku, Qt::Key_Hangul, Qt::Key_Escape, Qt::Key_F1}) {
+        QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier);
+        QApplication::sendEvent(&editor, &press);
+        QKeyEvent release(QEvent::KeyRelease, key, Qt::NoModifier);
+        QApplication::sendEvent(&editor, &release);
+    }
     QCOMPARE(changes.count(), 0);
     QVERIFY(!editor.document()->isUndoAvailable());
     QCOMPARE(ids(editor.snapshot()), ids(before));
@@ -825,6 +834,57 @@ void EditorTests::delete_merges_and_undo_restores_identity()
     QCOMPARE(ids(editor.snapshot()), ids(short_page()));
 }
 
+void EditorTests::backspace_at_nested_block_start_outdents_subtree()
+{
+    for (const auto kind : {BlockKind::Paragraph, BlockKind::Heading, BlockKind::Bullet, BlockKind::Todo}) {
+        for (const bool empty : {false, true}) {
+            Page original{
+                "nested-backspace",
+                {{"outer", "", BlockKind::Heading, {{"Outer"}}},
+                 {"parent", "outer", BlockKind::Paragraph, {{"Parent"}}},
+                 {"prior", "parent", BlockKind::Paragraph, {{"First child"}}},
+                 {"child", "parent", kind, empty ? std::vector<Run>{} : std::vector<Run>{{u8"日本語 café", true}}},
+                 {"grandchild", "child", BlockKind::Paragraph, {{"Keep descendant"}}},
+                 {"later", "parent", BlockKind::Paragraph, {{"Keep sibling"}}},
+                 {"next", "", BlockKind::Paragraph, {{"Next root"}}}}};
+            original.blocks[3].checked = kind == BlockKind::Todo;
+            PageEditor editor;
+            ready(editor, original);
+            QVERIFY(editor.go_to_block("child"));
+            QTest::keyClick(&editor, Qt::Key_Backspace);
+            const auto outdented = editor.snapshot();
+            validate(outdented);
+            QCOMPARE(ids(outdented), QStringList({"outer", "parent", "prior", "later", "child", "grandchild", "next"}));
+            QCOMPARE(outdented.blocks[4].parent_id, std::string("outer"));
+            QCOMPARE(outdented.blocks[4].kind, kind);
+            QCOMPARE(outdented.blocks[4].checked, original.blocks[3].checked);
+            QCOMPARE(text(outdented.blocks[4]), text(original.blocks[3]));
+            if (!empty)
+                QVERIFY(outdented.blocks[4].runs[0].bold);
+            QCOMPARE(outdented.blocks[5].parent_id, std::string("child"));
+            QCOMPARE(outdented.blocks[3].parent_id, std::string("parent"));
+            QCOMPARE(editor.current_block_id(), QString("child"));
+            QCOMPARE(editor.textCursor().positionInBlock(), 0);
+            QCOMPARE(editor.textCursor().blockFormat().indent(), 1);
+            QVERIFY(editor.take_absorbed_blocks().empty());
+            QTest::keyClick(&editor, Qt::Key_Backspace);
+            QVERIFY(editor.snapshot().blocks[4].parent_id.empty());
+            QCOMPARE(editor.textCursor().blockFormat().indent(), 0);
+            const auto promoted = encode_document(editor.snapshot());
+            editor.undo();
+            QCOMPARE(encode_document(editor.snapshot()), encode_document(outdented));
+            editor.undo();
+            QCOMPARE(encode_document(editor.snapshot()), encode_document(original));
+            QCOMPARE(editor.current_block_id(), QString("child"));
+            QCOMPARE(editor.textCursor().positionInBlock(), 0);
+            editor.redo();
+            QCOMPARE(encode_document(editor.snapshot()), encode_document(outdented));
+            editor.redo();
+            QCOMPARE(encode_document(editor.snapshot()), promoted);
+        }
+    }
+}
+
 void EditorTests::paste_normalizes_line_endings_and_ids()
 {
     PageEditor editor;
@@ -1052,9 +1112,17 @@ void EditorTests::input_method_preedit_and_commit()
     PageEditor editor;
     ready(editor);
     at(editor, 0);
+    QSignalSpy changes(&editor, &PageEditor::content_changed);
     QInputMethodEvent preedit(QString::fromUtf8(u8"に"), {});
     QApplication::sendEvent(&editor, &preedit);
     QCOMPARE(text(editor.snapshot().blocks[0]), QString("alpha"));
+    QCOMPARE(changes.count(), 0);
+    QInputMethodEvent update(QString::fromUtf8(u8"にほ"), {});
+    QApplication::sendEvent(&editor, &update);
+    QInputMethodEvent cancel;
+    QApplication::sendEvent(&editor, &cancel);
+    QCOMPARE(changes.count(), 0);
+    QVERIFY(!editor.document()->isUndoAvailable());
     QInputMethodEvent commit;
     commit.setCommitString(QString::fromUtf8(u8"日本語🌙"));
     QApplication::sendEvent(&editor, &commit);
@@ -1062,6 +1130,15 @@ void EditorTests::input_method_preedit_and_commit()
     QCOMPARE(ids(editor.snapshot()), ids(short_page()));
     editor.undo();
     QCOMPARE(text(editor.snapshot().blocks[0]), QString("alpha"));
+    // An empty commit may still delete a replacement range.
+    at(editor, 1);
+    QInputMethodEvent replacement;
+    replacement.setCommitString({}, -1, 1);
+    QApplication::sendEvent(&editor, &replacement);
+    QCOMPARE(text(editor.snapshot().blocks[0]), QString("lpha"));
+    editor.undo();
+    QCOMPARE(text(editor.snapshot().blocks[0]), QString("alpha"));
+    QCOMPARE(ids(editor.snapshot()), ids(short_page()));
 }
 
 void EditorTests::container_font_baseline_renders_sample_scripts()

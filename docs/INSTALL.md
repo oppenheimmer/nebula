@@ -1,8 +1,8 @@
 # Linux package preparation and verification
 
 The current artifact is a **development preview**, `0.1.0~dev1`, for Debian 13
-amd64. It is not a published release. Linux OS input-method/screen-reader
-acceptance and remaining release issues are tracked in [ROADMAP](../ROADMAP.md).
+amd64. It is not a published release. Release verification and remaining issues
+are tracked in [ROADMAP](../ROADMAP.md).
 Other distributions, architectures and BSD native packages are not established
 by this verification.
 

@@ -159,6 +159,30 @@ Backup/JSON fixtures are transferred among all three OSes in short-lived CI
 artifacts, with exact canonical manifest and attachment-byte checks. Native
 desktop/IME/accessibility and package validation remain separate M10 requirements.
 
+## Optional Linux desktop acceptance environment
+
+`build-desktop-image` selects the `desktop-check` stage in `Dockerfile.dev`;
+`test-desktop` runs it without networking or host display/audio/session-bus mounts.
+The ordinary development image and application package do not gain these tools.
+Xvfb/Openbox supply a private X11 desktop; IBus/Anthy provide real Japanese
+composition; Orca/AT-SPI expose reader speech and text selection. Speech Dispatcher,
+eSpeak NG and PulseAudio route speech to a private null sink. `xdotool` supplies
+XTest key events and Python pyatspi inspects AT-SPI. The image generates its own
+English UTF-8 locale for deterministic reader output.
+
+These are development-only Debian dependencies with their own notices under
+`/usr/share/doc/<package>/copyright`. The main licenses are X11/MIT for Xvfb/xauth,
+GPL-2-or-later for Openbox and ibus-anthy, LGPL-2.1-or-later for IBus and Orca,
+BSD-3-Clause for xdotool, LGPL/GPL for pyatspi, GPL/LGPL for Speech Dispatcher and
+PulseAudio, and GPL-3-or-later for eSpeak NG. D-Bus offers AFL-2.1/GPL-2-or-later;
+the locale data and supporting components retain their separate package notices.
+These summaries do not replace the installed notices or relicense the tools.
+
+The C++/Qt/SQLite baselines are unchanged. This Linux profile establishes no
+FreeBSD/OpenBSD desktop support: M10.5 requires separate native input/reader
+environments and evidence on each BSD. The F8 details dialog uses existing Qt
+Widgets APIs and adds no application runtime dependency.
+
 ## Debian package preview
 
 The development package targets Debian 13 amd64 and dynamically links the system

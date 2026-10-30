@@ -2,6 +2,7 @@
 #include "nebula/app/workspace_dialog.hpp"
 #include "nebula/app/workspace_window.hpp"
 #include "nebula/editor/page_editor.hpp"
+#include "nebula/format/codec.hpp"
 #include "nebula/storage/workspace.hpp"
 
 #include <QAbstractItemView>
@@ -12,15 +13,18 @@
 #include <QCompleter>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImage>
 #include <QInputDialog>
+#include <QInputMethodEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QPlainTextEdit>
 #include <QPointer>
 #include <QProcess>
 #include <QPushButton>
@@ -86,11 +90,57 @@ void click_action(PrototypeWindow& window, const char* name)
     QTest::mouseClick(button, Qt::LeftButton);
     QApplication::processEvents();
 }
+// Real XTest events travel through Qt's platform input context and IBus.
+bool native_command(const QString& command, const QStringList& arguments, int timeout = 30000)
+{
+    QProcess process;
+    process.start(command, arguments);
+    if (!process.waitForStarted())
+        return false;
+    QElapsedTimer timer;
+    timer.start();
+    while (process.state() != QProcess::NotRunning && timer.elapsed() < timeout)
+        QTest::qWait(10);
+    if (process.state() != QProcess::NotRunning) {
+        process.kill();
+        process.waitForFinished();
+        return false;
+    }
+    const auto output = process.readAllStandardOutput();
+    if (!output.isEmpty())
+        qInfo().noquote() << output.trimmed();
+    if (process.exitCode() != 0)
+        qWarning().noquote() << process.readAllStandardError();
+    return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+}
+bool native_keys(const QStringList& keys)
+{
+    return native_command("xdotool", QStringList{"key", "--clearmodifiers", "--delay", "60"} + keys);
+}
+struct NativeComposition : QObject {
+    QString preedit;
+    QStringList updates, commits;
+    bool eventFilter(QObject*, QEvent* event) override
+    {
+        if (event->type() == QEvent::InputMethod) {
+            auto* input = static_cast<QInputMethodEvent*>(event);
+            preedit = input->preeditString();
+            updates.push_back(preedit);
+            if (!input->commitString().isEmpty())
+                commits.push_back(input->commitString());
+        }
+        return false;
+    }
+};
 } // namespace
 
 class DesktopTests : public QObject {
     Q_OBJECT
 private slots:
+    void block_details_keep_selection_and_expose_semantics();
+    void nested_backspace_persists_outdent_and_undo_without_trash();
+    void real_orca_reads_block_details_and_selection();
+    void real_ibus_candidates_commit_cancel_and_preserve_block_boundaries();
     void search_shortcut_opens_matching_block_and_preserves_history();
     void search_scope_cancel_and_rebuild_with_pending_edits();
     void markdown_controls_report_conversion_and_keep_existing_pages();
@@ -1484,6 +1534,8 @@ void DesktopTests::unresolved_existing_choice_replaces_only_the_selected_referen
     QCOMPARE(outgoing->count(), 2);
     outgoing->setCurrentRow(1);
     outgoing->setFocus();
+    QTRY_VERIFY(window.isActiveWindow());
+    QTRY_VERIFY(outgoing->hasFocus());
     choose.start(0);
     QTest::keyClick(outgoing, Qt::Key_Return);
     choose.stop();
@@ -2087,5 +2139,206 @@ void DesktopTests::view_controls_save_multiple_reference_filters_and_cancel_remo
             QCOMPARE(view.link_filters.size(), std::size_t(2));
     QCOMPARE(table->rowCount(), 1);
 }
+void DesktopTests::nested_backspace_persists_outdent_and_undo_without_trash()
+{
+    QTemporaryDir folder;
+    auto workspace = Workspace::open(path(folder.path()));
+    const auto database = workspace.create_database("Notes");
+    const auto page = workspace.create_page(database.id, "Nested typing", {},
+                                            {{"parent", "", BlockKind::Paragraph, {{"Parent"}}},
+                                             {"child", "parent", BlockKind::Paragraph, {{u8"café 日本語"}}},
+                                             {"descendant", "child", BlockKind::Todo, {{"Retain this task"}}},
+                                             {"sibling", "parent", BlockKind::Paragraph, {{"Retain this sibling"}}}});
+    workspace.create_page(
+        database.id, "Reference", {},
+        {{"referrer", "", BlockKind::Paragraph, {{"Child", false, false, Reference{ReferenceKind::Block, "child"}}}}});
+    {
+        WorkspaceWindow window(workspace);
+        show_window(window);
+        QVERIFY(window.open_page(page.document.id));
+        auto* editor = window.page_editor();
+        QVERIFY(editor->go_to_block("child"));
+        QTest::keyClick(editor, Qt::Key_Backspace);
+        QVERIFY(window.flush());
+        const auto saved = workspace.load_page(page.document.id).document;
+        QCOMPARE(saved.blocks.size(), std::size_t(4));
+        QCOMPARE(saved.blocks[1].id, std::string("sibling"));
+        QCOMPARE(saved.blocks[2].id, std::string("child"));
+        QVERIFY(saved.blocks[2].parent_id.empty());
+        QCOMPARE(saved.blocks[3].parent_id, std::string("child"));
+        QVERIFY(workspace.deleted_blocks().empty());
+        QCOMPARE(workspace.backlinks(ReferenceKind::Block, "child").size(), std::size_t(1));
+        editor->undo();
+        QVERIFY(window.flush());
+        QCOMPARE(workspace.load_page(page.document.id).document.blocks[1].parent_id, std::string("parent"));
+        editor->redo();
+        QVERIFY(window.flush());
+        QCOMPARE(encode_document(workspace.load_page(page.document.id).document), encode_document(saved));
+    }
+    auto reopened = Workspace::open(path(folder.path()));
+    const auto restored = reopened.load_page(page.document.id).document;
+    QCOMPARE(restored.blocks[2].id, std::string("child"));
+    QVERIFY(restored.blocks[2].parent_id.empty());
+    QCOMPARE(restored.blocks[2].runs[0].text, std::string(u8"café 日本語"));
+    QCOMPARE(restored.blocks[3].parent_id, std::string("child"));
+    QVERIFY(reopened.deleted_blocks().empty());
+    QCOMPARE(reopened.backlinks(ReferenceKind::Block, "child").size(), std::size_t(1));
+}
+
+void DesktopTests::block_details_keep_selection_and_expose_semantics()
+{
+    PrototypeWindow window(sample_page());
+    show_window(window);
+    auto* editor = window.page_editor();
+    auto inspect = [&](const QString& id, const QString& expected) {
+        QVERIFY(editor->go_to_block(id));
+        auto cursor = editor->textCursor();
+        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        editor->setTextCursor(cursor);
+        const auto before = encode_document(editor->snapshot());
+        const auto position = editor->capture_position();
+        const bool undo = editor->document()->isUndoAvailable();
+        QSignalSpy changes(editor, &QTextEdit::textChanged);
+        QString contents, name;
+        bool read_only = false, keyboard_selection = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            if (auto* text = dialog->findChild<QPlainTextEdit*>("blockDetailsText")) {
+                contents = text->toPlainText();
+                name = text->accessibleName();
+                read_only = text->isReadOnly();
+                QTest::keyClick(text, Qt::Key_Home, Qt::ControlModifier);
+                QTest::keyClick(text, Qt::Key_End, Qt::ShiftModifier);
+                keyboard_selection = text->textCursor().hasSelection();
+                QTest::keyClick(text, Qt::Key_Escape);
+                return;
+            }
+            dialog->reject();
+        });
+        QTest::keyClick(editor, Qt::Key_F8);
+        QVERIFY(read_only);
+        QVERIFY(keyboard_selection);
+        QVERIFY2(contents.contains(expected), qPrintable(contents));
+        QCOMPARE(name, QString("Block details"));
+        QCOMPARE(encode_document(editor->snapshot()), before);
+        const auto after = editor->capture_position();
+        QCOMPARE(after.block, position.block);
+        QCOMPARE(after.offset, position.offset);
+        QCOMPARE(after.anchor_block, position.anchor_block);
+        QCOMPARE(after.anchor_offset, position.anchor_offset);
+        QCOMPARE(editor->document()->isUndoAvailable(), undo);
+        QCOMPARE(changes.count(), 0);
+        QTRY_VERIFY(editor->hasFocus());
+    };
+    inspect("heading", "Heading level 1");
+    inspect("list", "Bullet list item");
+    inspect("child", "Nesting level 1");
+    inspect("todo", "Task unchecked");
+    editor->toggle_checked();
+    inspect("todo", "Task checked");
+    inspect("reference", "Local block reference");
+    inspect("image", "Image: Sample image representation");
+    inspect("attachment", "Attachment: journal-notes.txt");
+    editor->insert_unresolved_reference("Later", "Missing page", "");
+    inspect("attachment", "Unresolved page reference: Missing page");
+}
+
+void DesktopTests::real_orca_reads_block_details_and_selection()
+{
+    if (qEnvironmentVariable("NEBULA_OS_DESKTOP") != "1")
+        QSKIP("Requires the isolated Orca/AT-SPI desktop profile");
+    QTemporaryDir folder;
+    auto workspace = Workspace::open(path(folder.path()));
+    const auto page =
+        workspace.create_page(workspace.create_database("Notes").id, "Reader fixture", {}, sample_page().blocks);
+    WorkspaceWindow window(workspace);
+    show_window(window);
+    QVERIFY(window.open_page(page.document.id));
+    QVERIFY(window.page_editor()->go_to_block("heading"));
+    QVERIFY(
+        native_command("python3", {"-c", "import gi;gi.require_version('IBus','1.0');from gi.repository import IBus;"
+                                         "assert IBus.Bus.new().set_global_engine('xkb:us::eng')"}));
+    const auto before = encode_document(window.page_editor()->snapshot());
+    const auto persisted_before = encode_document(workspace.load_page(page.document.id).document);
+    QVERIFY(native_command("python3", {"/workspace/scripts/desktop-reader.py"}, 210000));
+    QCOMPARE(encode_document(window.page_editor()->snapshot()), before);
+    QVERIFY(window.flush());
+    const auto persisted_after = workspace.load_page(page.document.id);
+    QCOMPARE(encode_document(persisted_after.document), persisted_before);
+    QCOMPARE(persisted_after.revision, page.revision);
+}
+
+void DesktopTests::real_ibus_candidates_commit_cancel_and_preserve_block_boundaries()
+{
+    if (qEnvironmentVariable("NEBULA_OS_DESKTOP") != "1")
+        QSKIP("Requires the isolated X11/IBus desktop profile");
+    QTemporaryDir folder;
+    auto workspace = Workspace::open(path(folder.path()));
+    const auto page = workspace.create_page(
+        workspace.create_database("Notes").id, "Native input", {},
+        {{"ime-first", {}, BlockKind::Paragraph, {{"Left "}}}, {"ime-second", {}, BlockKind::Paragraph, {{"Right"}}}});
+    WorkspaceWindow window(workspace);
+    show_window(window);
+    QVERIFY(window.open_page(page.document.id));
+    auto* editor = window.page_editor();
+    QVERIFY(editor->go_to_block("ime-first"));
+    auto cursor = editor->textCursor();
+    cursor.movePosition(QTextCursor::EndOfBlock);
+    editor->setTextCursor(cursor);
+    NativeComposition composition;
+    editor->installEventFilter(&composition);
+    QVERIFY(native_command(
+        "python3",
+        {"-c", "import gi;gi.require_version('IBus','1.0');from gi.repository import IBus;"
+               "bus=IBus.Bus.new();print('Global engine selection:',bus.set_global_engine('anthy'),flush=True)"}));
+    QVERIFY(native_keys({"Zenkaku_Hankaku", "n", "i", "h", "o", "n"}));
+    QTRY_VERIFY_WITH_TIMEOUT(!composition.preedit.isEmpty(), 10000);
+    QCOMPARE(editor->snapshot().blocks.size(), std::size_t(2));
+    QCOMPARE(editor->snapshot().blocks[0].runs[0].text, std::string("Left "));
+    QVERIFY(window.flush());
+    QCOMPARE(workspace.load_page(page.document.id).revision, page.revision);
+    const auto kana = composition.preedit;
+    QVERIFY(native_keys({"space", "space", "Down"}));
+    QTRY_VERIFY_WITH_TIMEOUT(!composition.preedit.isEmpty() && composition.preedit != kana, 10000);
+    const auto candidate = composition.preedit;
+    QVERIFY(native_keys({"Return"}));
+    QTRY_VERIFY_WITH_TIMEOUT(!composition.commits.isEmpty(), 10000);
+    QCOMPARE(composition.commits.join(""), candidate);
+    QCOMPARE(editor->toPlainText(), "Left " + candidate + "\nRight");
+    QCOMPARE(editor->snapshot().blocks.size(), std::size_t(2));
+    QVERIFY(window.flush());
+    QCOMPARE(workspace.load_page(page.document.id).document.blocks[0].id, std::string("ime-first"));
+    QVERIFY(native_keys({"k", "a"}));
+    QTRY_VERIFY(!composition.preedit.isEmpty());
+    QVERIFY(native_keys({"Escape", "Escape"}));
+    QTRY_VERIFY(composition.preedit.isEmpty());
+    QCOMPARE(editor->toPlainText(), "Left " + candidate + "\nRight");
+    QVERIFY(native_keys({"Return"}));
+    QTRY_COMPARE(editor->snapshot().blocks.size(), std::size_t(3));
+    QVERIFY(native_keys({"ctrl+z"}));
+    QTRY_COMPARE(editor->snapshot().blocks.size(), std::size_t(2));
+    QVERIFY(native_keys({"Home", "shift+End"}));
+    QTRY_COMPARE(editor->textCursor().selectedText(), "Left " + candidate);
+    QVERIFY(native_keys({"ctrl+c", "Right", "End", "ctrl+v"}));
+    QTRY_COMPARE(editor->toPlainText(), "Left " + candidate + "Left " + candidate + "\nRight");
+    QVERIFY(native_keys({"ctrl+z"}));
+    QTRY_COMPARE(editor->toPlainText(), "Left " + candidate + "\nRight");
+    QVERIFY(native_keys({"ctrl+z"}));
+    QTRY_COMPARE(editor->toPlainText(), QString("Left \nRight"));
+    QVERIFY(native_keys({"ctrl+shift+z"}));
+    QTRY_COMPARE(editor->toPlainText(), "Left " + candidate + "\nRight");
+    QVERIFY(native_keys({"ctrl+Home", "End", "shift+Right"}));
+    QTRY_COMPARE(editor->textCursor().selectedText(), QString(QChar::ParagraphSeparator));
+    QVERIFY(native_keys({"Right", "BackSpace"}));
+    QTRY_COMPARE(editor->snapshot().blocks.size(), std::size_t(1));
+    QVERIFY(native_keys({"ctrl+z"}));
+    QTRY_COMPARE(editor->toPlainText(), "Left " + candidate + "\nRight");
+    QCOMPARE(editor->snapshot().blocks[1].id, std::string("ime-second"));
+    QVERIFY(window.flush());
+    qInfo() << "Native IME updates:" << composition.updates.size() << "candidate:" << candidate;
+}
+
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

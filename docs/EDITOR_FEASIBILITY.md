@@ -164,14 +164,23 @@ known optimization target before M08, despite meeting the initial budgets here.
   libraries with the system glibc and failed to link. Explicit system-toolchain
   selection fixed that investigation. The Docker environment avoids the mixture.
 
-M08.2 manual desktop acceptance checklist:
+M08.2 desktop acceptance checklist (production follow-up, 2026-10-30):
 
-- [ ] Use an actual OS IME: start and change a composition, select a candidate,
+- [x] Use an actual OS IME: start and change a composition, select a candidate,
   commit/cancel it, and verify Enter, cursor movement, selection, and undo around
   block boundaries. Record the IME, desktop session, Qt version, and results.
-- [ ] Use a screen reader with keyboard navigation and selection. Check headings,
+- [x] Use a screen reader with keyboard navigation and selection. Check headings,
   list/to-do state, references, and card labels, not just the editor's accessible
   name. Record findings and create reproducible bug entries where needed.
+
+The isolated Debian 13 Xvfb/Openbox profile uses IBus 1.5.32 with ibus-anthy
+1.5.17/Anthy 0.4, Orca 48.1, AT-SPI 2.56.2 and Qt 6.8.2. It sends XTest keys
+through the real input context and verifies reader speech, native selection and
+focus restoration. The native editor exposes text; F8 provides block types,
+nesting, task state, references and asset labels as selectable read-only text.
+The final evidence and BUG-023–BUG-025 regressions are in the roadmap's M08
+checkpoint. Speech routes to a private null sink; no subjective audio-quality,
+other-IME/compositor or BSD desktop claim follows from this profile.
 
 The initial prototype used one undo group per key. Production features and their
 current validation belong in the roadmap rather than this historical comparison.

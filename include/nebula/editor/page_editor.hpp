@@ -4,6 +4,7 @@
 #include "nebula/core/position.hpp"
 
 #include <QElapsedTimer>
+#include <QPointer>
 #include <QTextEdit>
 #include <functional>
 #include <map>
@@ -11,6 +12,7 @@
 
 class QTimer;
 class QCompleter;
+class QDialog;
 
 namespace nebula {
 
@@ -73,8 +75,11 @@ public:
     bool restore_position(const EditorPosition& position);
     std::optional<Reference> current_reference() const;
     bool activate_current_reference();
+    void show_block_details();
 
 signals:
+    // Canonical edits only; native textChanged also reports IME preedit display.
+    void content_changed();
     void reference_activated(int kind, const QString& target_id);
     void unresolved_reference_activated(const QString& name, const QString& database_scope);
     void paste_rejected(const QString& reason);
@@ -98,6 +103,7 @@ protected:
 private:
     std::string page_id_;
     bool grip_pressed_ = false;
+    bool preedit_update_ = false;
     bool dragging_ = false;
     bool drop_valid_ = false;
     QPoint drag_start_, drag_position_;
@@ -117,6 +123,7 @@ private:
     std::unordered_set<std::string> absorbed_;
     QRectF painted_active_;
     CardRenderer* cards_ = nullptr;
+    QPointer<QDialog> details_dialog_;
     void refresh_reference_labels(const Page* before = nullptr, const QString& before_title = {});
     bool fast_typing_allowed(const QKeyEvent* event) const;
     void update_active_region();
