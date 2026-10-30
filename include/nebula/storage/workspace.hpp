@@ -58,6 +58,9 @@ public:
                                   const std::string& block);
     void set_transfer_applied(BlockTransfer& transfer, bool applied);
     ReferenceTarget resolve_reference(const Reference& reference) const;
+    std::optional<std::string> reference_label(const Reference& reference) const;
+    PageRecord create_reference_target(PageRecord& source, const ReferenceLocation& location,
+                                       const std::string& database, const std::string& title);
     void trash_page(const std::string& id, bool trashed);
     std::vector<DeletedBlockGroup> deleted_blocks() const;
     PageRecord restore_deleted_blocks(const std::string& id);
@@ -77,6 +80,9 @@ private:
     std::unique_ptr<sqlite3, DatabaseCloser> database_;
     void replace_transfer_documents(const Page& source, std::int64_t source_revision,
                                     const Page& destination, std::int64_t destination_revision);
+    PageRecord create_page_in_transaction(const std::string& database, const std::string& title,
+        const std::map<std::string,PropertyValue>& properties, const std::vector<Block>& blocks);
+    void save_page_in_transaction(PageRecord& page);
 };
 
 } // namespace nebula

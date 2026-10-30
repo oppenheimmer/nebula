@@ -149,7 +149,10 @@ creating another page with that title does not silently bind the link. Type
 `[[Page]]`, `[[Page#Heading]]`, or `[[Page#^block-id]]` for wiki entry; append
 `|label` for a custom label. Completion shows database/target context, and duplicate
 matches require choosing a specific target. Link… also searches page/heading/block
-text and IDs. Labels currently remain as inserted through renames. Escaping,
+text and IDs. Default labels follow target titles/text, while explicit labels stay
+fixed. Following an unresolved reference offers existing-target selection or
+explicit page creation in a chosen database. Page creation and source binding
+commit together; undoing the binding keeps the created page. Escaping,
 completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
 
 ## Backup and restore

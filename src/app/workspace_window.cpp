@@ -165,7 +165,9 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     autosave_=new QTimer(this); autosave_->setSingleShot(true); autosave_->setInterval(500);
     connect(autosave_,&QTimer::timeout,this,[this]{ flush(); });
     connect(page_editor(),&QTextEdit::textChanged,this,&WorkspaceWindow::mark_pending);
-    connect(title_,&QLineEdit::textEdited,this,&WorkspaceWindow::mark_pending);
+    connect(title_,&QLineEdit::textEdited,this,[this](const QString& title){
+        if (!loading_) { page_editor()->set_page_title(title); mark_pending(); }
+    });
     connect(databases_,&QComboBox::currentIndexChanged,this,[this]{ if (!loading_) switch_database(); });
     connect(views_,&QComboBox::currentIndexChanged,this,[this](int i){ if (!loading_ && i>=0 && i<int(saved_views_.size())) { current_view_=saved_views_[std::size_t(i)]; refresh_table(); } });
     connect(table_,&QTableWidget::itemSelectionChanged,this,[this]{
@@ -179,7 +181,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
             const auto text=item->text();
             const auto property_id=column?s(table_->horizontalHeaderItem(column)->data(Qt::UserRole).toString()):std::string{};
             if (!open_page(id)) return;
-            if (column==0) { session_.set_title(s(text)); QSignalBlocker guard(title_); title_->setText(text); }
+            if (column==0) { session_.set_title(s(text)); QSignalBlocker guard(title_); title_->setText(text); page_editor()->set_page_title(text); }
             else {
                 const auto def=std::find_if(definitions_.begin(),definitions_.end(),[&](const auto& d){return d.id==property_id;});
                 if (def!=definitions_.end()) session_.set_property(property_id,parse_value(def->kind,text));
@@ -201,17 +203,18 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         const auto syntax=parse_wiki_link(s("[["+*prefix+"]]"));
         if (!page_editor()->select_wiki_link()) return;
         page_editor()->insert_reference(syntax && syntax->custom_label?q(syntax->label):index.data(Qt::UserRole+2).toString(),
-            ReferenceKind(index.data(Qt::UserRole).toInt()),index.data(Qt::UserRole+1).toString());
+            ReferenceKind(index.data(Qt::UserRole).toInt()),index.data(Qt::UserRole+1).toString(),syntax && syntax->custom_label);
         completing_=false;
     });
-    connect(page_editor(),&PageEditor::unresolved_reference_activated,this,[this](const QString& name,const QString&){
-        statusBar()->showMessage("Unresolved link: "+name+". Select its text and use Link… to choose a target.",8000);
+    page_editor()->set_reference_label_resolver([this](const Reference& reference){ return workspace_.reference_label(reference); });
+    connect(page_editor(),&PageEditor::unresolved_reference_activated,this,[this](const QString& name,const QString& scope){
+        try { resolve_unresolved(name,scope); } catch(const std::exception& e) { error(this,e); }
     });
     connect(backlinks_,&QListWidget::itemActivated,this,[this](QListWidgetItem* item){ open_page(s(item->data(Qt::UserRole).toString()),s(item->data(Qt::UserRole+1).toString())); });
     connect(outgoing_,&QListWidget::itemActivated,this,[this](QListWidgetItem* item){
         const auto id=item->data(Qt::UserRole+1).toString();
         if (id.isEmpty()) {
-            page_editor()->go_to_block(item->data(Qt::UserRole+2).toString()); page_editor()->setFocus();
+            page_editor()->select_reference_at({s(item->data(Qt::UserRole+2).toString()),std::size_t(item->data(Qt::UserRole+5).toULongLong()),1}); page_editor()->setFocus();
             page_editor()->unresolved_reference_activated(item->data(Qt::UserRole+3).toString(),item->data(Qt::UserRole+4).toString());
         } else follow_reference(ReferenceKind(item->data(Qt::UserRole).toInt()),s(id));
     });
@@ -228,6 +231,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
 void WorkspaceWindow::mark_pending()
 {
     if (loading_ || !session_.has_page()) return;
+    if (title_->text()!=page_editor()->page_title()) { QSignalBlocker guard(title_); title_->setText(page_editor()->page_title()); }
     pending_=true; save_state_->setText("Unsaved changes…"); autosave_->start();
 }
 bool WorkspaceWindow::flush()
@@ -313,7 +317,7 @@ bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
         if (target.database_id!=database_id_) { databases_->setCurrentIndex(database_index); }
         session_.open(id); loading_=true;
         completing_=false;
-        title_->setText(q(session_.record().title)); title_->setEnabled(true); page_editor()->set_page(session_.record().document); page_editor()->setEnabled(true);
+        title_->setText(q(session_.record().title)); title_->setEnabled(true); page_editor()->set_page(session_.record().document,q(session_.record().title)); page_editor()->setEnabled(true);
         for (auto* bar:findChildren<QToolBar*>()) bar->setEnabled(true);
         loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
         update_transfer_actions();
@@ -349,6 +353,7 @@ void WorkspaceWindow::update_links()
         auto* item=new QListWidgetItem(q(edge.label)+" → "+destination+" — "+q(edge.source_context).left(100),outgoing_);
         item->setData(Qt::UserRole,int(edge.kind)); item->setData(Qt::UserRole+1,q(edge.target_id));
         item->setData(Qt::UserRole+2,q(edge.source_block)); item->setData(Qt::UserRole+3,q(edge.unresolved_name)); item->setData(Qt::UserRole+4,q(edge.database_scope));
+        item->setData(Qt::UserRole+5,qlonglong(edge.run_index));
         item->setToolTip("Source block: "+q(edge.source_block)+"\nTarget: "+q(edge.target_id));
     }
 }
@@ -520,9 +525,9 @@ void WorkspaceWindow::enter_wiki_link(const QString& syntax)
         else if (link->heading.empty() && link->block.empty() && candidate.kind==ReferenceKind::Page) matches.push_back(candidate);
     }
     if (matches.size()==1) {
-        const auto& target=matches.front(); page_editor()->insert_reference(q(link->custom_label?link->label:target.label),target.kind,q(target.id));
+        const auto& target=matches.front(); page_editor()->insert_reference(q(link->custom_label?link->label:target.label),target.kind,q(target.id),link->custom_label);
     } else if (matches.empty() && link->heading.empty() && link->block.empty()) {
-        page_editor()->insert_unresolved_reference(q(link->custom_label?link->label:link->page),q(link->page),q(database_id_));
+        page_editor()->insert_unresolved_reference(q(link->custom_label?link->label:link->page),q(link->page),q(database_id_),link->custom_label);
     } else if (matches.empty()) {
         leave_text(); statusBar()->showMessage("No matching heading or block. Use Link… to choose its target.",8000);
     } else {
@@ -550,7 +555,7 @@ void WorkspaceWindow::insert_link(const QString& query, const QString& custom_la
     auto* keep_unresolved=new QPushButton("Insert unresolved link",&dialog); keep_unresolved->setObjectName("insertUnresolved"); layout->addWidget(keep_unresolved);
     connect(keep_unresolved,&QPushButton::clicked,&dialog,[&]{
         if (!unresolved->text().trimmed().isEmpty()) {
-            const auto name=unresolved->text().trimmed(); page_editor()->insert_unresolved_reference(label->text().isEmpty()?name:label->text(),name,q(database_id_)); dialog.accept();
+            const auto name=unresolved->text().trimmed(); page_editor()->insert_unresolved_reference(label->text().isEmpty()?name:label->text(),name,q(database_id_),!label->text().isEmpty()); dialog.accept();
         }
     });
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
@@ -569,9 +574,67 @@ void WorkspaceWindow::insert_link(const QString& query, const QString& custom_la
             page->setHidden(!visible); page->setExpanded(!text.isEmpty());
         }
     });
-    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem(); item && !item->isHidden()) { page_editor()->insert_reference(label->text().isEmpty()?item->data(0,Qt::UserRole+2).toString():label->text(),ReferenceKind(item->data(0,Qt::UserRole+1).toInt()),item->data(0,Qt::UserRole).toString()); dialog.accept(); } });
+    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem(); item && !item->isHidden()) {
+        const auto text=label->text().isEmpty()?item->data(0,Qt::UserRole+2).toString():label->text();
+        const Reference reference{ReferenceKind(item->data(0,Qt::UserRole+1).toInt()),s(item->data(0,Qt::UserRole).toString()),"","",!label->text().isEmpty()};
+        if (page_editor()->textCursor().hasSelection() && page_editor()->selected_reference_location()) page_editor()->replace_selected_reference(reference,text);
+        else page_editor()->insert_reference(text,reference.kind,q(reference.target_id),reference.custom_label);
+        dialog.accept();
+    } });
     connect(tree,&QTreeWidget::itemDoubleClicked,&dialog,[&]{ buttons->button(QDialogButtonBox::Ok)->click(); });
     search->setText(query.trimmed()); dialog.resize(760,550); dialog.exec(); activateWindow(); page_editor()->setFocus();
+}
+void WorkspaceWindow::resolve_unresolved(const QString& name, const QString& scope)
+{
+    if (!session_.has_page() || !flush()) return;
+    auto* editor=page_editor();
+    auto reference=editor->current_reference();
+    if (!reference || !reference->target_id.empty() || reference->unresolved_name!=s(name) || reference->database_scope!=s(scope)) {
+        const auto page=editor->snapshot(); bool found=false;
+        for (const auto& block:page.blocks) {
+            for (std::size_t i=0;i<block.runs.size();++i) {
+                const auto& ref=block.runs[i].reference;
+                if (ref && ref->target_id.empty() && ref->unresolved_name==s(name) && ref->database_scope==s(scope)) {
+                    found=editor->select_reference_at({block.id,i,1}); break;
+                }
+            }
+            if (found) break;
+        }
+        if (!found) return;
+        reference=editor->current_reference();
+    }
+    if (!editor->select_current_reference()) return;
+    const auto location=editor->selected_reference_location(); if (!location) return;
+    const auto old_label=editor->textCursor().selectedText();
+    QDialog dialog(this); dialog.setObjectName("resolveUnresolved"); dialog.setWindowTitle("Resolve unresolved reference");
+    auto* layout=new QVBoxLayout(&dialog); layout->addWidget(new QLabel("Intended page: "+name+"\nChoose an existing target or explicitly create a page.",&dialog));
+    auto* title=new QLineEdit(name,&dialog); title->setObjectName("targetPageTitle"); title->setAccessibleName("New page title"); layout->addWidget(title);
+    auto* database=new QComboBox(&dialog); database->setObjectName("targetDatabase"); database->setAccessibleName("Destination database for new page");
+    for (const auto& db:workspace_.databases()) database->addItem(q(db.name)+" ["+q(db.id)+"]",q(db.id));
+    auto selected=database->findData(scope); if (selected<0) selected=database->findData(q(session_.record().database_id));
+    database->setCurrentIndex(selected); layout->addWidget(new QLabel("Destination database",&dialog)); layout->addWidget(database);
+    auto* choose=new QPushButton("Choose existing target…",&dialog); choose->setObjectName("chooseReferenceTarget"); layout->addWidget(choose);
+    auto* create=new QPushButton("Create page and link",&dialog); create->setObjectName("createReferenceTarget"); layout->addWidget(create);
+    auto* cancel=new QDialogButtonBox(QDialogButtonBox::Cancel,&dialog); layout->addWidget(cancel);
+    connect(cancel,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    enum class Action { None, Choose, Create }; Action action=Action::None;
+    auto valid=[&]{ create->setEnabled(database->currentIndex()>=0 && !title->text().trimmed().isEmpty()); };
+    connect(title,&QLineEdit::textChanged,&dialog,valid); valid();
+    connect(choose,&QPushButton::clicked,&dialog,[&]{action=Action::Choose; dialog.accept();});
+    connect(create,&QPushButton::clicked,&dialog,[&]{action=Action::Create; dialog.accept();});
+    if (dialog.exec()!=QDialog::Accepted) { activateWindow(); editor->setFocus(); return; }
+    activateWindow(); editor->setFocus();
+    if (action==Action::Choose) {
+        insert_link(name,reference->custom_label?old_label:QString{}); flush(); return;
+    }
+    if (action!=Action::Create) return;
+    auto source=session_.record(); source.document=editor->snapshot(); source.title=s(title_->text());
+    const auto target=workspace_.create_reference_target(source,*location,s(database->currentData().toString()),s(title->text().trimmed()));
+    const Reference resolved{ReferenceKind::Page,target.document.id,"","",reference->custom_label};
+    session_.adopt_saved(std::move(source)); loading_=true;
+    editor->replace_selected_reference(resolved,reference->custom_label?old_label:q(target.title));
+    loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
+    statusBar()->showMessage("Page created and reference saved locally. Undo restores the unresolved reference and keeps the created page.",8000);
 }
 void WorkspaceWindow::follow_reference(ReferenceKind kind, const std::string& id)
 {

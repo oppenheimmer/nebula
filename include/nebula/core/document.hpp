@@ -12,14 +12,18 @@ enum class ReferenceKind { Page, Block };
 
 struct Reference {
     Reference(ReferenceKind type=ReferenceKind::Page, std::string target={},
-              std::string unresolved={}, std::string scope={})
+              std::string unresolved={}, std::string scope={}, bool custom=true)
         : kind(type),target_id(std::move(target)),unresolved_name(std::move(unresolved)),
-          database_scope(std::move(scope)) {}
+          database_scope(std::move(scope)), custom_label(custom) {}
     ReferenceKind kind = ReferenceKind::Page;
     std::string target_id;
     std::string unresolved_name;
     std::string database_scope;
+    bool custom_label = true; // Legacy labels remain fixed; new default labels opt in.
 };
+bool operator==(const Reference& a, const Reference& b);
+inline bool operator!=(const Reference& a, const Reference& b) { return !(a==b); }
+struct ReferenceLocation { std::string block; std::size_t first_run = 0, run_count = 0; };
 
 struct Asset {
     bool image = false;
@@ -60,6 +64,8 @@ struct Page {
 
 // Throws std::invalid_argument for an invalid prototype document.
 void validate(const Page& page);
+// Default references inside a block title use [link], avoiding recursive labels.
+std::string reference_title(const Block& block);
 int depth(const Page& page, const std::string& block_id);
 bool move_subtree(Page& page, const std::string& block_id, int direction);
 // Move before a sibling, or append under parent when before_id is empty.

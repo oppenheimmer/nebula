@@ -9,7 +9,7 @@ namespace nebula {
 namespace {
 
 constexpr int ApplicationId = 0x4e454255; // NEBU
-constexpr int SchemaVersion = 5;
+constexpr int SchemaVersion = 6;
 
 void execute(sqlite3* database, const std::string& sql)
 {
@@ -89,7 +89,7 @@ Workspace Workspace::open(const std::filesystem::path& directory)
             version = "1";
         } else if (application != std::to_string(ApplicationId)) {
             throw std::runtime_error("This folder contains a database that is not a Nebula workspace");
-        } else if (version != "1" && version != "2" && version != "3" && version != "4" && version != std::to_string(SchemaVersion)) {
+        } else if (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" && version != std::to_string(SchemaVersion)) {
             throw std::runtime_error("This workspace format is not supported by this version of Nebula");
         }
         const auto id = scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
@@ -175,7 +175,9 @@ Workspace Workspace::open(const std::filesystem::path& directory)
                 CREATE INDEX links_target ON links(target_kind,target_id);
                 PRAGMA user_version=5;
             )SQL");
+            version="5";
         }
+        if (version=="5") execute(raw,"PRAGMA user_version=6");
         if (scalar(raw, "PRAGMA quick_check") != "ok")
             throw std::runtime_error("Workspace integrity check failed");
         sql::Statement relationships(raw,"PRAGMA foreign_key_check");

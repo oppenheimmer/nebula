@@ -148,6 +148,11 @@ int main()
             for (const auto* text:{"[[]]","[[Page|]]","[[Page#]]","[[Page#^]]","[[Page#A#B]]","[[Page|a|b]]","[[Page\\q]]","[[Page]","[[Page\nname]]","[[Page[part]]"})
                 check(!parse_wiki_link(text),std::string("Accepted invalid wiki link: ")+text);
         }},
+        {"block reference titles avoid recursive default labels", [] {
+            Block heading{"heading","",BlockKind::Heading,{{"See "},{"cached self",false,false,Reference{ReferenceKind::Block,"heading","","",false}},
+                {" and custom",false,false,Reference{ReferenceKind::Block,"heading"}}}};
+            check(reference_title(heading)=="See [link] and custom","Default reference label expanded recursively");
+        }},
         {"long-page fixture", [] {
             const auto page = long_page(1000); validate(page);
             check(page.blocks.size() == 1000, "Wrong fixture size");

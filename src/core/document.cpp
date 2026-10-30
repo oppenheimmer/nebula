@@ -76,6 +76,23 @@ void validate(const Page& page)
     }
 }
 
+bool operator==(const Reference& a, const Reference& b)
+{
+    return a.kind==b.kind && a.target_id==b.target_id && a.unresolved_name==b.unresolved_name
+        && a.database_scope==b.database_scope && a.custom_label==b.custom_label;
+}
+std::string reference_title(const Block& block)
+{
+    std::string result;
+    for (const auto& run:block.runs) {
+        if (run.asset) result+=run.asset->label;
+        else if (run.reference && !run.reference->custom_label) result+="[link]";
+        else result+=run.text;
+    }
+    if (result.empty()) result=block.asset_label.empty()?"Empty block":block.asset_label;
+    return result;
+}
+
 int depth(const Page& page, const std::string& block_id)
 {
     validate(page);

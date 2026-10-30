@@ -129,6 +129,10 @@ private slots:
     void cross_database_history_preserves_selection_scroll_and_forward_branch();
     void outgoing_and_backlink_lists_navigate_exact_blocks_with_keyboard();
     void history_refuses_trash_and_failed_saves_without_losing_entries();
+    void default_and_custom_labels_follow_renames_without_retargeting();
+    void unresolved_creation_chooses_database_and_undo_keeps_created_page();
+    void unresolved_existing_choice_replaces_only_the_selected_reference();
+    void unresolved_creation_failure_keeps_reference_and_no_orphan_page();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -534,6 +538,7 @@ void DesktopTests::unresolved_link_picker_does_not_create_or_bind_pages()
     QVERIFY(ref); QVERIFY(ref->target_id.empty()); QCOMPARE(ref->database_scope,db.id);
     const auto same=w.create_page(db.id,"Future");
     QVERIFY(w.backlinks(ReferenceKind::Page,same.document.id).empty());
+    QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); QCOMPARE(dialog->objectName(),QString("resolveUnresolved")); dialog->reject(); });
     window.page_editor()->unresolved_reference_activated("Future",QString::fromStdString(db.id));
     QCOMPARE(window.page_editor()->snapshot().id,p.document.id); QCOMPARE(w.pages(db.id).size(),std::size_t(2));
 }
@@ -568,13 +573,14 @@ void DesktopTests::typing_undo_group_survives_autosave()
 void DesktopTests::rich_clipboard_persists_remapped_links_and_undo()
 {
     QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
-    const auto source=w.create_page(db.id,"Source",{},{{"heading","",BlockKind::Heading,{{"Heading",true}}},{"link","",BlockKind::Paragraph,{{"Jump",false,true,Reference{ReferenceKind::Block,"heading"}}}}});
+    const auto source=w.create_page(db.id,"Source",{},{{"heading","",BlockKind::Heading,{{"Heading",true}}},{"link","",BlockKind::Paragraph,{{"Jump",false,true,Reference{ReferenceKind::Block,"heading","","",false}}}}});
     const auto target=w.create_page(db.id,"Target"); WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
     auto* editor=window.page_editor(); auto selected=editor->textCursor(); selected.select(QTextCursor::Document); editor->setTextCursor(selected); QTest::keyClick(editor,Qt::Key_C,Qt::ControlModifier);
     QVERIFY(window.open_page(target.document.id)); QTest::keyClick(editor,Qt::Key_V,Qt::ControlModifier); QVERIFY(window.flush());
     const auto copied=w.load_page(target.document.id); QCOMPARE(copied.document.blocks.size(),std::size_t(2));
     QCOMPARE(copied.document.blocks[0].kind,BlockKind::Heading); QVERIFY(copied.document.blocks[1].runs[0].italic);
     QCOMPARE(copied.document.blocks[1].runs[0].reference->target_id,copied.document.blocks[0].id);
+    QVERIFY(!copied.document.blocks[1].runs[0].reference->custom_label); QCOMPARE(copied.document.blocks[1].runs[0].text,std::string("Heading"));
     QCOMPARE(w.backlinks(ReferenceKind::Block,copied.document.blocks[0].id).size(),std::size_t(1));
     editor->undo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(target.document.id).document.blocks.size(),std::size_t(1));
     editor->redo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(target.document.id).document.blocks[0].id,copied.document.blocks[0].id);
@@ -843,6 +849,88 @@ void DesktopTests::history_refuses_trash_and_failed_saves_without_losing_entries
     QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier); QCOMPARE(editor->snapshot().id,source.document.id);
     QTest::keyClick(editor,Qt::Key_Right,Qt::AltModifier); QCOMPARE(editor->snapshot().id,target.document.id);
     QCOMPARE(editor->toPlainText(),QString("Pending"));
+}
+void DesktopTests::default_and_custom_labels_follow_renames_without_retargeting()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto target=w.create_page(db.id,"Original");
+    target.document.blocks[0].runs={{"Cached",false,false,Reference{ReferenceKind::Page,target.document.id,"","",false}}}; w.save_page(target);
+    const auto source=w.create_page(db.id,"Source",{},{{"source","",BlockKind::Paragraph,{
+        {"Cached",false,false,Reference{ReferenceKind::Page,target.document.id,"","",false}},
+        {" fixed",true,false,Reference{ReferenceKind::Page,target.document.id}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    QCOMPARE(window.page_editor()->toPlainText(),QString("Original fixed"));
+    QVERIFY(window.open_page(target.document.id)); auto* title=window.findChild<QLineEdit*>("pageTitle");
+    title->setFocus(); title->selectAll(); QTest::keyClicks(title,"Renamed"); QVERIFY(window.flush());
+    QCOMPARE(w.load_page(target.document.id).title,std::string("Renamed")); QCOMPARE(window.page_editor()->toPlainText(),QString("Renamed"));
+    auto* editor=window.page_editor(); editor->setFocus(); editor->undo(); QVERIFY(window.flush());
+    QCOMPARE(title->text(),editor->page_title()); QCOMPARE(w.load_page(target.document.id).title,title->text().toStdString());
+    editor->redo(); QVERIFY(window.flush()); QCOMPARE(title->text(),QString("Renamed"));
+    QVERIFY(window.open_page(source.document.id)); QCOMPARE(editor->toPlainText(),QString("Renamed fixed"));
+    QVERIFY(window.findChild<QListWidget*>("outgoingLinks")->item(0)->text().startsWith("Renamed → Renamed"));
+    const auto page=editor->snapshot(); QVERIFY(!page.blocks[0].runs[0].reference->custom_label); QVERIFY(page.blocks[0].runs[1].reference->custom_label);
+    QCOMPARE(page.blocks[0].runs[0].reference->target_id,target.document.id);
+}
+void DesktopTests::unresolved_creation_chooses_database_and_undo_keeps_created_page()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Projects");
+    const auto source=w.create_page(a.id,"Source"), same_name=w.create_page(b.id,"Future");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id)); auto* editor=window.page_editor();
+    QTest::keyClicks(editor,"[[FutureName]]"); QVERIFY(window.flush());
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); QCOMPARE(dialog->objectName(),QString("resolveUnresolved"));
+        auto* databases=dialog->findChild<QComboBox*>("targetDatabase"); databases->setCurrentIndex(databases->findData(QString::fromStdString(b.id)));
+        dialog->findChild<QLineEdit*>("targetPageTitle")->setText("Future"); dialog->findChild<QPushButton*>("createReferenceTarget")->click();
+    });
+    QTest::keyClick(editor,Qt::Key_Return,Qt::ControlModifier);
+    const auto reference=editor->snapshot().blocks[0].runs[0].reference; QVERIFY(reference); QVERIFY(!reference->target_id.empty());
+    QVERIFY(reference->target_id!=same_name.document.id); QCOMPARE(w.load_page(reference->target_id).database_id,b.id);
+    QCOMPARE(editor->toPlainText(),QString("Future")); QCOMPARE(w.pages(b.id).size(),std::size_t(2));
+    QCOMPARE(w.load_page(source.document.id).document.blocks[0].runs[0].reference->target_id,reference->target_id);
+    editor->undo(); QVERIFY(window.flush()); QCOMPARE(editor->toPlainText(),QString("FutureName"));
+    QVERIFY(w.load_page(source.document.id).document.blocks[0].runs[0].reference->target_id.empty()); QCOMPARE(w.pages(b.id).size(),std::size_t(2));
+    editor->redo(); QVERIFY(window.flush()); QCOMPARE(w.backlinks(ReferenceKind::Page,reference->target_id).size(),std::size_t(1));
+}
+void DesktopTests::unresolved_existing_choice_replaces_only_the_selected_reference()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Projects");
+    const auto target=w.create_page(b.id,"Future");
+    const auto source=w.create_page(a.id,"Source",{},{{"source","",BlockKind::Paragraph,{
+        {"Future",false,false,Reference{ReferenceKind::Page,"","Future",a.id,false}},{" and "},
+        {"read notes",true,false,Reference{ReferenceKind::Page,"","Future",a.id,true}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    QTimer choose;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); if (!dialog) return;
+        if (dialog->objectName()=="resolveUnresolved") { dialog->findChild<QPushButton*>("chooseReferenceTarget")->click(); return; }
+        auto* tree=dialog->findChild<QTreeWidget*>("linkTargets"); if (!tree) return;
+        QCOMPARE(dialog->findChild<QLineEdit*>("linkLabel")->text(),QString("read notes"));
+        for (int row=0;row<tree->topLevelItemCount();++row) if (tree->topLevelItem(row)->data(0,Qt::UserRole).toString()==QString::fromStdString(target.document.id)) tree->setCurrentItem(tree->topLevelItem(row));
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    });
+    auto* outgoing=window.findChild<QListWidget*>("outgoingLinks"); QCOMPARE(outgoing->count(),2); outgoing->setCurrentRow(1); outgoing->setFocus();
+    choose.start(0); QTest::keyClick(outgoing,Qt::Key_Return); choose.stop(); QVERIFY(window.flush());
+    const auto runs=w.load_page(source.document.id).document.blocks[0].runs;
+    QVERIFY(runs[0].reference->target_id.empty()); QCOMPARE(runs[2].reference->target_id,target.document.id);
+    QCOMPARE(runs[2].text,std::string("read notes")); QVERIFY(runs[2].bold); QVERIFY(runs[2].reference->custom_label);
+    window.page_editor()->undo(); QVERIFY(window.flush()); QVERIFY(w.load_page(source.document.id).document.blocks[0].runs[2].reference->target_id.empty());
+}
+void DesktopTests::unresolved_creation_failure_keeps_reference_and_no_orphan_page()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Projects");
+    const auto source=w.create_page(a.id,"Source",{},{{"source","",BlockKind::Paragraph,{{"Future",false,false,Reference{ReferenceKind::Page,"","Future",a.id,false}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_create_link BEFORE INSERT ON links BEGIN SELECT RAISE(ABORT,'injected link failure'); END;");
+    QTimer choose; bool saw_error=false;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        if (auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) { saw_error=true; box->accept(); return; }
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); if (!dialog || dialog->objectName()!="resolveUnresolved") return;
+        auto* databases=dialog->findChild<QComboBox*>("targetDatabase"); databases->setCurrentIndex(databases->findData(QString::fromStdString(b.id)));
+        dialog->findChild<QPushButton*>("createReferenceTarget")->click();
+    });
+    choose.start(0); QTest::keyClick(window.page_editor(),Qt::Key_Return,Qt::ControlModifier); choose.stop();
+    QVERIFY(saw_error); QVERIFY(w.pages(b.id).empty()); QVERIFY(window.page_editor()->snapshot().blocks[0].runs[0].reference->target_id.empty());
+    QCOMPARE(w.load_page(source.document.id).revision,source.revision); QCOMPARE(window.page_editor()->toPlainText(),QString("Future"));
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

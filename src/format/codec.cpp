@@ -33,12 +33,12 @@ QJsonObject object(const QJsonValue& value) {
     if (!value.isObject()) throw std::runtime_error("Expected JSON object");
     return value.toObject();
 }
-QJsonObject parse(const std::string& text) {
+QJsonObject parse(const std::string& text, int maximum_version=1) {
     QJsonParseError error;
     const auto doc = QJsonDocument::fromJson(QByteArray::fromStdString(text), &error);
     if (error.error != QJsonParseError::NoError || !doc.isObject()) throw std::runtime_error("Invalid payload JSON");
     auto obj = doc.object();
-    if (integer(obj["version"], 1) != 1) throw std::runtime_error("Unsupported payload version");
+    if (integer(obj["version"], maximum_version)<1) throw std::runtime_error("Unsupported payload version");
     return obj;
 }
 std::string serialize(const QJsonObject& obj) { return QJsonDocument(obj).toJson(QJsonDocument::Compact).toStdString(); }
@@ -82,15 +82,16 @@ std::string encode_block(const Block& block)
     for (const auto& run : block.runs) {
         QJsonObject out{{"text", q(run.text)}, {"bold", run.bold}, {"italic", run.italic}};
         if (run.reference) out["reference"] = QJsonObject{{"kind", int(run.reference->kind)}, {"target", q(run.reference->target_id)},
-            {"unresolved_name",q(run.reference->unresolved_name)},{"scope",q(run.reference->database_scope)}};
+            {"unresolved_name",q(run.reference->unresolved_name)},{"scope",q(run.reference->database_scope)},
+            {"custom_label",run.reference->custom_label}};
         if (run.asset) out["asset"] = QJsonObject{{"image", run.asset->image}, {"label", q(run.asset->label)}};
         runs.append(out);
     }
-    return serialize({{"version", 1}, {"runs", runs}, {"asset_label", q(block.asset_label)}, {"checked", block.checked}});
+    return serialize({{"version", 2}, {"runs", runs}, {"asset_label", q(block.asset_label)}, {"checked", block.checked}});
 }
 void decode_block(Block& block, const std::string& json)
 {
-    const auto obj = parse(json);
+    const auto obj = parse(json,2);
     block.runs.clear(); block.asset_label = s(obj["asset_label"]); block.checked = flag(obj["checked"]);
     for (const auto& item : array(obj["runs"])) {
         const auto run = object(item);
@@ -100,6 +101,7 @@ void decode_block(Block& block, const std::string& json)
             out.reference = Reference{static_cast<ReferenceKind>(integer(ref["kind"], 1)), s(ref["target"])};
             if (ref.contains("unresolved_name")) out.reference->unresolved_name=s(ref["unresolved_name"]);
             if (ref.contains("scope")) out.reference->database_scope=s(ref["scope"]);
+            if (obj["version"].toInt()==2) out.reference->custom_label=flag(ref["custom_label"]);
         }
         if (run.contains("asset")) {
             const auto asset = object(run["asset"]);
@@ -135,7 +137,7 @@ std::string encode_document(const Page& page)
 {
     validate(page); QJsonArray blocks;
     for (const auto& block:page.blocks) blocks.append(QJsonObject{{"id",q(block.id)},
-        {"parent",q(block.parent_id)},{"kind",int(block.kind)},{"payload",parse(encode_block(block))}});
+        {"parent",q(block.parent_id)},{"kind",int(block.kind)},{"payload",parse(encode_block(block),2)}});
     return serialize({{"version",1},{"id",q(page.id)},{"blocks",blocks}});
 }
 Page decode_document(const std::string& json)

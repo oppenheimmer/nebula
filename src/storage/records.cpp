@@ -8,14 +8,16 @@
 namespace nebula {
 namespace {
 using sql::Statement;
-LinkEdge read_edge(const Statement& row) {
+LinkEdge read_edge(const Statement& row, const Workspace& workspace) {
     LinkEdge edge; edge.source_page=row.text(0); edge.source_block=row.text(1);
     edge.source_title=row.text(2); edge.target_id=row.text(3); edge.kind=ReferenceKind(row.number(4));
     edge.run_index=row.number(5); edge.position=row.number(6);
     Block block; decode_block(block,row.text(7));
-    for (const auto& run:block.runs) edge.source_context+=run.text;
+    auto label=[&](const Run& run) { return run.reference && !run.reference->custom_label
+        ?workspace.reference_label(*run.reference).value_or(run.text):run.text; };
+    for (const auto& run:block.runs) edge.source_context+=label(run);
     if (edge.source_context.empty()) edge.source_context=block.asset_label;
-    if (edge.run_index>=0 && std::size_t(edge.run_index)<block.runs.size()) edge.label=block.runs[std::size_t(edge.run_index)].text;
+    if (edge.run_index>=0 && std::size_t(edge.run_index)<block.runs.size()) edge.label=label(block.runs[std::size_t(edge.run_index)]);
     return edge;
 }
 void name_required(const std::string& name) {
@@ -114,6 +116,12 @@ PageRecord Workspace::create_page(const std::string& database, const std::string
                                  const std::vector<Block>& initial_blocks)
 {
     sql::Transaction transaction(database_.get());
+    auto page=create_page_in_transaction(database,title,values,initial_blocks);
+    transaction.commit(); return page;
+}
+PageRecord Workspace::create_page_in_transaction(const std::string& database, const std::string& title,
+    const std::map<std::string,PropertyValue>& values, const std::vector<Block>& initial_blocks)
+{
     const auto page_id = sql::id(database_.get());
     PageRecord page{{page_id, {{sql::id(database_.get()), "", BlockKind::Paragraph, {}}}}, database, title, values, 1, false};
     if (!initial_blocks.empty()) page.document.blocks=initial_blocks;
@@ -131,7 +139,7 @@ PageRecord Workspace::create_page(const std::string& database, const std::string
         Statement add_value(database_.get(),"INSERT INTO property_values(page_id,property_id,value_json) VALUES(?,?,?)");
         add_value.bind(1,page_id).bind(2,entry.first).bind(3,encode_value(entry.second)).done();
     }
-    transaction.commit(); return page;
+    return page;
 }
 PageRecord Workspace::load_page(const std::string& id) const
 {
@@ -160,6 +168,11 @@ std::vector<PageRecord> Workspace::pages(const std::string& database, bool inclu
 }
 void Workspace::save_page(PageRecord& page)
 {
+    sql::Transaction transaction(database_.get());
+    save_page_in_transaction(page); transaction.commit(); ++page.revision;
+}
+void Workspace::save_page_in_transaction(PageRecord& page)
+{
     validate(page.document);
     const auto definitions = properties(page.database_id);
     for (const auto& entry : page.properties) {
@@ -169,7 +182,6 @@ void Workspace::save_page(PageRecord& page)
         if (def == definitions.end()) throw std::invalid_argument("Property does not belong to this database");
         validate_value(def->kind,value);
     }
-    sql::Transaction transaction(database_.get());
     const auto previous=load_page(page.document.id);
     Statement update(database_.get(), "UPDATE pages SET database_id=?,title=?,trashed=?,revision=revision+1,modified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND revision=?");
     update.bind(1,page.database_id).bind(2,page.title).bind(3,page.trashed).bind(4,page.document.id).bind(5,page.revision).done();
@@ -182,7 +194,6 @@ void Workspace::save_page(PageRecord& page)
         Statement add(database_.get(), "INSERT INTO property_values(page_id,property_id,value_json) VALUES(?,?,?)");
         add.bind(1,page.document.id).bind(2,id).bind(3,encode_value(value)).done();
     }
-    transaction.commit(); ++page.revision;
 }
 void Workspace::trash_page(const std::string& id, bool trashed)
 {
@@ -200,6 +211,45 @@ ReferenceTarget Workspace::resolve_reference(const Reference& reference) const
     const auto state=query.number(3)?ReferenceState::DatabaseTrashed
         :query.number(2)?ReferenceState::PageTrashed:ReferenceState::Available;
     return {state,query.text(0),query.text(1)};
+}
+std::optional<std::string> Workspace::reference_label(const Reference& reference) const
+{
+    if (reference.target_id.empty()) return reference.unresolved_name;
+    Statement query(database_.get(),reference.kind==ReferenceKind::Page
+        ?"SELECT title FROM pages WHERE id=?":"SELECT payload FROM blocks WHERE id=?");
+    query.bind(1,reference.target_id); if (!query.row()) return {};
+    if (reference.kind==ReferenceKind::Page) return query.text(0);
+    Block block; decode_block(block,query.text(0)); return reference_title(block);
+}
+PageRecord Workspace::create_reference_target(PageRecord& source, const ReferenceLocation& location,
+                                              const std::string& database, const std::string& title)
+{
+    name_required(title); auto next=source;
+    auto block=std::find_if(next.document.blocks.begin(),next.document.blocks.end(),[&](const auto& b){return b.id==location.block;});
+    if (block==next.document.blocks.end() || !location.run_count || location.first_run>=block->runs.size()
+        || location.run_count>block->runs.size()-location.first_run) throw std::invalid_argument("Select an unresolved reference first");
+    const auto first=location.first_run, end=first+location.run_count;
+    const auto reference=block->runs[first].reference;
+    if (!reference || !reference->target_id.empty()) throw std::invalid_argument("This reference is already resolved");
+    for (auto i=first;i<end;++i)
+        if (!block->runs[i].reference || *block->runs[i].reference!=*reference)
+            throw std::invalid_argument("Select a single unresolved reference");
+    sql::Transaction transaction(database_.get());
+    if (resolve_reference({ReferenceKind::Page,source.document.id}).state!=ReferenceState::Available)
+        throw std::runtime_error("Restore the source page and database first");
+    Statement target_db(database_.get(),"SELECT id FROM databases WHERE id=? AND NOT trashed"); target_db.bind(1,database);
+    if (!target_db.row()) throw std::runtime_error("Choose an available destination database");
+    auto target=create_page_in_transaction(database,title,{},{});
+    Reference resolved{ReferenceKind::Page,target.document.id,"","",reference->custom_label};
+    if (reference->custom_label) {
+        for (auto i=first;i<end;++i) block->runs[i].reference=resolved;
+    } else {
+        auto run=block->runs[first]; run.text=title; run.reference=resolved;
+        block->runs.erase(block->runs.begin()+first,block->runs.begin()+end);
+        block->runs.insert(block->runs.begin()+first,std::move(run));
+    }
+    save_page_in_transaction(next); transaction.commit(); ++next.revision; source=std::move(next);
+    return target;
 }
 void Workspace::move_page(PageRecord& page, const std::string& database)
 {
@@ -377,7 +427,7 @@ std::vector<LinkEdge> Workspace::backlinks(ReferenceKind kind, const std::string
     if (id.empty()) return {};
     Statement query(database_.get(), "SELECT l.source_page,l.source_block,p.title,l.target_id,l.target_kind,l.run_index,b.position,b.payload FROM links l JOIN pages p ON p.id=l.source_page JOIN databases d ON d.id=p.database_id JOIN blocks b ON b.id=l.source_block WHERE NOT p.trashed AND NOT d.trashed AND ((l.target_kind=? AND l.target_id=?) OR (?=0 AND l.target_kind=1 AND l.target_id IN (SELECT id FROM blocks WHERE page_id=?))) ORDER BY p.title,b.position,l.run_index");
     query.bind(1,int(kind)).bind(2,id).bind(3,int(kind)).bind(4,id); std::vector<LinkEdge> result;
-    while (query.row()) result.push_back(read_edge(query));
+    while (query.row()) result.push_back(read_edge(query,*this));
     return result;
 }
 std::vector<LinkEdge> Workspace::outgoing_links(const std::string& id) const
@@ -385,11 +435,12 @@ std::vector<LinkEdge> Workspace::outgoing_links(const std::string& id) const
     if (resolve_reference({ReferenceKind::Page,id}).state!=ReferenceState::Available) return {};
     Statement query(database_.get(),"SELECT l.source_page,l.source_block,p.title,l.target_id,l.target_kind,l.run_index,b.position,b.payload FROM links l JOIN blocks b ON b.id=l.source_block JOIN pages p ON p.id=l.source_page WHERE l.source_block IN (SELECT id FROM blocks WHERE page_id=?) ORDER BY b.position,l.run_index");
     query.bind(1,id); std::vector<LinkEdge> result;
-    while (query.row()) result.push_back(read_edge(query));
+    while (query.row()) result.push_back(read_edge(query,*this));
     const auto page=load_page(id);
     for (std::size_t position=0;position<page.document.blocks.size();++position) {
         const auto& block=page.document.blocks[position]; std::string context;
-        for (const auto& run:block.runs) context+=run.text;
+        for (const auto& run:block.runs) context+=run.reference && !run.reference->custom_label
+            ?reference_label(*run.reference).value_or(run.text):run.text;
         for (std::size_t i=0;i<block.runs.size();++i) {
             const auto& run=block.runs[i]; if (!run.reference || !run.reference->target_id.empty()) continue;
             LinkEdge edge; edge.source_page=id; edge.source_block=block.id; edge.source_title=page.title;

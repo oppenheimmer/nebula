@@ -33,4 +33,9 @@ bool PageSession::save() {
     try { workspace_.save_page(*page_); dirty_=false; error_.clear(); return true; }
     catch (const std::exception& error) { error_=error.what(); return false; }
 }
+void PageSession::adopt_saved(PageRecord record) {
+    if (dirty_ || record.document.id!=this->record().document.id)
+        throw std::logic_error("Flush the current page before adopting a saved operation");
+    page_=std::move(record); error_.clear();
+}
 } // namespace nebula

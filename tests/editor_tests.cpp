@@ -107,6 +107,10 @@ private slots:
     void wiki_composition_and_escaped_opening();
     void positions_restore_selection_scroll_and_clamp_missing_content();
     void keyboard_reference_activation_preserves_document();
+    void default_labels_follow_heading_edits_in_the_same_undo_group();
+    void title_and_default_page_labels_undo_together();
+    void editing_a_default_label_makes_it_custom_and_undo_restores_mode();
+    void resolving_custom_reference_preserves_rich_label_and_undo();
 };
 
 void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
@@ -173,6 +177,56 @@ void EditorTests::keyboard_reference_activation_preserves_document()
     editor.go_to_block("missing"); QTest::keyClick(&editor,Qt::Key_Enter,Qt::ControlModifier);
     QCOMPARE(unresolved.size(),1); QCOMPARE(unresolved[0][0].toString(),QString("Future"));
     QCOMPARE(changes.size(),0); QVERIFY(!editor.document()->isUndoAvailable());
+    editor.go_to_block("ref"); QTest::keyClick(&editor,Qt::Key_End);
+    editor.insert_reference("New target",ReferenceKind::Block,"new-target");
+    QTest::keyClick(&editor,Qt::Key_Return,Qt::ControlModifier); QCOMPARE(resolved.size(),2);
+    QCOMPARE(resolved.back()[1].toString(),QString("new-target"));
+}
+void EditorTests::default_labels_follow_heading_edits_in_the_same_undo_group()
+{
+    PageEditor editor; ready(editor,{"page",{{"heading","",BlockKind::Heading,{{"Heading"}}},
+        {"default","",BlockKind::Paragraph,{{"Cached",true,false,Reference{ReferenceKind::Block,"heading","","",false}}}},
+        {"custom","",BlockKind::Paragraph,{{"Fixed",false,true,Reference{ReferenceKind::Block,"heading"}}}}}});
+    QCOMPARE(text(editor.snapshot().blocks[1]),QString("Heading"));
+    editor.go_to_block("heading"); QTest::keyClick(&editor,Qt::Key_End); QTest::keyClicks(&editor," changed");
+    QCOMPARE(text(editor.snapshot().blocks[1]),QString("Heading changed")); QCOMPARE(text(editor.snapshot().blocks[2]),QString("Fixed"));
+    QVERIFY(!editor.snapshot().blocks[1].runs[0].reference->custom_label); QVERIFY(editor.snapshot().blocks[1].runs[0].bold);
+    editor.undo(); QCOMPARE(text(editor.snapshot().blocks[0]),QString("Heading")); QCOMPARE(text(editor.snapshot().blocks[1]),QString("Heading"));
+    editor.redo(); QCOMPARE(text(editor.snapshot().blocks[1]),QString("Heading changed"));
+    QVERIFY(editor.move_current(1)); editor.undo(); QCOMPARE(text(editor.snapshot().blocks[1]),QString("Heading changed"));
+}
+void EditorTests::title_and_default_page_labels_undo_together()
+{
+    PageEditor editor; ready(editor); editor.set_page({"page",{{"ref","",BlockKind::Paragraph,{
+        {"Cached",false,false,Reference{ReferenceKind::Page,"page","","",false}},
+        {" fixed",false,true,Reference{ReferenceKind::Page,"page"}}}}}},"Original");
+    QCOMPARE(editor.page_title(),QString("Original")); QCOMPARE(editor.snapshot().blocks[0].runs[0].text,std::string("Original"));
+    editor.set_page_title("Renamed"); QCOMPARE(editor.snapshot().blocks[0].runs[0].text,std::string("Renamed"));
+    QCOMPARE(editor.page_title(),QString("Renamed")); editor.undo(); QCOMPARE(editor.page_title(),QString("Original"));
+    QCOMPARE(editor.snapshot().blocks[0].runs[0].text,std::string("Original")); editor.redo(); QCOMPARE(editor.page_title(),QString("Renamed"));
+    QCOMPARE(editor.snapshot().blocks[0].runs[1].text,std::string(" fixed"));
+}
+void EditorTests::editing_a_default_label_makes_it_custom_and_undo_restores_mode()
+{
+    PageEditor editor; ready(editor,{"page",{{"heading","",BlockKind::Heading,{{"Heading"}}},
+        {"ref","",BlockKind::Paragraph,{{"Cached",false,false,Reference{ReferenceKind::Block,"heading","","",false}}}}}});
+    editor.go_to_block("ref"); QTest::keyClick(&editor,Qt::Key_Right); QTest::keyClicks(&editor,"custom");
+    auto run=editor.snapshot().blocks[1].runs[0]; QVERIFY(run.reference->custom_label); QVERIFY(run.text.find("custom")!=std::string::npos);
+    editor.undo(); run=editor.snapshot().blocks[1].runs[0]; QVERIFY(!run.reference->custom_label); QCOMPARE(run.text,std::string("Heading"));
+    editor.redo(); QVERIFY(editor.snapshot().blocks[1].runs[0].reference->custom_label);
+}
+void EditorTests::resolving_custom_reference_preserves_rich_label_and_undo()
+{
+    const Reference unresolved{ReferenceKind::Page,"","Future","db",true};
+    PageEditor editor; ready(editor,{"page",{{"ref","",BlockKind::Paragraph,{
+        {"read",true,false,unresolved},{" notes",false,true,unresolved}}}}});
+    QVERIFY(editor.select_current_reference()); const auto location=editor.selected_reference_location(); QVERIFY(location);
+    QCOMPARE(location->first_run,std::size_t(0)); QCOMPARE(location->run_count,std::size_t(2));
+    editor.replace_selected_reference({ReferenceKind::Page,"target"},"read notes");
+    auto block=editor.snapshot().blocks[0]; QCOMPARE(block.runs.size(),std::size_t(2));
+    QVERIFY(block.runs[0].bold); QVERIFY(block.runs[1].italic); QCOMPARE(block.runs[1].reference->target_id,std::string("target"));
+    editor.undo(); QCOMPARE(editor.snapshot().blocks[0].runs[1].reference->unresolved_name,std::string("Future"));
+    editor.redo(); QCOMPARE(editor.snapshot().blocks[0].runs[0].reference->target_id,std::string("target"));
 }
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
 {

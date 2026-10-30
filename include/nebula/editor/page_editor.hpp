@@ -22,7 +22,7 @@ class PageEditor : public QTextEdit {
     Q_OBJECT
 public:
     explicit PageEditor(QWidget* parent = nullptr);
-    void set_page(const Page& page);
+    void set_page(const Page& page, const QString& title = {});
     Page snapshot() const;
     QString current_block_id() const;
     QRectF active_block_rect() const; // Viewport coordinates, including wrapped lines.
@@ -33,8 +33,15 @@ public:
     bool outdent_current();
     void set_block_kind(BlockKind kind);
     void toggle_checked();
-    void insert_reference(const QString& label, ReferenceKind kind, const QString& target_id);
-    void insert_unresolved_reference(const QString& label, const QString& name, const QString& database_scope);
+    void insert_reference(const QString& label, ReferenceKind kind, const QString& target_id, bool custom_label = true);
+    void insert_unresolved_reference(const QString& label, const QString& name, const QString& database_scope, bool custom_label = true);
+    void set_reference_label_resolver(std::function<std::optional<std::string>(const Reference&)> resolver);
+    QString page_title() const;
+    void set_page_title(const QString& title);
+    bool select_current_reference();
+    bool select_reference_at(const ReferenceLocation& location);
+    std::optional<ReferenceLocation> selected_reference_location() const;
+    void replace_selected_reference(const Reference& reference, const QString& label);
     void insert_card(bool image, const QString& label);
     void insert_divider();
     void toggle_bold();
@@ -82,6 +89,9 @@ private:
     int typing_position_ = -1;
     int typing_revision_ = -1;
     QCompleter* wiki_completer_ = nullptr;
+    QString fallback_title_;
+    std::function<std::optional<std::string>(const Reference&)> label_resolver_;
+    void refresh_reference_labels(const Page* before = nullptr, const QString& before_title = {});
     int wiki_start() const;
     void process_wiki_input();
     QRectF block_rect(const QTextBlock& block) const;

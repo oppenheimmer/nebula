@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <limits>
 #include <memory>
+#include <map>
 
 namespace nebula {
 namespace {
@@ -40,6 +41,8 @@ constexpr int RefTarget = QTextFormat::UserProperty + 7;
 constexpr int CardImage = QTextFormat::UserProperty + 8;
 constexpr int RefName = QTextFormat::UserProperty + 9;
 constexpr int RefScope = QTextFormat::UserProperty + 10;
+constexpr int RefCustom = QTextFormat::UserProperty + 11;
+constexpr int PageTitle = QTextFormat::UserProperty + 12;
 constexpr int CardObject = QTextFormat::UserObject + 1;
 constexpr auto ClipboardFormat = "application/x-nebula-blocks+json";
 
@@ -89,6 +92,7 @@ QTextCharFormat run_format(const Run& run)
         format.setProperty(RefTarget, QString::fromStdString(run.reference->target_id));
         format.setProperty(RefName, QString::fromStdString(run.reference->unresolved_name));
         format.setProperty(RefScope, QString::fromStdString(run.reference->database_scope));
+        format.setProperty(RefCustom, run.reference->custom_label);
         format.setForeground(QColor(run.reference->target_id.empty()?"#a16b3b":"#236b9a"));
         format.setFontUnderline(true);
     }
@@ -114,11 +118,42 @@ Block read_block(const QTextBlock& qt_block, int start=0, int end=std::numeric_l
         Run run{fragment.text().mid(from-fragment.position(),to-from).toStdString(),
             character.fontWeight()>=QFont::Bold,character.fontItalic()};
         if (character.hasProperty(RefTarget)) run.reference=Reference{ReferenceKind(character.intProperty(RefKind)),
-            character.stringProperty(RefTarget).toStdString(),character.stringProperty(RefName).toStdString(),character.stringProperty(RefScope).toStdString()};
+            character.stringProperty(RefTarget).toStdString(),character.stringProperty(RefName).toStdString(),character.stringProperty(RefScope).toStdString(),
+            !character.hasProperty(RefCustom) || character.boolProperty(RefCustom)};
         if (character.objectType()==CardObject) run.asset=Asset{character.boolProperty(CardImage),character.stringProperty(AssetLabel).toStdString()};
         block.runs.push_back(std::move(run));
     }
     return block;
+}
+
+struct ReferenceSpan {
+    int start, end;
+    ReferenceLocation location;
+    Reference reference;
+    std::string text;
+    QTextCharFormat format;
+};
+std::vector<ReferenceSpan> reference_spans(const QTextDocument* document)
+{
+    std::vector<ReferenceSpan> result;
+    for (auto block=document->begin();block.isValid();block=block.next()) {
+        std::size_t run=0;
+        for (auto it=block.begin();!it.atEnd();++it) {
+            const auto fragment=it.fragment(); if (!fragment.isValid()) continue;
+            const auto format=fragment.charFormat();
+            if (format.hasProperty(RefTarget)) {
+                Reference ref{ReferenceKind(format.intProperty(RefKind)),format.stringProperty(RefTarget).toStdString(),
+                    format.stringProperty(RefName).toStdString(),format.stringProperty(RefScope).toStdString(),
+                    !format.hasProperty(RefCustom) || format.boolProperty(RefCustom)};
+                if (!result.empty() && result.back().end==fragment.position() && result.back().reference==ref) {
+                    result.back().end+=fragment.length(); result.back().text+=fragment.text().toStdString(); ++result.back().location.run_count;
+                } else result.push_back({fragment.position(),fragment.position()+fragment.length(),
+                    {block.blockFormat().stringProperty(Id).toStdString(),run,1},ref,fragment.text().toStdString(),format});
+            }
+            ++run;
+        }
+    }
+    return result;
 }
 
 void apply_block_format(QTextCursor& cursor,const Block& block,int level)
@@ -236,13 +271,18 @@ void PageEditor::paintEvent(QPaintEvent* event)
     }
 }
 
-void PageEditor::set_page(const Page& page)
+void PageEditor::set_page(const Page& page, const QString& title)
 {
     if (wiki_completer_) wiki_completer_->popup()->hide();
     cancel_drag();
     validate(page);
     page_id_ = page.id;
+    fallback_title_=title;
+    document()->setUndoRedoEnabled(false);
+    auto metadata=document()->begin().blockFormat(); metadata.setProperty(PageTitle,title);
+    QTextCursor(document()->begin()).setBlockFormat(metadata);
     write_page(page);
+    document()->setUndoRedoEnabled(true);
     document()->clearUndoRedoStacks();
     document()->setModified(false);
 }
@@ -251,6 +291,7 @@ void PageEditor::write_page(const Page& page, const QString& focus_id)
 {
     typing_position_=-1;
     validate(page);
+    const auto title=page_title();
     std::unordered_map<std::string, int> depths;
     QTextCursor cursor = textCursor();
     cursor.beginEditBlock();
@@ -270,6 +311,7 @@ void PageEditor::write_page(const Page& page, const QString& focus_id)
         format.setBottomMargin(10);
         format.setHeadingLevel(block.kind == BlockKind::Heading ? 1 : 0);
         if (first) {
+            format.setProperty(PageTitle,title);
             if (cursor.currentList())
                 cursor.currentList()->remove(cursor.block());
             cursor.setBlockFormat(format);
@@ -301,7 +343,7 @@ void PageEditor::write_page(const Page& page, const QString& focus_id)
         }
         cursor.setCharFormat(QTextCharFormat{});
     }
-    cursor.endEditBlock();
+    refresh_reference_labels(); cursor.endEditBlock();
     cursor.movePosition(QTextCursor::Start);
     setTextCursor(cursor);
     if (!focus_id.isEmpty())
@@ -346,14 +388,22 @@ std::optional<Reference> PageEditor::current_reference() const
     if (cursor.positionInBlock()<cursor.block().length()-1) cursor.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
     auto format=cursor.charFormat();
     if (!format.hasProperty(RefTarget)) format=before;
+    if (!format.hasProperty(RefTarget) && textCursor().selectionStart()>textCursor().block().position()) {
+        auto previous=textCursor(); previous.setPosition(previous.selectionStart());
+        previous.movePosition(QTextCursor::PreviousCharacter,QTextCursor::KeepAnchor); format=previous.charFormat();
+    }
     if (!format.hasProperty(RefTarget)) return {};
     return Reference{ReferenceKind(format.intProperty(RefKind)),format.stringProperty(RefTarget).toStdString(),
-        format.stringProperty(RefName).toStdString(),format.stringProperty(RefScope).toStdString()};
+        format.stringProperty(RefName).toStdString(),format.stringProperty(RefScope).toStdString(),
+        !format.hasProperty(RefCustom) || format.boolProperty(RefCustom)};
 }
 bool PageEditor::activate_current_reference()
 {
     const auto reference=current_reference(); if (!reference) return false;
-    if (reference->target_id.empty()) emit unresolved_reference_activated(QString::fromStdString(reference->unresolved_name),QString::fromStdString(reference->database_scope));
+    if (reference->target_id.empty()) {
+        select_current_reference();
+        emit unresolved_reference_activated(QString::fromStdString(reference->unresolved_name),QString::fromStdString(reference->database_scope));
+    }
     else emit reference_activated(int(reference->kind),QString::fromStdString(reference->target_id));
     return true;
 }
@@ -370,15 +420,121 @@ bool PageEditor::go_to_block(const QString& id)
     return false;
 }
 
+QString PageEditor::page_title() const
+{
+    const auto format=document()->begin().blockFormat();
+    return format.hasProperty(PageTitle)?format.stringProperty(PageTitle):fallback_title_;
+}
+void PageEditor::set_page_title(const QString& title)
+{
+    if (title==page_title()) return;
+    mutate([&]{ auto cursor=QTextCursor(document()->begin()); auto format=cursor.blockFormat(); format.setProperty(PageTitle,title); cursor.setBlockFormat(format); });
+}
+void PageEditor::set_reference_label_resolver(std::function<std::optional<std::string>(const Reference&)> resolver)
+{
+    label_resolver_=std::move(resolver);
+}
+void PageEditor::refresh_reference_labels(const Page* before, const QString& before_title)
+{
+    const auto spans=reference_spans(document());
+    if (std::none_of(spans.begin(),spans.end(),[](const auto& span){return !span.reference.custom_label;})) return;
+    const auto current=snapshot();
+    using Group=std::pair<Reference,std::string>;
+    std::map<std::string,std::vector<Group>> old_groups;
+    if (before) for (const auto& block:before->blocks) {
+        bool adjacent=false; auto& groups=old_groups[block.id];
+        for (const auto& run:block.runs) {
+            if (!run.reference) { adjacent=false; continue; }
+            if (adjacent && !groups.empty() && groups.back().first==*run.reference) groups.back().second+=run.text;
+            else groups.emplace_back(*run.reference,run.text);
+            adjacent=true;
+        }
+    }
+    std::map<std::pair<int,std::string>,std::optional<std::string>> external_labels;
+    auto label=[&](const Reference& ref,const Page& page,const QString& title) -> std::optional<std::string> {
+        if (ref.target_id.empty()) return ref.unresolved_name;
+        if (ref.kind==ReferenceKind::Page && ref.target_id==page.id) return title.isEmpty()?std::string("Untitled page"):title.toStdString();
+        if (ref.kind==ReferenceKind::Block) {
+            const auto block=std::find_if(page.blocks.begin(),page.blocks.end(),[&](const auto& b){return b.id==ref.target_id;});
+            if (block!=page.blocks.end()) return reference_title(*block);
+        }
+        const auto key=std::make_pair(int(ref.kind),ref.target_id);
+        auto cached=external_labels.find(key);
+        if (cached==external_labels.end()) cached=external_labels.emplace(key,label_resolver_?label_resolver_(ref):std::nullopt).first;
+        return cached->second;
+    };
+    std::map<std::string,std::size_t> ordinals;
+    for (const auto& span:spans) ++ordinals[span.location.block];
+    for (auto it=spans.rbegin();it!=spans.rend();++it) {
+        const auto& span=*it; const auto ordinal=--ordinals[span.location.block];
+        if (span.reference.custom_label) continue;
+        const auto desired=label(span.reference,current,page_title());
+        if (!desired) continue;
+        bool edited=false; const auto old=old_groups.find(span.location.block);
+        if (before && old!=old_groups.end() && ordinal<old->second.size()) {
+            const auto& group=old->second[ordinal];
+            edited=group.first==span.reference && group.second!=span.text
+                && label(span.reference,*before,before_title)==desired;
+        }
+        auto cursor=QTextCursor(document()); cursor.setPosition(span.start); cursor.setPosition(span.end,QTextCursor::KeepAnchor);
+        if (edited) { QTextCharFormat format; format.setProperty(RefCustom,true); cursor.mergeCharFormat(format); }
+        else if (*desired!=span.text) cursor.insertText(QString::fromStdString(desired->empty()?"Untitled page":*desired),span.format);
+    }
+}
+bool PageEditor::select_current_reference()
+{
+    const auto reference=current_reference(); if (!reference) return false;
+    const auto position=textCursor().selectionStart();
+    for (const auto& span:reference_spans(document())) if (span.reference==*reference && span.start<=position && position<=span.end) {
+        auto cursor=QTextCursor(document()); cursor.setPosition(span.start); cursor.setPosition(span.end,QTextCursor::KeepAnchor); setTextCursor(cursor); return true;
+    }
+    return false;
+}
+bool PageEditor::select_reference_at(const ReferenceLocation& location)
+{
+    for (const auto& span:reference_spans(document())) if (span.location.block==location.block
+        && location.first_run>=span.location.first_run && location.first_run<span.location.first_run+span.location.run_count) {
+        auto cursor=QTextCursor(document()); cursor.setPosition(span.start); cursor.setPosition(span.end,QTextCursor::KeepAnchor); setTextCursor(cursor); return true;
+    }
+    return false;
+}
+std::optional<ReferenceLocation> PageEditor::selected_reference_location() const
+{
+    const auto cursor=textCursor();
+    for (const auto& span:reference_spans(document()))
+        if (cursor.selectionStart()>=span.start && cursor.selectionEnd()<=span.end) return span.location;
+    return {};
+}
+void PageEditor::replace_selected_reference(const Reference& reference, const QString& label)
+{
+    if (!select_current_reference()) return;
+    mutate([&]{
+        auto cursor=textCursor(); Run run; run.reference=reference; auto format=run_format(run);
+        if (reference.custom_label && cursor.selectedText()==label) {
+            format.clearProperty(QTextFormat::FontWeight); format.clearProperty(QTextFormat::FontItalic);
+            cursor.mergeCharFormat(format); cursor.clearSelection();
+        } else {
+            auto start=cursor; start.setPosition(cursor.selectionStart()); start.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
+            run.bold=start.charFormat().fontWeight()>=QFont::Bold; run.italic=start.charFormat().fontItalic();
+            cursor.insertText(label,run_format(run));
+        }
+        cursor.setCharFormat(QTextCharFormat{}); setTextCursor(cursor);
+    });
+}
+
 void PageEditor::mutate(const std::function<void()>& action, bool join_typing)
 {
     typing_position_=-1;
     const auto before = snapshot();
+    const auto before_title=page_title();
     QTextCursor group = textCursor();
     if (join_typing) group.joinPreviousEditBlock();
     else group.beginEditBlock();
     action();
     normalize(before);
+    auto root=document()->begin();
+    if (!root.blockFormat().hasProperty(PageTitle)) { auto format=root.blockFormat(); format.setProperty(PageTitle,before_title); QTextCursor(root).setBlockFormat(format); }
+    refresh_reference_labels(&before,before_title);
     group.endEditBlock();
 }
 
@@ -391,6 +547,7 @@ void PageEditor::normalize(const Page& before)
     std::vector<std::string> ancestors;
     for (auto block = document()->begin(); block.isValid(); block = block.next()) {
         auto format = block.blockFormat();
+        if (block!=document()->begin()) format.clearProperty(PageTitle);
         auto id = format.stringProperty(Id).toStdString();
         if (id.empty() || seen.count(id)) {
             id = new_id().toStdString();
@@ -742,14 +899,14 @@ void PageEditor::toggle_checked()
     });
 }
 
-void PageEditor::insert_reference(const QString& label, ReferenceKind kind, const QString& target_id)
+void PageEditor::insert_reference(const QString& label, ReferenceKind kind, const QString& target_id, bool custom_label)
 {
     if (label.isEmpty() || target_id.isEmpty())
         return;
     mutate([&] {
         auto cursor = textCursor();
         Run run;
-        run.reference = Reference{kind, target_id.toStdString()};
+        run.reference = Reference{kind, target_id.toStdString(),"","",custom_label};
         cursor.insertText(label, run_format(run));
         cursor.setCharFormat(QTextCharFormat{});
         setTextCursor(cursor);
@@ -799,12 +956,12 @@ void PageEditor::toggle_bold()
     });
 }
 
-void PageEditor::insert_unresolved_reference(const QString& label, const QString& name, const QString& scope)
+void PageEditor::insert_unresolved_reference(const QString& label, const QString& name, const QString& scope, bool custom_label)
 {
     if (name.isEmpty()) return;
     mutate([&] {
         auto cursor=textCursor();
-        Run run{label.toStdString(),false,false,Reference{ReferenceKind::Page,"",name.toStdString(),scope.toStdString()}};
+        Run run{label.toStdString(),false,false,Reference{ReferenceKind::Page,"",name.toStdString(),scope.toStdString(),custom_label}};
         cursor.insertText(label,run_format(run)); cursor.setCharFormat(QTextCharFormat{}); setTextCursor(cursor);
     });
 }

@@ -17,6 +17,7 @@ public:
     void set_title(std::string title);
     void set_property(const std::string& id, PropertyValue value);
     bool save();
+    void adopt_saved(PageRecord record); // A committed operation on this page; keeps editor undo.
 private:
     Workspace& workspace_;
     std::optional<PageRecord> page_;

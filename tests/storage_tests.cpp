@@ -54,6 +54,9 @@ private slots:
     void page_move_preserves_typed_values_and_references();
     void page_move_property_conflict_rolls_back();
     void outgoing_links_keep_flow_order_context_and_unresolved_names();
+    void version_five_migration_keeps_legacy_labels_and_reads_new_modes();
+    void creating_reference_target_commits_page_and_source_together();
+    void failed_reference_creation_leaves_no_page_or_partial_binding();
 };
 void StorageTests::dates_and_types()
 {
@@ -570,6 +573,57 @@ void StorageTests::outgoing_links_keep_flow_order_context_and_unresolved_names()
     w.transfer_blocks(source,destination,"first");
     outgoing=w.outgoing_links(destination.document.id); QCOMPARE(outgoing.size(),std::size_t(2));
     QCOMPARE(outgoing[1].source_page,destination.document.id); QCOMPARE(outgoing[1].target_id,target.document.id);
+}
+void StorageTests::version_five_migration_keeps_legacy_labels_and_reads_new_modes()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("source"))); const auto db=w.create_database("Notes");
+    const auto legacy=w.create_page(db.id,"Legacy"); const auto identity=w.id();
+    sql(folder.filePath("source/nebula.sqlite3"),R"SQL(
+        UPDATE blocks SET payload='{"version":1,"runs":[{"text":"Legacy label","bold":true,"italic":false,"reference":{"kind":0,"target":"legacy-target"}}],"asset_label":"","checked":false}';
+        PRAGMA user_version=5;
+    )SQL");
+    auto upgraded=Workspace::open(path(folder.filePath("source"))); QCOMPARE(upgraded.id(),identity);
+    auto page=upgraded.load_page(legacy.document.id); QVERIFY(page.document.blocks[0].runs[0].reference->custom_label);
+    QCOMPARE(page.document.blocks[0].runs[0].text,std::string("Legacy label")); QVERIFY(page.document.blocks[0].runs[0].bold);
+    page.document.blocks[0].runs[0].reference->custom_label=false; upgraded.save_page(page);
+    QVERIFY(!upgraded.load_page(page.document.id).document.blocks[0].runs[0].reference->custom_label);
+    upgraded.backup_to(path(folder.filePath("backup"))); auto restored=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
+    QVERIFY(!restored.load_page(page.document.id).document.blocks[0].runs[0].reference->custom_label);
+    Block invalid;
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,decode_block(invalid,R"({"version":2,"runs":[{"text":"x","bold":false,"italic":false,"reference":{"kind":0,"target":"id"}}],"asset_label":"","checked":false})"));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,decode_block(invalid,R"({"version":3,"runs":[],"asset_label":"","checked":false})"));
+}
+void StorageTests::creating_reference_target_commits_page_and_source_together()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto source_db=w.create_database("Notes"), target_db=w.create_database("Projects");
+    auto source=w.create_page(source_db.id,"Source",{},{{"source","",BlockKind::Paragraph,{{"Future",true,false,Reference{ReferenceKind::Page,"","Future",source_db.id,false}}}}});
+    const auto before=source.document;
+    const auto target=w.create_reference_target(source,{"source",0,1},target_db.id,"Chosen name");
+    QCOMPARE(target.database_id,target_db.id); QCOMPARE(source.document.blocks[0].runs[0].text,std::string("Chosen name"));
+    QVERIFY(!source.document.blocks[0].runs[0].reference->custom_label); QVERIFY(source.document.blocks[0].runs[0].bold);
+    QCOMPARE(w.backlinks(ReferenceKind::Page,target.document.id).size(),std::size_t(1));
+    QCOMPARE(w.load_page(source.document.id).revision,source.revision);
+    auto after=source.document; source.document=before; w.save_page(source);
+    QVERIFY(w.backlinks(ReferenceKind::Page,target.document.id).empty()); QCOMPARE(w.pages(target_db.id).size(),std::size_t(1));
+    source.document=after; w.save_page(source); QCOMPARE(w.backlinks(ReferenceKind::Page,target.document.id).size(),std::size_t(1));
+    auto reopened=Workspace::open(path(folder.path())); QCOMPARE(reopened.load_page(source.document.id).document.blocks[0].runs[0].reference->target_id,target.document.id);
+    QCOMPARE(*reopened.reference_label({ReferenceKind::Page,target.document.id}),std::string("Chosen name"));
+}
+void StorageTests::failed_reference_creation_leaves_no_page_or_partial_binding()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Projects");
+    auto source=w.create_page(a.id,"Source",{},{{"source","",BlockKind::Paragraph,{{"Future",false,false,Reference{ReferenceKind::Page,"","Future",a.id,false}}}}});
+    const auto original=source;
+    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_reference_edge BEFORE INSERT ON links BEGIN SELECT RAISE(ABORT,'injected reference failure'); END;");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.create_reference_target(source,{"source",0,1},b.id,"Future"));
+    QCOMPARE(source.revision,original.revision); QCOMPARE(encode_document(w.load_page(source.document.id).document),encode_document(original.document));
+    QVERIFY(w.pages(b.id).empty()); QVERIFY(w.deleted_blocks().empty());
+    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_reference_edge;");
+    auto changed=source; changed.title="New title"; w.save_page(changed);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.create_reference_target(source,{"source",0,1},b.id,"Future")); QVERIFY(w.pages(b.id).empty());
+    source=w.load_page(source.document.id); w.trash_database(b.id,true);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.create_reference_target(source,{"source",0,1},b.id,"Future"));
+    QVERIFY(w.pages(b.id,true).empty());
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

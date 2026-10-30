@@ -1,13 +1,16 @@
-# Workspace format, version 5
+# Workspace format, version 6
 
 A workspace contains `nebula.sqlite3` and `attachments/`. The database has SQLite
-application ID `0x4e454255` and `user_version = 5`. The application refuses unknown
+application ID `0x4e454255` and `user_version = 6`. The application refuses unknown
 versions. Version 1 contained only workspace identity; upgrading to version 2
 adds the persistent record tables in one transaction and preserves that identity.
 Version 3 adds deleted-block recovery. Version 4 records deletion operation IDs and
 original positions to preserve sibling order when fragments are restored in a
 different order. Version 5 adds divider blocks, rebuilding block/link tables in
-one transaction while preserving their records. Versions 1–4 migrate
+one transaction while preserving their records. Version 6 enables explicit
+default/custom reference labels with block payload version 2. Its marker upgrade
+preserves version 1 payloads and deleted fragments; legacy labels remain custom.
+Versions 1–5 migrate
 transactionally; existing version 3 fragments retain their content and original
 parent/next-sibling anchors.
 Failed migrations roll back. Managed attachment paths and database files cannot be
@@ -34,16 +37,35 @@ additionally validates active ancestry, cycles, IDs, and paragraph boundaries.
 Pages always have at least one block. Image/file cards currently contain labels
 and representations; they do not establish managed attachment ownership.
 
-Block payload JSON version 1 contains `version`, `runs`, `asset_label`, and
+Block payload JSON version 2 contains `version`, `runs`, `asset_label`, and
 `checked`. Every run has UTF-8 `text`, `bold`, and `italic`. An optional `reference`
 contains `kind` (page 0 or block 1) and either permanent `target`, or an
 `unresolved_name` with optional database `scope`. Exactly one target form is valid.
-Absent name/scope fields in older version 1 payloads mean empty strings. Unresolved
+Version 2 references also require a boolean `custom_label`. True preserves explicit
+label text; false derives a current label by stable ID and uses stored text as an
+unavailable-target fallback. Readers accept version 1 payloads with all labels
+treated as custom. Absent name/scope fields in older version 1 payloads mean empty strings. Unresolved
 names are never bound by title during load, rendering, indexing, or navigation.
 An optional `asset`
 contains `image` and `label`. Soft breaks use U+2028; hard paragraph boundaries are
 separate blocks. QTextDocument/HTML serialization is never authoritative. Unknown
 payload versions and malformed or mistyped fields fail explicitly.
+
+Default labels refresh when a page opens and during editing. Current-page heading
+and title changes update their default labels in the same native undo command.
+The editor holds a temporary copy of the page title in its first block's Qt
+format solely to undo title/label edits together; it is excluded from canonical
+block JSON. The `pages.title` column remains authoritative. Editing default link
+text makes that label custom; undo restores both text and mode. Default block
+titles substitute `[link]` for nested default references, bounding recursive labels.
+Incoming/outgoing excerpts also derive current labels by ID without changing targets.
+
+Following an unresolved reference offers explicit existing-target selection or
+new-page creation with a destination database. Creating a page and binding its
+source reference uses one transaction, including revisions and derived edges;
+failed or stale source writes leave no new page. Undo of the binding restores the
+unresolved reference while retaining the explicitly created page. Creating another
+page with the intended name alone never binds an unresolved reference.
 
 Property JSON version 1 uses `version`, `type`, and (except unset) `value`:
 

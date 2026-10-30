@@ -38,9 +38,19 @@ the original wiki expression. Undo/redo and autosave preserve the selected IDs.
 
 Wiki recognition runs on typing and committed input-method text. Pasted wiki
 syntax remains text; Nebula's semantic clipboard carries typed references instead.
-Labels are currently stored as inserted text, so both an omitted label and an
-explicit label remain fixed through renames. Dynamic default labels and explicit
-unresolved create/select actions are tracked in M05.10 of the roadmap.
+Omitting `|label` creates a default label that follows the target title/text when
+opened or edited. Explicit labels remain fixed. Editing default label text makes
+it custom; undo/redo retains that choice. Same-page heading/title edits and their
+default-label updates undo together. Legacy labels retain their original fixed
+behavior. Default labels inside a block's own title use `[link]` when deriving
+other reference labels, preventing recursive expansion.
+
+Following an unresolved link opens explicit actions to choose an existing page,
+heading or block, or create a named page in a selected database. Creating the page
+and binding the source commit together. Cancel preserves the reference. Undoing
+the binding keeps the explicitly created page and restores the intended name/scope;
+redo restores the same target ID. Selecting an existing target changes only the
+activated occurrence and preserves a custom label's rich formatting.
 
 Ctrl+click or Ctrl+Enter at the editor cursor follows a reference. Incoming links
 show the referring page and source excerpt, including the exact target block ID

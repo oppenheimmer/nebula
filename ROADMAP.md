@@ -204,7 +204,7 @@ The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`
 UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
 Initialization occurs in a transaction; reopening preserves that identity.
 Unrelated databases and unsupported versions are rejected without modifying their
-contents. **Version 1 stores no pages or notes.** The current version 5 format
+contents. **Version 1 stores no pages or notes.** The current version 6 format
 adds persistent databases, pages, block payloads, properties, views, derived link
 edges, and deleted-block recovery. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
 schema, JSON versions, ownership, autosave/undo boundaries, and backup contract.
@@ -251,7 +251,8 @@ Record partial progress explicitly; do not infer completion from code existing o
 from a proposed design. An in-memory editor prototype and test/build foundation
 now exist, with a workspace chooser and persistent SQLite database-to-page workflow.
 Content persistence, autosave, typed properties, and saved table views are
-implemented; attachment import and the full wiki workflow remain incomplete.
+implemented, including the interactive wiki workflow. Managed attachment import,
+search/interchange, and release validation remain unfinished.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -267,7 +268,7 @@ including material data-handling limitations, rather than a running progress log
 | M02 | Modular application foundation | M01 | Complete |
 | M03 | Persistent workspace and recovery foundations | M02 | Complete |
 | M04 | Database-to-page workflow | M03 | Complete |
-| M05 | Complete first-release block editing | M01, M04 | In progress |
+| M05 | Complete first-release block editing | M01, M04 | Complete |
 | M06 | Attachments and diary workflow | M03, M05 | In progress |
 | M07 | Search and portable interchange | M04, M06 | Not started |
 | M08 | Reliability, accessibility, and performance | M04–M07 | Not started |
@@ -379,7 +380,7 @@ records, and an initial backup/restore path.
 - [x] M03.9 Verify interrupted operations, reopening, rollback, migration, and
   backup/restore using representative persisted fixtures.
 
-Current implementation: version 5 stores application-owned block JSON and typed
+Current implementation: version 6 stores application-owned block JSON and typed
 properties, with deferred same-page parent foreign keys, global block IDs,
 transactional page/index replacement, and optimistic revisions. `PageSession`
 owns pending values and save failures; the Qt adapter owns per-page undo. Autosave
@@ -447,7 +448,7 @@ Deliverables: the production block editor implementing the approach chosen in M0
   headings, and blocks, with duplicate-title disambiguation and custom labels.
 - [x] M05.9 Add backlinks/outgoing-link navigation with source context and exact
   block destinations; provide keyboard access and back/forward position history.
-- [ ] M05.10 Surface unresolved references and explicit create-or-select-target
+- [x] M05.10 Surface unresolved references and explicit create-or-select-target
   actions, including the destination database for a new page. Keep default and
   custom label behavior consistent through renames and undo/redo.
 
@@ -470,7 +471,9 @@ Wiki entry/completion and searchable explicit target selection cover page,
 heading/block, duplicate-title, custom-label, escaping, Unicode, and undo cases.
 Incoming/outgoing source-context navigation, keyboard following, and stable
 position/selection/scroll back/forward history pass storage/editor/window checks.
-Default labels and explicit unresolved target actions remain open in M05.10.
+Default/custom label modes, same-page title/heading undo, explicit unresolved
+selection/creation, and transactional source binding have focused regression
+coverage. [LINKS.md](docs/LINKS.md) defines entry, labels and navigation behavior.
 
 ### M06 — Attachments and diary workflow
 
@@ -789,6 +792,23 @@ problems remain in the risk register until reproduced.
 - **Verification:** the focused no-edit test failed before the fix (two signals)
   and passes afterward. The full-window transfer/undo/redo shortcut case also
   passes; final compiler/native results are recorded below.
+
+### BUG-012 — Keyboard following missed a just-inserted reference
+
+- **Milestone/state/impact:** M05.9/M05.10; fixed during unresolved-target work.
+  Ctrl+Enter immediately after typing an unresolved link did not open its actions.
+- **Environment/reproduction:** Debian 13 development image, Qt 6.8.2 offscreen;
+  type `[[FutureName]]` and press Ctrl+Enter at the end of the inserted reference.
+  The full-window create-target test observed that it remained unresolved.
+- **Expected:** keyboard following recognizes the reference immediately before
+  the caret, including after insertion has cleared the typing format.
+- **Cause:** at a block's end, lookup reused the cursor's cleared insertion
+  format rather than inspecting the preceding document character.
+- **Resolution:** inspect the preceding character when the current/next format
+  has no reference, staying within the current block.
+- **Verification:** the full-window typed-reference/create flow failed before
+  the fix and passes after it. The focused keyboard test now also follows a link
+  immediately after insertion; final compiler/native results are recorded below.
 
 For each future defect, record:
 
@@ -1157,6 +1177,50 @@ begin as part of this shutdown.
 - **Next:** M05.10 explicit unresolved create/select actions and default/custom
   labels through rename and undo/redo; then M06 managed attachments. M05 remains
   In progress until that behavior and its exit criteria have evidence.
+
+### Default labels and explicit unresolved actions checkpoint — 2026-10-30
+
+- Pushed the M05.9 checkpoint `185d465` to `origin/main` without trailers.
+- Completed M05.10 and M05's deliverables/exit criteria. Unresolved activation
+  offers explicit existing-target selection or new-page creation in a chosen
+  database. Selection replaces only the activated occurrence and preserves rich
+  custom labels. New page/source binding/revision/index writes commit together;
+  injected failures and stale source revisions leave no orphan page or partial
+  binding. Undo restores intended name/scope while retaining the explicitly
+  created page; redo reuses its original ID. Name reuse alone never binds a link.
+- Workspace schema 6 enables block JSON version 2 with explicit `custom_label`.
+  Versions 1–5 migrate transactionally; old payloads/fragments remain readable and
+  their fixed labels become custom. Document/clipboard/property/view envelopes
+  remain version 1. Old application versions reject the newer workspace marker
+  instead of silently dropping label behavior. Backup/restore accepts version 6.
+- Default labels derive target titles/text by ID on open/edit, including incoming/
+  outgoing excerpts. Current-page heading/title changes and their default labels
+  undo together; direct label edits become custom and undo restores mode. The
+  editor's temporary Qt title metadata participates only in native undo and is
+  excluded from canonical JSON; `pages.title` remains authoritative. Default
+  references inside block titles use `[link]` to bound recursive labels.
+- Fixed BUG-012: Ctrl+Enter at a just-inserted link's end now inspects the previous
+  document character after insertion clears the typing format. Both the focused
+  keyboard case and the full-window unresolved-create case have regression checks.
+- **Verification:** GCC and Clang passed all six CTest entries: 22 core, 34
+  storage, 51 editor and 49 desktop cases plus launcher/smoke. Core-only passed
+  without Qt/SQLite. Native Xwayland passed all 51 editor and 49 desktop cases.
+  Coverage includes legacy payload preservation, unknown/malformed new payload
+  rejection, default-label clipboard remapping, rename/undo, exact unresolved
+  occurrence selection, target database choice, transactional failure rollback,
+  restart/backup restore, and prior editor/window regressions. The recorded
+  Docker/toolchain environment is unchanged; no host dependencies were installed.
+- The 1,000-block measurement was 14 ms load, 14.92 ms typing p95, 84 ms adjacent
+  move and 33,724 KiB peak RSS. This single run, made while compiler/native checks
+  were also active, remains within the M01 investigation budgets; it is not a
+  statistical or release performance claim. Ordered tasks, statuses, local links,
+  balanced fences and `git diff --check` passed. Actual OS IME/screen-reader checks
+  remain M08 work, and macOS checks remain M10; none is claimed here.
+- **Next:** execute M06.1–M06.3 managed attachment import/ownership, interruption
+  and cleanup rules, and database-plus-file manifest backup/restore. M06 remains
+  In progress; M07–M10 remain Not started. Current schema/payload contracts are in
+  [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md), and interactive behavior is in
+  [LINKS.md](docs/LINKS.md).
 
 ## Technical references discussed
 
