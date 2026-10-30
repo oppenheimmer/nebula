@@ -3,8 +3,7 @@
 The current artifact is a **development preview**, `0.1.0~dev1`, for Debian 13
 amd64. It is not a published release. Release verification and remaining issues
 are tracked in [ROADMAP](../ROADMAP.md).
-Other distributions, architectures and BSD native packages are not established
-by this verification.
+Other distributions and architectures are not established by this verification.
 
 From the checkout, using the existing Docker daemon:
 

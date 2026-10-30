@@ -102,8 +102,6 @@ Recorded environments:
 | Same image; GCC core-only configuration | Standalone core build/tests passed with GUI discovery disabled. |
 | Docker GUI through host Xwayland | Native interaction suite, automatic GUI close, and screenshot capture passed; the screenshot was visually inspected. |
 | Initial RHEL 9.8 investigation; isolated Qt 6.8.3 SDK | Earlier suites built/ran with GCC 11.5 and Clang 21.1.8; superseded by the Docker workflow after the user's isolation requirement. |
-| FreeBSD amd64 | Not run; native build and desktop validation required in M10. |
-| OpenBSD amd64 | Not run; native build and desktop validation required in M10. |
 
 The image tag is `nebula-dev:debian13`; the verified image ID is
 `sha256:d96a2a1a0a4e223d4df47f2088b052961673eb5cc2f3a0e74fe4a0a0893a6f6e`.
@@ -179,8 +177,8 @@ through the real input context and verifies reader speech, native selection and
 focus restoration. The native editor exposes text; F8 provides block types,
 nesting, task state, references and asset labels as selectable read-only text.
 The final evidence and BUG-023–BUG-025 regressions are in the roadmap's M08
-checkpoint. Speech routes to a private null sink; no subjective audio-quality,
-other-IME/compositor or BSD desktop claim follows from this profile.
+checkpoint. Speech routes to a private null sink; subjective audio quality and
+other IMEs/compositors remain unverified.
 
 The initial prototype used one undo group per key. Production features and their
 current validation belong in the roadmap rather than this historical comparison.

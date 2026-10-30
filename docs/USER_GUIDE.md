@@ -1,8 +1,7 @@
 # First steps with Nebula
 
 Nebula keeps one person's notes in a local workspace. The current development
-workflow is Linux with Docker and X11/Xwayland. FreeBSD and OpenBSD on amd64 are
-planned; native BSD packages and desktop behavior have not been verified.
+workflow is Linux with Docker and X11/Xwayland. Linux is the only target platform.
 
 ## Open your first notebook
 

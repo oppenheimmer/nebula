@@ -2,8 +2,7 @@
 
 An always-local, single-user note-taking and diary application. Database entries
 open as flowing block documents, with Notion-inspired organization and
-Zim-inspired cross-references. Linux comes first; FreeBSD and OpenBSD on amd64
-are planned.
+Zim-inspired cross-references. Linux is the only target platform.
 
 Workspace pages and properties are stored in a local SQLite database. The separate
 `--demo` mode edits an in-memory sample and discards it on close. Implementation
@@ -308,14 +307,6 @@ measurements for the 1,000-block editor fixture; see
 workspace` measures the real window over a 10,000-block page, a 5,000-entry Journal,
 a page referenced by 1,000 entries and a page with 200 images.
 `.github/workflows/ci.yml` runs the Docker checks on GitHub-hosted Linux.
-The manually dispatched `BSD native checks` workflow builds/tests in separate
-amd64 FreeBSD 14.5/OpenBSD 8.0 VMs. It transfers synthetic backup and lossless JSON
-fixtures from each OS to all three systems, checking canonical records, IDs and
-attachment bytes. Fixtures are short-lived CI artifacts; no user workspace is
-uploaded. `./scripts/dev.sh portability bundle` creates the Linux fixture;
-`portability verify` checks the three downloaded `portability-*` artifact folders
-under ignored `build-portability-inputs/`. These checks do not establish supported
-BSD desktop releases.
 `test-desktop` uses a separate optional image with a private Xvfb/Openbox desktop,
 IBus/Anthy and Orca/AT-SPI. It sends real X11 input through the OS input engine and
 checks the reader's speech output and selection, without accessing the host's

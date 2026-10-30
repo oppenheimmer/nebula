@@ -17,7 +17,6 @@ Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh format [--check]
        ./scripts/dev.sh benchmark [single|separate|workspace]
        ./scripts/dev.sh test-native
-       ./scripts/dev.sh portability [bundle|verify]
        ./scripts/dev.sh backup SOURCE_FOLDER NEW_BACKUP_FOLDER
        ./scripts/dev.sh restore BACKUP_FOLDER NEW_WORKSPACE_FOLDER
        ./scripts/dev.sh export-md WORKSPACE_FOLDER NEW_MARKDOWN_FOLDER
@@ -104,11 +103,6 @@ case "$command_name" in
         [[ "$seconds" =~ ^[0-9]+$ && "$seconds" -gt 0 ]] || { usage >&2; exit 2; }
         compiler=fuzz
         ;;
-    portability)
-        mode=${2:-bundle}
-        [[ "$mode" == bundle || "$mode" == verify ]] || { usage >&2; exit 2; }
-        compiler=portability
-        ;;
     format)
         [[ $# == 1 || ( $# == 2 && $2 == --check ) ]] || { usage >&2; exit 2; }
         compiler=gcc
@@ -148,27 +142,6 @@ case "$command_name" in
             chmod 700 "$HOME" "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME"
             exec xvfb-run -a -s "-screen 0 1280x900x24 -nolisten tcp" \
                 dbus-run-session -- sh /workspace/scripts/desktop-check.sh'
-        ;;
-    portability)
-        exec "${run[@]}" --env "NEBULA_PORTABILITY_MODE=$mode" "$image" sh -ec '
-            cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ \
-                -DNEBULA_WERROR=ON -DNEBULA_SANITIZE=OFF -DNEBULA_LIBFUZZER=OFF
-            cmake --build /build --parallel 4 --target nebula_package_fixture
-            if [ "$NEBULA_PORTABILITY_MODE" = bundle ]; then
-                rm -rf /build/portability-output
-                /build/nebula_package_fixture bundle /build/portability-output
-            else
-                stage=$(mktemp -d /build/portability-check.XXXXXX)
-                cleanup() { rm -rf "$stage"; }
-                trap cleanup EXIT
-                count=0
-                for source in /workspace/build-portability-inputs/portability-*; do
-                    test -d "$source"
-                    /build/nebula_package_fixture transfer "$source" "$stage/$(basename "$source")"
-                    count=$((count + 1))
-                done
-                test "$count" -eq 3
-            fi'
         ;;
     format)
         format_args=(-i)

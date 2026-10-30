@@ -4,17 +4,16 @@ Last updated: 2026-10-30 (Asia/Tokyo)
 
 ## Project goal
 
-Build a portable desktop note-taking and diary application inspired by Notion's
+Build a Linux desktop note-taking and diary application inspired by Notion's
 block editing and database organization and Zim Desktop Wiki's interconnected
 notes. The primary interface is a database view: each entry is a page with editable
 properties and a flowing document of movable blocks. Users should be able to write
 naturally, organize entries through typed properties, cross-reference documents,
 and keep their data usable for the long term.
 
-The application is **always local and single-user**. Linux is the first release
-target; FreeBSD and OpenBSD on amd64 are planned subsequent targets. The
-architecture must be modular, with a documented storage format and conservative
-C/C++ dependencies.
+The application is **always local and single-user**. Linux is the only target
+platform. The architecture must be modular, with a documented storage format and
+conservative C/C++ dependencies.
 
 This describes the behavior we intend to build, not either application's internal
 architecture or a promise of full Notion or Zim format compatibility.
@@ -38,24 +37,20 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Build | CMake; keep compiler and platform requirements explicit. |
 | Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
 | Modularity | UI-independent document core, application operations, storage interfaces, and separate desktop adapters. |
-| Portability | Linux first; independent compile/smoke, desktop and packaging verification on FreeBSD amd64 and OpenBSD amd64 are required in M10. |
+| Platform | Linux only; the selected package target is Debian 13 amd64. |
 | Data ownership | Documented schema, migration paths, backup/restore, and portable exports. |
 
 The following remain implementation decisions rather than settled facts:
 
 - Desktop/input-method/accessibility coverage beyond the recorded Linux
-  IBus/Anthy/Orca profile, including native desktop acceptance on each BSD.
+  IBus/Anthy/Orca profile.
 - Release dependency pinning and third-party distribution notices. The current
   module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
-- Supported FreeBSD/OpenBSD version, compiler and dependency baselines (amd64).
-  The selected Linux package target is Debian 13 amd64.
-- Final Linux release verification/version and the FreeBSD/OpenBSD packaging
-  and distribution methods.
+- Final Linux release verification/version and distribution method.
 - Portable performance expectations beyond the recorded reference machine;
   budgets are in [PERFORMANCE.md](docs/PERFORMANCE.md) and search behavior in
   [SEARCH.md](docs/SEARCH.md).
-- Native desktop/package verification of interchange workflows on each BSD;
-  cross-system backup/JSON transfer is verified in M10.6. Contracts are in
+- Interchange behavior and limitations are documented in
   [INTERCHANGE.md](docs/INTERCHANGE.md),
   [MARKDOWN.md](docs/MARKDOWN.md) and
   [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
@@ -66,8 +61,8 @@ The following remain implementation decisions rather than settled facts:
 | --- | --- | --- |
 | C++ with Qt Widgets | Rich-text facilities, desktop controls, and model/view tables. | Preferred; custom block interactions still need a prototype. |
 | C++ with Qt Quick/QML | Flexible layouts and animated interfaces. | Adds QML and another interface model; a fallback if the editor investigation warrants it. |
-| C with GTK 4, or C++ with gtkmm | Strong Linux foundation; suitable if C or GNOME integration becomes the priority. | BSD/amd64 integration and packaging need separate investigation. |
-| C++ with wxWidgets | Established cross-platform native desktop controls. | Expected to require more custom work for this editor; keep as an alternative. |
+| C with GTK 4, or C++ with gtkmm | Strong Linux foundation; suitable if C or GNOME integration becomes the priority. | Would require a different editor adapter and dependency baseline. |
+| C++ with wxWidgets | Established native desktop controls. | Expected to require more custom work for this editor; keep as an alternative. |
 | Markdown files with metadata | Easy external editing and inspection. | Block identity, rich formatting, database queries, and atomic changes require additional machinery. Use for interchange. |
 | JSON files per page | Inspectable, flexible page representation. | Transactions, indexing, and recovery become additional systems. Use versioned JSON for lossless interchange and selected payloads. |
 | SQLite | Fits a database-centered local application with transactions and indexed queries. | Selected storage direction. |
@@ -244,8 +239,6 @@ recovery/restore verification.
   in search and saved database views.
 - A documented, installable Linux release that works offline.
 
-FreeBSD and OpenBSD releases target amd64 after the Linux release, beginning with
-independent native build and smoke checks on each system.
 Calendar and other database presentations are possible later extensions. Advanced
 relations, formulas, and broader Notion feature parity are not first-release
 commitments. Dragging files or images into the editor and translating the user
@@ -286,14 +279,13 @@ including material data-handling limitations, rather than a running progress log
 | M07 | Search and portable interchange | M04, M06 | Complete |
 | M08 | Reliability, accessibility, and performance | M04–M07 | Complete |
 | M09 | Linux release | M08 | In progress |
-| M10 | FreeBSD and OpenBSD releases (amd64) | M09 | In progress |
-| M11 | Thorough code audit and simplification | M00–M10 complete | Not started |
+| M10 | Thorough code audit and simplification | M00–M09 complete | Not started |
 
 ### M00 — Project definition and working conventions
 
 Deliverables: this roadmap and repository management instructions in `AGENTS.md`.
 
-- [x] M00.1 Record the project goal, local-only scope, and Linux and BSD/amd64 direction.
+- [x] M00.1 Record the project goal, local-only scope, and Linux-only direction.
 - [x] M00.2 Capture the preferred stack, alternatives, and unresolved decisions.
 - [x] M00.3 Define milestones, deliverables, exit criteria, and tracking conventions.
 - [x] M00.4 Establish project management and Git authorship conventions.
@@ -603,7 +595,7 @@ Completion evidence: the recorded reliability/performance checks plus real Linux
 IBus/Anthy composition, Orca speech/selection through F8 block details, full native
 interaction suites and controlled Xvfb/Xwayland focus stress. BUG-023–BUG-025 have
 focused regressions; detailed environments, results and coverage limits are in
-the final M08 work-log checkpoint. BSD desktop acceptance remains M10.5.
+the final M08 work-log checkpoint.
 
 ### M09 — Linux release
 
@@ -625,76 +617,40 @@ Exit criteria: a reproducible package installs and runs the agreed offline workf
 on the documented Linux target. Release documentation and the roadmap reflect the
 actual delivered features and remaining issues.
 
-### M10 — FreeBSD and OpenBSD releases (amd64)
-
-Deliverables: native FreeBSD and OpenBSD packages for amd64, using the same core
-and workspace format, with separate platform verification and installation
-instructions. Other BSD systems and architectures are outside this milestone.
-
-- [x] M10.1 Compile and smoke-test the core, storage, and desktop targets on a
-  real FreeBSD amd64 machine, VM or runner. Keep dependencies in that isolated
-  development environment; run applicable tests and record OS version, compiler,
-  Qt, SQLite, display environment and actual outcomes.
-- [x] M10.2 Repeat the build and applicable checks independently on OpenBSD amd64
-  in an isolated machine, VM or runner, recording the same environment details.
-- [ ] M10.3 Resolve issues found by M10.1/M10.2; choose and document minimum OS,
-  compiler and dependency versions separately for FreeBSD and OpenBSD. Confirm
-  Qt Widgets/Network, TLS trust and plugin availability without assuming that
-  Linux builds or one BSD establish support for the other.
-- [ ] M10.4 Adapt filesystem durability/locking, paths, dialogs, desktop launch,
-  menus and keyboard shortcuts behind narrow platform adapters. Verify managed
-  attachment copying, save failures, backup/restore and offline operation on both
-  systems; keep document rules independent of platform code.
-- [ ] M10.5 Verify text/input-method behavior, accessibility and the complete
-  database/page workflow on each BSD desktop. Record actual IME, screen-reader,
-  display and Qt results separately, including unavailable checks.
-- [x] M10.6 Verify backup/export transfer among Linux, FreeBSD amd64 and OpenBSD
-  amd64 while preserving notes, IDs, references and attachment bytes; this is
-  manual portability, not synchronization.
-- [ ] M10.7 Select native packaging and installation methods for each BSD,
-  document dependencies and license notices, and verify clean install, upgrade,
-  launch and removal without deleting workspaces. Record release versions,
-  distribution procedures, checks and known limitations separately.
-
-Exit criteria: both BSD amd64 packages complete the agreed offline workflow and
-cross-platform data-transfer checks on their recorded supported environments.
-Each system has its own build, desktop, data-reliability and package evidence;
-a Linux build or a successful check on one BSD cannot complete the other.
-
-### M11 — Thorough code audit and simplification
+### M10 — Thorough code audit and simplification
 
 Deliverables: a recorded audit of the completed application and a simpler,
 well-organized implementation using the
 [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
-Begin only after all M00–M10 milestones and their exit criteria are complete.
+Begin only after all M00–M09 milestones and their exit criteria are complete.
 
-- [ ] M11.1 Capture the audited source revision and baseline evidence: Linux,
-  FreeBSD amd64 and OpenBSD amd64 builds/checks, recovery and interchange
-  fixtures, desktop workflows and the established performance measurements.
-- [ ] M11.2 Audit the complete codebase, tests, build/dependency configuration and
+- [ ] M10.1 Capture the audited source revision and baseline evidence: Linux
+  GCC/Clang/sanitizer builds/checks, recovery and interchange fixtures, desktop
+  workflows and the established performance measurements.
+- [ ] M10.2 Audit the complete codebase, tests, build/dependency configuration and
   packaging for correctness, data safety, security, ownership/lifetime errors,
   platform assumptions, duplicated rules, unnecessary abstraction and complexity.
   Publish prioritized findings with code references, impact and reproducible
   evidence; give confirmed defects stable BUG IDs and regression tests.
-- [ ] M11.3 Define and document the Google C++ style baseline for naming, headers,
+- [ ] M10.3 Define and document the Google C++ style baseline for naming, headers,
   includes, class/function organization, ownership, comments and formatting.
   Record narrow, justified exceptions for Qt integration, C++17 compatibility or
   established error/data contracts; do not change those contracts implicitly.
   Configure the existing formatter and appropriate isolated automated checks.
-- [ ] M11.4 Address audit defects and simplify modules in small reviewable changes:
+- [ ] M10.4 Address audit defects and simplify modules in small reviewable changes:
   reduce duplication and long functions, clarify interfaces and ownership, and
   remove unnecessary indirection while preserving offline scope, stable IDs,
   persistent formats, transactions, recovery and observable behavior. Separate
   mechanical formatting/renaming from semantic fixes/refactoring in Git history.
-- [ ] M11.5 Re-run applicable compiler, sanitizer, parser, desktop, storage,
-  migration, backup/restore, interchange, package and native platform checks.
+- [ ] M10.5 Re-run applicable compiler, sanitizer, parser, Linux desktop, storage,
+  migration, backup/restore, interchange and package checks.
   Compare representative performance with the recorded baseline, account for
   every audit finding, and document remaining limitations and final evidence.
 
 Exit criteria: the thorough audit is reviewable, findings have verified fixes or
 explicitly documented dispositions, the code follows the recorded Google C++
 style baseline, and simplification preserves tested behavior/data compatibility
-without unexplained performance regressions on all three supported platforms.
+without unexplained performance regressions on the supported Linux environments.
 
 Progress from the Suggestions implementation (2026-10-30), before the subsequent M08
 verification checkpoint: integrated benchmarks over representative fixtures now exist for M08.3
@@ -714,7 +670,7 @@ These are anticipated risks, not encountered bugs.
 | R03 | Attachment files and database references may diverge after interruption or backup. | Define import ordering, reconciliation, retention, and a consistent backup manifest. | Open |
 | R04 | Search tokenization may be unsuitable for some writing systems. | Define supported behavior and test representative language fixtures in M07. | Open |
 | R05 | Large documents or databases may expose rendering/query bottlenecks. | Establish workloads and thresholds in M01; measure again in M08. | Open |
-| R06 | Linux assumptions may make FreeBSD/OpenBSD ports expensive. | Keep platform adapters narrow; start with independent native amd64 compile/smoke checks and validate filesystem, Qt/TLS and desktop behavior on each BSD. | Open |
+| R06 | Distribution and desktop differences may invalidate Linux release assumptions. | Record the supported distribution, dependencies and desktop environment; validate filesystem, Qt/TLS and package behavior on that target. | Open |
 | R07 | Dependency licensing or platform requirements may constrain distribution. | Resolve the license/module baseline in M01 and validate packaging requirements before release. | Open |
 | R08 | Autosave or migration failures may lose data or falsely report that it was saved. | Define durability semantics, expose failures, and test recovery and migrations. | Open |
 | R09 | References may be redirected by duplicate/reused titles, or backlinks may become stale after edits/imports. | Use permanent target IDs, explicit unresolved states, a rebuildable derived link index, and lifecycle/round-trip checks. | Open |
@@ -1086,7 +1042,7 @@ problems remain in the risk register until reproduced.
 
 ### BUG-021 — Large export read transactions can delay GUI autosave
 
-- **Milestone/state:** M08.4/M08.13/M09.2; Fixed and verified on Linux, FreeBSD and OpenBSD. Pending
+- **Milestone/state:** M08.4/M08.13/M09.2; Fixed and verified on Linux. Pending
   edits remain available; no lost saved notes were observed.
 - **Environment/reproduction:** pinned Debian 13 Docker, Qt 6.8.2, SQLite 3.46.1,
   GCC Debug ASan/UBSan. Type in the full window while a second process repeatedly
@@ -1108,8 +1064,7 @@ problems remain in the risk register until reproduced.
   during an active source transaction. GCC, Clang and ASan/UBSan pass 15/15
   groups; native Xwayland passes all interaction/reliability cases. The expanded
   worker covers JSON and Markdown without any save-failure status. M08.13 is
-  complete again. Both native BSD guests independently passed this later source
-  in run 41033901370, including the new regression and snapshot invariants.
+  complete again.
 
 ### BUG-022 — Installed documentation linked to omitted project files
 
@@ -1334,9 +1289,9 @@ milestone, evidence, and the resulting action.
   Its private test-user customization sets line buffering for that log only;
   speech generation and the installed reader remain unchanged.
 - **G34 — New CMake deprecates the older SQLite target alias (2026-10-30,
-  M10.3):** native OpenBSD CMake 4.3.5 warns that `SQLite::SQLite3` should become
-  `SQLite3::SQLite3`. The build/tests pass. Any target-name cleanup must retain
-  the agreed CMake 3.22 baseline; resolve that compatibility choice in M10.3.
+  M09.1):** earlier toolchain checks with CMake 4.3.5 warned that
+  `SQLite::SQLite3` should become `SQLite3::SQLite3`. The build/tests passed.
+  Future CMake upgrades must retain compatibility with the agreed 3.22 baseline.
 
 ## Suggestions
 
@@ -1439,7 +1394,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
 
   Decide whether loopback and private-network hosts are fetched without confirmation:
   a pasted link can reach a router or local admin page. Record the Qt Network/TLS
-  backend licence and BSD/amd64 implications in DEPENDENCIES.md. Test the success,
+  backend licence and Linux deployment requirements in DEPENDENCIES.md. Test the success,
   failure, timeout, oversize and cancel paths against a loopback server inside the
   network-less test container.
 - **SUG-02 — `dev.sh` mounts the destination's parent read-write** (Medium,
@@ -1462,7 +1417,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
   version, allowing FTS5 shadow tables, and fail on any extras. Enable
   `SQLITE_DBCONFIG_DEFENSIVE` and `PRAGMA trusted_schema=OFF`. Where the SQLite
   baseline allows, also disable triggers and views on Nebula connections. This
-  matters for the Linux↔FreeBSD/OpenBSD amd64 transfers in M10.6.
+  also applies when opening backups or importing exported data from other machines.
 - **SUG-04 — Use private file modes for diary data** (Medium, Confirmed, M08).
   Workspace, backup and export folders get default directory modes
   (`src/storage/workspace.cpp:58`), and SQLite creates `nebula.sqlite3` with its
@@ -1758,8 +1713,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
   - fuzz targets for `parse_wiki_link`, the block/view/document codec, JSON and
     Markdown import, HTML paste and the backup manifest;
   - `-Werror` for project targets;
-  - a CI workflow that runs `test gcc`, `test clang` and `test core`, later joined by
-    independent FreeBSD amd64 and OpenBSD amd64 runners.
+  - a Linux CI workflow that runs `test gcc`, `test clang` and `test core`.
 
   Use the CI workflow to stress-test BUG-014.
 - **SUG-41 — Check required SQLite features up front** (Low, M09.1). CMake checks
@@ -1817,7 +1771,7 @@ Initial failures were corrected rather than omitted: an outline-test fixture use
 the wrong block ID, the mock launcher could not execute on `/tmp`'s container
 mount, native test focus needed activation waits (G16/G17), and the outline height
 and unrelated-database edge case became BUG-005/BUG-006. BUG-004's exact original
-session remains unconfirmed. Real OS IME, screen-reader, and BSD/amd64 checks remain
+session remains unconfirmed. Real OS IME and screen-reader checks remain
 unperformed; no production note persistence or autosave is claimed.
 
 Future entries should record the steps changed, checks actually performed and
@@ -1851,7 +1805,7 @@ Do not record tests as passed when they were unavailable or not run.
   still needs dividers, rich clipboard, wiki entry, full link lifecycle/navigation,
   input/accessibility checks, and the remaining editor polish. M06 attachment
   ownership/import/manifest recovery, M07 search/interchange, M08 reliability,
-  and Linux and BSD/amd64 packaging remain unfinished. Do not infer completion from this
+  and Linux packaging remain unfinished. Do not infer completion from this
   checkpoint or restore the old in-memory-only README warning for workspace mode.
 
 ### Grip-dot mouse reordering checkpoint — 2026-10-30
@@ -1872,9 +1826,9 @@ Do not record tests as passed when they were unavailable or not run.
 
 ### Dependency and validation schedule correction — 2026-10-30
 
-At the user's direction, actual OS IME/screen-reader acceptance belongs to M08.2
-and BSD/amd64 compile/smoke checks begin M10. Tasks were moved into their destination
-lists and renumbered in execution order, with no transfer notices left behind.
+At the user's direction, actual OS IME/screen-reader acceptance belongs to M08.2.
+Tasks were moved into their destination lists and renumbered in execution order,
+with no transfer notices left behind.
 M01/M02 satisfy their automated/Linux scope; the later checks remain unperformed.
 The M03 list also follows implementation order from schema/workspace setup through
 record operations, migrations, autosave, references, recovery, and verification.
@@ -1901,7 +1855,7 @@ record operations, migrations, autosave, references, recovery, and verification.
 - Next: finish M05 block types, rich clipboard and typing undo grouping, followed
   by the wiki/reference navigation workflow. M06 managed attachments, M07 search/
   interchange, M08 reliability/accessibility, and platform releases remain open.
-  Real OS IME, screen-reader, and BSD/amd64 checks have not been performed.
+  Real OS IME and screen-reader checks have not been performed.
 
 ### Divider, clipboard, and undo checkpoint — 2026-10-30
 
@@ -1940,7 +1894,7 @@ begin as part of this shutdown.
 
 - **Milestones:** M00–M04 are Complete. M05 remains In progress with M05.6 and
   M05.8–M05.10 open. M06 is In progress: the journal template/date workflow works,
-  but managed attachments are unfinished. M07–M10 are Not started.
+  but managed attachments are unfinished. M07–M09 are Not started.
 - **Current implementation:** C++17/Qt 6 Widgets/SQLite, MIT; modules are core,
   format, storage, application/session, editor, desktop, and CLI. The JSON codec
   now lives in `include/nebula/format/codec.hpp` and `src/format/codec.cpp`.
@@ -1959,7 +1913,7 @@ begin as part of this shutdown.
   directory but has no managed-file manifest/retention verification yet. Cut/paste
   creates copied identities; default labels, cross-page block transfer, wiki
   completion, outgoing links/history, and explicit unresolved create/select actions
-  remain incomplete. Real OS IME/screen-reader and BSD/amd64 checks are unperformed;
+  remain incomplete. Real OS IME/screen-reader checks are unperformed;
   installed IBus/Orca do not establish acceptance.
 - **Resume point:** read `AGENTS.md` and this roadmap, inspect `git status` and the
   latest commits, then continue M05.6/M05.8–M05.10 with focused tests. Start with
@@ -2005,7 +1959,7 @@ begin as part of this shutdown.
   `sha256:d96a2a1a0a4e223d4df47f2088b052961673eb5cc2f3a0e74fe4a0a0893a6f6e`,
   Qt 6.8.2, SQLite 3.46.1, GCC 14.2.0, and Clang 19.1.7 on the RHEL 9.8 x86_64
   host. No host dependencies were installed. Documentation/task/link/whitespace
-  checks passed. Real OS IME, screen-reader, and BSD/amd64 checks remain unperformed;
+  checks passed. Real OS IME and screen-reader checks remain unperformed;
   no new performance claim is made by this change.
 - **Next:** M05.8 wiki entry/completion and picker polish, M05.9 outgoing links/
   source context and back/forward position history, and M05.10 default/custom
@@ -2038,7 +1992,7 @@ begin as part of this shutdown.
   environment is unchanged from the preceding checkpoint. A newly unused helper
   produced a compiler warning during the initial build; it was removed and final
   GCC/Clang builds are clean. Whitespace, ordered-task, Markdown-link and fence
-  checks passed. Actual OS IME, reader, and BSD/amd64 acceptance remain unperformed.
+  checks passed. Actual OS IME and reader acceptance remain unperformed.
 - **Next:** execute M05.9 outgoing/source-context navigation, keyboard following,
   and back/forward position history, followed by M05.10 and the managed-attachment
   milestones. M05 remains In progress.
@@ -2069,7 +2023,7 @@ begin as part of this shutdown.
   caught a mixed-type `auto` declaration in the new history method; splitting the
   declarations fixed compilation. No core implementation changed, so the separate
   core-only configuration was not rerun. Documentation/link/status/whitespace
-  checks passed. OS IME/reader and BSD/amd64 acceptance remain unperformed.
+  checks passed. OS IME/reader acceptance remain unperformed.
 - **Next:** M05.10 explicit unresolved create/select actions and default/custom
   labels through rename and undo/redo; then M06 managed attachments. M05 remains
   In progress until that behavior and its exit criteria have evidence.
@@ -2111,10 +2065,10 @@ begin as part of this shutdown.
   were also active, remains within the M01 investigation budgets; it is not a
   statistical or release performance claim. Ordered tasks, statuses, local links,
   balanced fences and `git diff --check` passed. Actual OS IME/screen-reader checks
-  remain M08 work, and BSD/amd64 checks remain M10; none is claimed here.
+  remain M08 work; none is claimed here.
 - **Next:** execute M06.1–M06.3 managed attachment import/ownership, interruption
   and cleanup rules, and database-plus-file manifest backup/restore. M06 remains
-  In progress; M07–M10 remain Not started. Current schema/payload contracts are in
+  In progress; M07–M09 remain Not started. Current schema/payload contracts are in
   [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md), and interactive behavior is in
   [LINKS.md](docs/LINKS.md).
 
@@ -2128,7 +2082,7 @@ begin as part of this shutdown.
   files where possible. Source modification/removal does not change managed bytes.
   Symlinks/special files are rejected, including before image-reader access.
 - Added a separate `nebula_files` adapter using existing Qt Core hash/JSON and
-  POSIX file APIs (BSD/amd64 validation pending). Image cards preview managed bytes through existing Qt Gui
+  POSIX file APIs. Image cards preview managed bytes through existing Qt Gui
   readers with bounded decode/cache sizes. File IDs survive clipboard, movement,
   deletion/undo and reopen. Local open/copy and availability/audit controls are
   keyboard-accessible. The Docker launcher adds only an explicitly selected
@@ -2136,7 +2090,7 @@ begin as part of this shutdown.
 - Schema 7 adds the attachment registry; block payload 3 carries block/inline
   managed IDs while reading payloads 1–2. Versions 1–6 migrate with preserved notes,
   legacy label-only cards and recovery fragments. No new external library was
-  added. BSD/amd64 compilation/filesystem behavior remains M10 work.
+  added.
 - Shared backup locks and exclusive import/cleanup locks protect immutable files.
   Backups copy a consistent SQLite snapshot and all retained attachment bytes,
   validate registered metadata/hashes, and durably write manifest version 1.
@@ -2163,11 +2117,11 @@ begin as part of this shutdown.
   syntax, ordered tasks, local links, fences and `git diff --check` passed.
   Interrupted-import handling uses orphan fixtures and transactional failures;
   process-kill tests at every file/rename/commit boundary remain M08 work. External
-  desktop-handler opening, actual OS IME/reader and BSD/amd64 checks remain unperformed.
+  desktop-handler opening, actual OS IME/reader checks remain unperformed.
   Imports/audits are synchronous; large-file responsiveness is not claimed.
 - **Next:** M07.1–M07.2 indexed search/tokenization and navigation, M07.3–M07.6
   Markdown/lossless interchange and validation, and M07.7 reference filters in
-  search/views. M00–M06 are Complete; M07–M10 remain Not started at this checkpoint.
+  search/views. M00–M06 are Complete; M07–M09 remain Not started at this checkpoint.
 
 ### Indexed local search checkpoint — 2026-10-30
 
@@ -2196,11 +2150,11 @@ begin as part of this shutdown.
   cases, including the search shortcut, Enter selection, exact block, Back history,
   cancel, scoped results and repair with pending edits. The initial shortcut test
   needed to wait for modal-to-window activation before sending Back; both
-  offscreen and native checks then passed. Actual OS IME/reader and BSD/amd64 checks
+  offscreen and native checks then passed. Actual OS IME/reader checks
   remain unperformed. Build environment is unchanged from M06. All 69 unique
   task IDs, local documentation links/fences and `git diff --check` passed.
 - **Next:** M07.3 Markdown subset, M07.4–M07.6 lossless portable interchange and
-  validation, then M07.7 reference filters. M08–M10 remain Not started.
+  validation, then M07.7 reference filters. M08–M09 remain Not started.
 
 ### Markdown conversion checkpoint — 2026-10-30
 
@@ -2238,8 +2192,8 @@ begin as part of this shutdown.
   original attachment bytes at `/tmp/nebula-m07.BQJ8dY`. All 69 task IDs,
   prose documentation links/fences, Bash syntax and `git diff --check` passed.
 - **Next:** implement lossless JSON and complete M07.4–M07.6 validation/round trips,
-  then M07.7 reference filters. M07 remains In progress; M08–M10 remain Not started.
-  The Linux environment is unchanged; OS IME/reader and BSD/amd64 remain unverified.
+  then M07.7 reference filters. M07 remains In progress; M08–M09 remain Not started.
+  The Linux environment is unchanged; OS IME/reader remain unverified.
 
 ### Lossless interchange checkpoint — 2026-10-30
 
@@ -2277,13 +2231,11 @@ begin as part of this shutdown.
   function returns. Real Docker JSON export/import through Unicode/comma/quote
   paths preserved every canonical row and file byte in the M07 disposable fixture.
   Clang identified a C++20 structured-binding capture extension; the code now uses
-  ordinary C++17 references. OS IME/reader, crash-kill boundaries and actual BSD/amd64
-  transfer remain separately required. GitHub repository access is available;
-  native BSD runner availability must be established in M10. No
-  BSD/amd64 verification is claimed.
+  ordinary C++17 references. OS IME/reader and crash-kill boundaries remain
+  separately required. GitHub repository access is available.
   All 69 task IDs, prose links/fences, Bash syntax and `git diff --check` passed.
 - **Next:** M07.7 structured incoming/outgoing reference filters in search and
-  saved views. M07 remains In progress; M08–M10 remain Not started.
+  saved views. M07 remains In progress; M08–M09 remain Not started.
 
 ### Pasted-link preview scope addition — 2026-10-30
 
@@ -2332,9 +2284,9 @@ begin as part of this shutdown.
   In progress because the newly requested M07.8 is not implemented. Its scope
   explicitly permits text retrieval on paste only, with removable previews and no
   images/thumbnails. AGENTS.md records that narrow exception. No preview network
-  code/dependency was introduced in this checkpoint. M08–M10 remain Not started.
+  code/dependency was introduced in this checkpoint. M08–M09 remain Not started.
   Resume with M07.8, then reliability/accessibility/performance and release work;
-  actual OS IME, screen-reader and BSD/amd64 verification remain unperformed.
+  actual OS IME and screen-reader verification remain unperformed.
 
 ### Architecture, security and quality review — 2026-10-30
 
@@ -2396,7 +2348,7 @@ begin as part of this shutdown.
   GCC build cache needed a clean rebuild after switching back to HEAD APIs;
   that clean standalone build passed. No host dependencies were installed.
 - All 71 milestone task IDs are unique. Local documentation links, Markdown
-  fences and `git diff --check` passed. Actual OS IME, screen-reader and BSD/amd64
+  fences and `git diff --check` passed. Actual OS IME and screen-reader
   checks remain unperformed. M07/M08 remain In progress; next is M07.8, followed
   by the remaining reliability, accessibility, performance and release work.
 
@@ -2419,7 +2371,7 @@ begin as part of this shutdown.
   pages; redirects cannot change host, scheme or port. No image/subresource
   retrieval, background refresh or other networking is introduced. Qt Network
   adds no host installation or SDK baseline increase. Dependency, license and
-  Linux and BSD/amd64 TLS deployment implications are in
+  Linux TLS deployment requirements are in
   [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 - **Verification:** isolated HEAD-plus-adapter GCC/Clang builds passed all nine
   CTest entries. The final nine preview cases also passed focused GCC/Clang and
@@ -2443,7 +2395,7 @@ begin as part of this shutdown.
   capability, and verify full-window removal, save/reopen, clipboard and undo/redo.
   The application does not yet offer pasted-link previews. M07.8 stays unchecked,
   and M07/M08 remain In progress. Shared-window integration awaits the concurrent
-  agent as requested; OS IME, screen-reader and BSD/amd64 checks remain open.
+  agent as requested; OS IME and screen-reader checks remain open.
 
 ### Suggestions implementation checkpoint — 2026-10-30
 
@@ -2512,12 +2464,12 @@ begin as part of this shutdown.
   ms table switch and 128 MiB peak RSS.
 - **Not verified:** the CI workflow has not run on a GitHub runner yet; libFuzzer
   and clang-format are absent from the current image, so only the deterministic
-  fuzz driver ran; real OS IME, screen-reader, GUI/CLI lock contention and BSD/amd64
-  checks remain unperformed.
+  fuzz driver ran; real OS IME, screen-reader and GUI/CLI lock contention checks
+  remain unperformed.
 - **Pending work:** the remaining follow-ups for SUG-22, SUG-28, SUG-34, SUG-36,
   SUG-38 and SUG-40 are scheduled as M08.8. M07.8 editor integration of link
   previews (owned by the concurrent preview work), the other M08 tasks and the
-  M09/M10 release work remain open. Drag-and-drop and UI translation are deferred
+  M09 release work remain open. Drag-and-drop and UI translation are deferred
   beyond the first release. M07 and M08 stay In progress.
 - At the user's request this checkpoint is committed with a subject-only message
   and the configured author, without co-author or other trailers. The other
@@ -2544,25 +2496,6 @@ begin as part of this shutdown.
   acceptance remain M08 work. The host has IBus and Orca 40.3 executables, but
   IBus currently reports no connected bus/engine; their availability alone does
   not establish input-method or screen-reader verification.
-
-### BSD amd64 platform retargeting — 2026-10-30
-
-- At the user's direction, M10 now targets **FreeBSD amd64** and **OpenBSD amd64**
-  after the Linux release. Replaced the previous follow-on platform throughout
-  the roadmap, including deferred-platform references in historical checkpoints;
-  their recorded Linux check outcomes are unchanged. Updated README, project
-  instructions and dependency, attachment, interchange and feasibility documents
-  to match the new targets.
-- M10.1/M10.2 require independent native builds; M10.3–M10.7 cover separate
-  supported baselines, platform adapters, desktop/IME/accessibility, data transfer
-  and native packages. No application-bundle, platform signing or Command-key
-  work remains scheduled. Dependency availability, TLS deployment and filesystem
-  behavior must be verified on each BSD. Linux containers remain the Linux
-  development workflow; BSD requires isolated amd64 environments.
-- **Verification:** reviewed scope, statuses, task ordering, local documentation
-  links and Markdown fences; checked for obsolete platform plans and ran
-  `git diff --check`. This is a documentation retargeting; no BSD build, desktop
-  test or supported OS-version claim is made. M10 remains Not started.
 
 ### Pasted-link preview integration — 2026-10-30
 
@@ -2594,8 +2527,8 @@ begin as part of this shutdown.
   installed. The existing real GitHub runner passed commit `30978de`:
   [checks run](https://github.com/oppenheimmer/nebula/actions/runs/41022337351).
   That run does not certify these later unpushed changes. OS IME/screen-reader
-  acceptance and both BSD amd64 environments remain unverified. M08 continues;
-  M09 and the retargeted M10 remain Not started.
+  acceptance remains unverified. M08 continues;
+  M09 remains Not started.
 
 ### Reliability and application-service continuation — 2026-10-30
 
@@ -2637,10 +2570,10 @@ begin as part of this shutdown.
   save confirmation, keyboard controls, previews, managed files and recovery.
   Actual OS IME/reader acceptance remains unperformed: the host IBus command
   reports no connected engine; Orca availability does not establish a reader
-  check. No QEMU executable or `/dev/kvm` is available for BSD validation.
+  check.
 - Final compiler/sanitizer/native, benchmark, formatting, documentation and CI
   results will be recorded below before closing this checkpoint. M08 remains
-  In progress; M09/M10 retain their dependencies and are not claimed complete.
+  In progress; M09 retains its dependencies and is not claimed complete.
 
 ### M08 verified reliability, services and performance — 2026-10-30
 
@@ -2648,7 +2581,7 @@ begin as part of this shutdown.
   for actual OS IME/screen-reader acceptance and investigation of the intermittent
   native activation check (BUG-019). M08.11 awaits its formatting-only commit;
   M08.12 awaits verification of this source on the real runner. M08 stays
-  In progress; Linux release and both native BSD milestones remain unfinished.
+  In progress; the Linux release remains unfinished.
 - **Final checks:** GCC and Clang Release and GCC Debug ASan/UBSan each passed
   all 15 CTest groups with warnings-as-errors; core-only passed 2/2 without Qt or
   SQLite. Leak detection remains off. Native Xwayland passed 58 editor, 60 desktop,
@@ -2688,11 +2621,11 @@ begin as part of this shutdown.
   reference-machine checks, not portable CI timing assertions or IME measurements.
 - Final documentation checks cover local links outside code examples, balanced
   fences, 78 unique task IDs, scope/status consistency and `git diff --check`.
-  No host dependencies were installed. No power-loss, actual OS IME/reader or
-  native FreeBSD/OpenBSD result is claimed. Checkpoint commit/push and subsequent
+  No host dependencies were installed. No power-loss or actual OS IME/reader
+  result is claimed. Checkpoint commit/push and subsequent
   formatting/CI outcomes are recorded in the next entry.
 
-### Formatting, CI and native BSD preflight — 2026-10-30
+### Formatting and Linux CI — 2026-10-30
 
 - Pushed reliability/services checkpoint `06cf7aa` and formatting-only commit
   `d6aac43` to `origin/main`, using the configured author and subject-only messages.
@@ -2707,40 +2640,13 @@ begin as part of this shutdown.
   The formatting revision has a separate run in progress. The workflow now adds
   formatting and coverage-guided parser checks; the earlier successful run does
   not certify these newly added steps.
-- Began M10.1/M10.2 native **preflight** ahead of M09 to discover portability
-  defects while release/IME work remains open. This is an explicit ordering
-  exception for independent validation infrastructure; Linux and BSD releases
-  retain their original dependencies and exit criteria. M10 is In progress with
-  no native task marked complete yet.
-- Added manually dispatched, separate FreeBSD 14.3 amd64 and OpenBSD 7.8 amd64
-  QEMU VM jobs, using immutable VM-action revisions, read-only repository token
-  permissions, checkout without persisted credentials and unprivileged test users.
-  Dependencies install only in each ephemeral VM. `scripts/bsd-check.sh` refuses
-  other OSes, records environment/tool versions, then builds/tests the core-only
-  and full application separately with warnings-as-errors and offscreen Qt.
-- The VM actions are development-only MIT dependencies; they add no application
-  runtime service. Their [FreeBSD](https://github.com/vmactions/freebsd-vm) and
-  [OpenBSD](https://github.com/vmactions/openbsd-vm) documentation describes native
-  guest execution. Package preparation uses each guest's packages; the OpenBSD
-  Qt port's [module/package definition](https://github.com/openbsd/ports/blob/master/x11/qt6/qtbase/Makefile)
-  supplies Widgets, Network and Test. Selected OS versions are investigation
-  environments, not supported minimums or package-release claims. Results follow.
-
-### Native validation and Linux package preparation — 2026-10-30
+### Linux validation and package preparation — 2026-10-30
 
 - Real Linux CI passed `ab7e1c48a0e600676086d0b66cb32ff2544b1f40`, including
   the new formatter and five coverage-guided parser steps, all three compiler/
   sanitizer suites, core-only and ten interaction repetitions:
   [run 41030214143](https://github.com/oppenheimmer/nebula/actions/runs/41030214143).
   The formatting-only revision also passed its own Linux run.
-- Native preflight independently passed core-only 2/2 and full 15/15 groups on
-  **both** BSD systems at `ab7e1c4`:
-  [run 41030352762](https://github.com/oppenheimmer/nebula/actions/runs/41030352762).
-  FreeBSD: 14.3-RELEASE GENERIC amd64, Clang 19.1.7, CMake 3.31.12, SQLite 3.53.4,
-  Qt package 6.11.2_1, offscreen. OpenBSD: 7.8 GENERIC.MP#28 amd64, Clang 19.1.7,
-  CMake 3.31.8, SQLite 3.50.7, offscreen; that initial log did not print its Qt
-  package version. Added package inventory and verbose test metadata for the next
-  native run. Neither result establishes desktop/IME/reader or native packages.
 - Began M09 packaging preparation ahead of M08 acceptance as independent build/
   installation infrastructure; a published Linux release remains dependent on
   M08.2. Selected a Debian 13 amd64 `.deb` development preview (`0.1.0~dev1`),
@@ -2790,8 +2696,8 @@ begin as part of this shutdown.
   before the final compiler runs. No warning was disabled.
 - Remaining M08 work is M08.2: actual OS IME/reader acceptance and investigation of
   the intermittent native activation check, not replaced by these automated
-  composition/focus checks. Final package validation and another native BSD source
-  check follow; no released Linux/BSD package is claimed yet.
+  composition/focus checks. Final package validation
+  follows; no released Linux package is claimed yet.
 
 ### Debian development package verified — 2026-10-30
 
@@ -2830,29 +2736,10 @@ begin as part of this shutdown.
   local Markdown links/fences, 78 unique task IDs and `git diff --check` passed.
   The host has Python GI/pyatspi and an accessibility bus, but IBus reports no
   address/engine. Merely discovering those facilities does not complete actual
-  OS IME/Orca acceptance; M08.2 stays open. Both native BSD guests will recheck
-  the new source and print their Qt package/test metadata.
+  OS IME/Orca acceptance; M08.2 stays open.
 
-### Native source verification and package-documentation closure — 2026-10-30
+### Package-documentation closure — 2026-10-30
 
-- Completed M10.1 and M10.2 independently at implementation revision
-  `01f9535d45a42bd3ef31f75d1b10725362f075ad`:
-  [native run 41033901370](https://github.com/oppenheimmer/nebula/actions/runs/41033901370).
-  Each guest passed core-only 2/2 and the full 15/15 CTest groups with Clang
-  warnings-as-errors, including BUG-021, private snapshot consistency/cleanup,
-  file locks, migration/recovery, attachments, references, interchange and TLS.
-
-| Native guest | Recorded environment | Concurrent backup / JSON / Markdown |
-| --- | --- | --- |
-| FreeBSD amd64 | 14.3-RELEASE GENERIC; Clang 19.1.7; CMake 3.31.12; SQLite 3.53.4; Qt 6.11.2 (package 6.11.2_1); offscreen; OpenSSL 3.0.16 | 69,496,832-byte DB; two cycles, 13 typing events, 12 autosaves, zero save failures |
-| OpenBSD amd64 | 7.8 GENERIC.MP#28; Clang 19.1.7; CMake 3.31.8; SQLite 3.50.7; Qt 6.8.3 (package 6.8.3p4); offscreen; LibreSSL 4.2.0 | 69,480,448-byte DB; one cycle, 16 typing events, 15 autosaves, zero save failures |
-
-- Each BSD run intentionally skipped the one container-specific multilingual
-  font-profile case; native font/desktop/input-method/reader acceptance was not
-  performed. These are native Release checks, not BSD sanitizer results. M10.3–
-  M10.7 still require supported-baseline decisions, remaining platform/desktop
-  checks, actual cross-system backup/export transfer and native packages. M10
-  remains In progress; these runs establish no supported BSD desktop release.
 - Fixed BUG-022 after checking installed documentation navigation. Package tests
   now require the README, original LICENSE, project instructions, roadmap and
   install guide on disk. Added an app-specific dpkg path include to the slim
@@ -2867,7 +2754,7 @@ begin as part of this shutdown.
   not claimed.
 - Final source documentation links/fences, 78 unique milestone IDs, shell syntax,
   formatter and `git diff --check` pass. Existing commit/push authorization was
-  used with configured authorship and no trailers. M08.2, M09.4 and M10.3–M10.7
+  used with configured authorship and no trailers. M08.2 and M09.4
   remain open; no milestone or public release is marked complete without its
   remaining acceptance evidence.
 - Real Linux CI passed implementation `01f9535d45a42bd3ef31f75d1b10725362f075ad`:
@@ -2877,62 +2764,13 @@ begin as part of this shutdown.
   The later package-documentation inclusion fix was checked locally with the full
   package script; this earlier CI run is not claimed to certify that later edit.
 
-### Cross-system transfer acceptance infrastructure — 2026-10-30
-
-- M10.3/M10.4/M10.6 are In progress. Extended the existing package fixture
-  instead of adding another executable: Unicode and nested blocks, resolved and
-  unresolved references, Number/Checkbox/Tags/Date properties, saved view filters,
-  retained trash and managed attachment bytes now travel together. The checker
-  compares full canonical JSON objects, including IDs and file digests, after
-  both a fresh backup restore and a fresh lossless JSON import.
-- The native workflow now produces one synthetic fixture per OS and verifies
-  all three origins on each OS. Artifacts expire after one day and contain no
-  user data. Dependency preparation remains isolated; guest tests drop default
-  routes and retain only the local control link. Linux checks use network=none.
-- Selected FreeBSD 14.5 and OpenBSD 8.0 for the next validation run: upstream
-  [FreeBSD support](https://www.freebsd.org/security/) lists 14.3 as obsolete,
-  while [OpenBSD](https://www.openbsd.org/) now lists 8.0 as current and supports
-  its two latest releases. The pinned VM actions provide both selected images.
-  This changes the test candidates, not the still-open supported desktop baseline.
-- Local GCC fixture build and three-origin verification passed (all three local
-  inputs were Linux copies, so this is not yet cross-OS evidence). Two further
-  backup/JSON round trips passed. A deliberately changed manifest title was
-  rejected. Launcher regressions check offline routing, read-only source mounts,
-  isolated build output and invalid mode rejection; shell syntax and those tests
-  pass. The tiny fixture reader caps its manifest at 1 MiB.
-- Linux CI for revision `090408dc16e8196f7f0dfdca5496c21e64d5daeb` completed
-  successfully: [run 41035518213](https://github.com/oppenheimmer/nebula/actions/runs/41035518213).
-  It includes the installed documentation fix. Actual native transfer outcomes
-  will be recorded after dispatch; M10.6 remains unchecked until then.
-
-### Native cross-system transfer closure — 2026-10-30
-
-- Completed M10.6 at revision `7724481`: [native run 41042093069](https://github.com/oppenheimmer/nebula/actions/runs/41042093069)
-  passed all six jobs. Linux, FreeBSD 14.5 amd64 and OpenBSD 8.0 amd64 each
-  produced a synthetic backup/JSON bundle, then each consumer verified all three
-  origins. All six directed cross-OS paths and all three same-OS controls passed
-  fresh restore/import, exact canonical JSON equality and attachment byte checks.
-- Both supported-version native guests additionally passed core-only 2/2 and
-  full 15/15 CTest groups with warnings-as-errors and default routes removed.
-  FreeBSD: 14.5-RELEASE GENERIC, Clang 21.1.8, CMake 3.31.12, SQLite 3.53.4,
-  Qt 6.11.2_1, OpenSSL 3.0.21. OpenBSD: 8.0 GENERIC.MP#2, Clang 22.1.6,
-  CMake 4.3.5, SQLite 3.53.2, Qt 6.11.2p1, LibreSSL 4.4.0. The TLS certificate
-  and hostname regression passed independently on both providers.
-- Native Qt tests used offscreen rendering and skipped the container-specific
-  multilingual font fixture. These results close manual data portability, not
-  BSD desktop/IME/reader or native packaging acceptance. M10.3–M10.5/M10.7
-  remain In progress; no unsupported OS is selected as a release baseline.
-- Local Clang full checks also passed 15/15 at the transfer implementation
-  checkpoint. The optional OS desktop validation being developed next will need
-  its own fresh build, reader evidence and regressions before completion.
-
 ### Post-milestone audit scheduled — 2026-10-30
 
-- At the user's request, added M11 after completion of all existing milestones.
+- At the user's request, added a code audit after completion of all release work.
   It requires a thorough audit followed by code simplification and organization
   using the official Google C++ Style Guide, with separate mechanical/semantic
-  commits and cross-platform regression/performance evidence. M11 is Not started;
-  this scheduling change does not start a broad refactor during M08–M10.
+  commits and Linux regression/performance evidence. M10 is Not started;
+  this scheduling change does not start a broad refactor during M08–M09.
 - Read the official guide's goals and organization/include guidance to reference
   the requested standard. Checked roadmap dependencies, task ordering, scope and
   status. Prose links/fences across 17 Markdown files, 83 unique ordered task IDs
@@ -2942,9 +2780,8 @@ begin as part of this shutdown.
 ### Linux OS input/accessibility and nested Backspace closure — 2026-10-30
 
 - Resumed the uncommitted M08.2 implementation after reading README/roadmap and
-  inspecting status. Preserved its optional desktop-image work and independently
-  confirmed native transfer run 41042093069 at `7724481` succeeded in all six
-  jobs before recording M10.6 complete. M11 was separately committed/pushed as
+  inspecting status. Preserved its optional desktop-image work. The audit
+  milestone was separately committed/pushed as
   `a6b4e45`, using configured authorship and no attribution trailers.
 - Completed M08.2 and M08 on the recorded Linux profile. The optional image
   builds from the pinned recipe as
@@ -3010,11 +2847,11 @@ begin as part of this shutdown.
   consistency and `git diff --check` pass.
 - Limits: speech was verified from the real reader/dispatcher through a private
   null sink, without subjective audio-quality acceptance. The native editor is a
-  text field; block semantics use F8. Other IMEs/compositors and both BSD desktops
+  text field; block semantics use F8. Other IMEs/compositors
   remain outside this Linux profile. The final Backspace guard was verified after
   that full OS profile with focused native regressions. Existing performance
-  budgets remain recorded; no new performance claim is made. M09.4 and
-  M10.3–M10.5/M10.7 remain open; M11 waits for all preceding milestones.
+  budgets remain recorded; no new performance claim is made. M09.4
+  remains open; the audit waits for all preceding milestones.
 
 ### Implementation checkpoint verified on real runners — 2026-10-30
 
@@ -3030,26 +2867,72 @@ begin as part of this shutdown.
   real-runner evidence for the new optional image and scripts, beyond local
   acceptance. The reader test observed actual generated speech with its log
   flushed live.
-- All six jobs passed in [native run 41058746415](https://github.com/oppenheimmer/nebula/actions/runs/41058746415)
-  at the same implementation revision. Each BSD independently passed core-only
-  2/2 and full 15/15 groups with warnings-as-errors and offscreen Qt; each skipped
-  the container-specific font fixture and the two Linux-only OS-desktop cases.
+- M09.4 remains open. The post-release audit remains Not started until all
+  preceding milestones finish. This follow-up changed roadmap evidence only;
+  application tests were not repeated for its prose. Local
+  documentation/status/whitespace checks passed.
 
-| Native guest | Recorded environment | TLS provider |
-| --- | --- | --- |
-| FreeBSD amd64 | 14.5-RELEASE GENERIC; Clang 21.1.8; CMake 3.31.12; SQLite 3.53.4; Qt package 6.11.2_1 | OpenSSL 3.0.21 |
-| OpenBSD amd64 | 8.0 GENERIC.MP#2; Clang 22.1.6; CMake 4.3.5; SQLite 3.53.2; Qt package 6.11.2p1 | LibreSSL 4.4.0 |
+### Linux-only scope and space cleanup — 2026-10-30
 
-- Linux and both BSD consumers again verified backup/JSON bundles from all three
-  origins, covering all six directed cross-OS paths and three same-OS controls.
-  Fresh restores/imports matched canonical records/IDs and managed bytes exactly.
-  No user workspace was uploaded. OpenBSD's CMake target-alias warning is retained
-  as G34 for M10.3; no compiler warning was disabled.
-- Native BSD desktop/IME/reader acceptance and BSD packages remain unverified.
-  M09.4 and M10.3–M10.5/M10.7
-  remain open. M11 remains Not started until all preceding milestones finish.
-  This follow-up changes roadmap evidence only; application tests were not
-  repeated for its prose. Local documentation/status/whitespace checks pass.
+- At the user's direction, Linux is now the only target platform (M00.1/M09).
+  Removed the withdrawn follow-on release milestone and its requirements,
+  dependency/platform notes, native VM workflow/helper and obsolete work-log
+  material from the current tree. Historical commits remain intact. Third-party
+  license names/notices remain accurate. README, project instructions and usage,
+  dependency, attachment, interchange and feasibility documents agree.
+- Renumbered the existing post-release audit to M10.1–M10.5, directly after M09,
+  retaining the full audit, Google C++ style, simplification and verification
+  requirements with Linux baselines. M09.4 remains open; M10 is Not started and
+  still requires every preceding milestone to finish. This scope change does not
+  mark withdrawn deliverables complete or begin the audit.
+- Per the user's report, the unmerged packaging-preparation branch/worktree,
+  guest disks and local guest-tool image had already been deleted. That work was
+  never committed to main or pushed; no package was built or verified. Only one
+  guest's base/build disk pair had been prepared. Final Git inventory confirms
+  no retired-platform branch/worktree remains; the pre-existing detached Kilo
+  checkout is preserved.
+- Integrated the matching cleanup edits appearing during this session after the
+  user's explicit instruction to continue and integrate them. Removed the unused
+  three-origin transfer launcher command, its tests and bundle/transfer-only
+  fixture code. Kept the package fixture's richer notes, properties, reference,
+  trash and managed-file create/verify checks and all production interchange.
+  A final matching CMake edit links that fixture only to storage, removing its
+  unused direct interchange/Qt Core dependencies. The local package check below
+  preceded this final target-link change; fresh CI must verify that final graph.
+- **Verification before reclaiming builds:** Bash syntax and launcher regressions
+  passed; container `format --check` passed. The full isolated Debian package
+  check rebuilt the retained fixture with GCC 14.2/Qt 6.8.2 and passed install,
+  reinstall/purge data preservation, launch/edit/search, managed bytes,
+  Markdown/JSON export/import and fresh backup/restore. Full-window tests passed
+  62 behavior cases (64 including setup/cleanup); the two actual OS input/reader
+  cases are intentionally skipped by this package profile. Preview/TLS passed
+  nine behavior cases (11 including setup/cleanup), using OpenSSL 3.5.7.
+  Real OS input/reader acceptance was not repeated for this tooling removal.
+- **Local space recovery:** the main checkout fell from 1,352,404,992 bytes
+  (about 1.26 GiB) to about 9.1 MiB including Git history; source/docs outside Git
+  occupy about 1.6 MiB. Removed ignored build output, sanitizer/fuzz/transfer
+  fixtures, speech logs, preview packages and index caches. Also removed 12
+  confirmed generated Nebula build folders in old temporary snapshots
+  (248,311,808 bytes, about 237 MiB), preserving their sources and all workspaces,
+  attachments and backups. No user note data or unrelated project cache was
+  deleted.
+- Removed every remaining project Docker image, including the retained Linux
+  development image, and cleared the builder cache again after the package check
+  recreated it. Final `docker system df`, image inventory and `buildx du` report
+  zero images, containers, volumes and build-cache bytes. No host dependency
+  installation or global environment change was made. Before the next Docker
+  build/run, use `./scripts/dev.sh build-image`; optional OS acceptance additionally
+  needs `./scripts/dev.sh build-desktop-image`.
+- **Remote space recovery:** verified the retired workflows were idle, then
+  deleted all seven repository VM/tooling caches (5,840,811,690 bytes, 5.44 GiB)
+  and six synthetic transfer artifacts (56,297 bytes). Fresh GitHub API/CLI
+  inventories report zero caches and zero artifacts. Historical workflow logs
+  and Git commits were retained; other repositories were untouched.
+- Documentation checks pass: 17 Markdown documents, valid local links/fences,
+  Linux-only scope, 76 unique ordered task IDs, 25 preserved bug entries,
+  34 gotchas, accurate release/audit dependencies and `git diff --check`.
+  Scope scanning retains only third-party license identifiers for the withdrawn
+  targets.
 
 ## Technical references discussed
 

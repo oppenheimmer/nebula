@@ -219,21 +219,6 @@ for mode in check write; do
 done
 printf 'PASS: isolated fuzzing and formatting commands\n'
 
-for mode in bundle verify; do
-    reset_calls
-    bash "$launcher" portability "$mode"
-    count_calls 1
-    load_call 0
-    has_argument --network=none || fail 'portability checks must stay offline'
-    has_argument "NEBULA_PORTABILITY_MODE=$mode" || fail 'portability mode lost'
-    has_argument "type=bind,\"source=$fixture/project\",\"target=/workspace\",readonly" || fail 'portability source must be read-only'
-    has_argument "type=bind,\"source=$fixture/project/build-container-portability\",\"target=/build\"" || fail 'portability build must be isolated'
-done
-reset_calls
-if bash "$launcher" portability invalid >/dev/null 2>&1; then fail 'invalid portability mode accepted'; fi
-compgen -G "$NEBULA_TEST_CALLS/*" >/dev/null && fail 'invalid mode must fail before Docker'
-printf 'PASS: offline portability fixtures and mode validation\n'
-
 reset_calls
 bash "$launcher" build-desktop-image
 count_calls 1

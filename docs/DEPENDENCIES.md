@@ -72,11 +72,10 @@ The editor does not link the storage module.
 
 `nebula_files` provides managed-file copy/flush/locking and backup manifests. It
 uses the existing Qt Core SHA-256/JSON facilities and a narrow POSIX file
-adapter (BSD validation pending); no separate hashing or image library was added.
+adapter; no separate hashing or image library was added.
 The desktop previews images using Qt Gui's existing image readers. Filesystem operations require
 regular files, durable directory/file flushes, same-directory hard links and Unix
-shared/exclusive locks. Linux checks do not establish BSD/amd64 filesystem behavior;
-M10 must validate that adapter and the image-reader/plugin distribution.
+shared/exclusive locks.
 
 ## Paste-preview adapter
 
@@ -96,11 +95,8 @@ OpenSSL 3 uses [Apache License 2.0](https://openssl-library.org/source/license/)
 Packaging must include the selected Qt/TLS plugin and applicable third-party
 notices; this adapter does not settle release-distribution licensing choices.
 
-M10 must verify Qt Network availability, the shipped
-[TLS backend](https://doc.qt.io/qt-6.8/ssl.html), certificate trust and plugin
-deployment separately on FreeBSD amd64 and OpenBSD amd64. Linux checks do not
-establish BSD HTTPS support; dependency availability and supported versions
-remain platform validation requirements.
+Linux release packaging must include the shipped
+[TLS backend](https://doc.qt.io/qt-6.8/ssl.html) plugin and certificate trust.
 
 ## Licensing and references
 
@@ -111,9 +107,9 @@ The prototype's image card is drawn by application code.
 Qt is a separate dependency with its own commercial and open-source licensing
 options; selected module and third-party notices must accompany a distributed
 package as appropriate. This development image is not a release packaging design.
-Record the exact linked libraries and notices during M09/M10.
+Record the exact linked libraries and notices during M09.
 SQLite is [public domain](https://sqlite.org/copyright.html); it has no Qt or GUI
-dependency. M10 must validate its version and required features on each BSD.
+dependency.
 The bootstrap uses the
 [`sqlite_schema` name available since SQLite 3.33](https://sqlite.org/forum/info/d90adfbb0a6eea88);
 FTS5 must be enabled in SQLite for schema 8 search. The development image provides
@@ -124,8 +120,7 @@ adapter; the document core still builds without Qt/SQLite. See
 
 The separate interchange target uses existing Qt Core, SQLite and managed-file
 adapters. Its Markdown subset has an application-owned parser; no Markdown runtime
-or HTML resource loader is added. BSD/amd64 portability requires verification of
-those existing dependencies on both target systems; no BSD build is claimed yet.
+or HTML resource loader is added.
 
 - [Qt licensing](https://doc.qt.io/qt-6/licensing.html)
 - [Qt Widgets](https://doc.qt.io/qt-6/qtwidgets-index.html)
@@ -134,30 +129,8 @@ those existing dependencies on both target systems; no BSD build is claimed yet.
 - [Docker build documentation](https://docs.docker.com/build/)
 - [Docker run reference](https://docs.docker.com/reference/cli/docker/container/run/)
 
-Minimum supported end-user Linux distributions and FreeBSD/OpenBSD versions
-remain open platform decisions. Both BSD targets are amd64 only. Compiling on
-Linux does not validate either BSD, and checking one BSD does not validate the other.
-The Linux Docker workflow cannot supply native BSD validation: use separate
-isolated amd64 machines, VMs or runners with environment-scoped dependencies.
-
-## Native BSD validation tooling
-
-`.github/workflows/bsd.yml` uses development-only MIT-licensed
-[vmactions/freebsd-vm](https://github.com/vmactions/freebsd-vm) and
-[vmactions/openbsd-vm](https://github.com/vmactions/openbsd-vm), pinned to immutable
-revisions. Each job boots its own amd64 BSD guest and installs dependencies there,
-then runs `scripts/bsd-check.sh` as an unprivileged user. No host package install
-or runtime service is introduced. Linux is still validated separately through
-Docker. Guest package versions are recorded by their build/test logs; the selected
-FreeBSD 14.5/OpenBSD 8.0 versions are current validation candidates rather than
-supported desktop release baselines. Earlier 14.3/7.8 results remain historical
-preflight evidence. The selected candidates are listed by the projects as
-[supported FreeBSD releases](https://www.freebsd.org/security/) and the
-[current OpenBSD release](https://www.openbsd.org/). After dependency preparation,
-the guest drops its default routes, retaining only the local VM control link.
-Backup/JSON fixtures are transferred among all three OSes in short-lived CI
-artifacts, with exact canonical manifest and attachment-byte checks. Native
-desktop/IME/accessibility and package validation remain separate M10 requirements.
+Linux is the only target platform. The selected package target is Debian 13 amd64;
+other distributions and architectures have not been verified.
 
 ## Optional Linux desktop acceptance environment
 
@@ -178,9 +151,7 @@ PulseAudio, and GPL-3-or-later for eSpeak NG. D-Bus offers AFL-2.1/GPL-2-or-late
 the locale data and supporting components retain their separate package notices.
 These summaries do not replace the installed notices or relicense the tools.
 
-The C++/Qt/SQLite baselines are unchanged. This Linux profile establishes no
-FreeBSD/OpenBSD desktop support: M10.5 requires separate native input/reader
-environments and evidence on each BSD. The F8 details dialog uses existing Qt
+The C++/Qt/SQLite baselines are unchanged. The F8 details dialog uses existing Qt
 Widgets APIs and adds no application runtime dependency.
 
 ## Debian package preview
