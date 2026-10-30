@@ -15,6 +15,24 @@ Renaming a target updates referring pages in the same save transaction. Unresolv
 references remain unresolved; searching never creates or binds pages. Trash and
 trashed databases are excluded. Deleted fragments are not search results.
 
+## Structured reference filters
+
+Add reference filter selects a page by stable ID, with database/title/ID context
+to disambiguate duplicates. References selected page finds its incoming referrers.
+Referenced by selected page finds the pages at its outgoing targets. Both include
+references to blocks currently owned by the relevant page. Moving a block changes
+its owner for these queries; renaming pages or labels does not change targets.
+Unresolved names never match by title. A missing selected ID remains explicit,
+and references to that page ID can still be found if the edge remains.
+
+Up to eight filters combine with AND and with any search words/database scope.
+Leaving words empty runs only the structural query, independently of FTS rows.
+Selected pages may be trashed; result pages/databases must be active. The
+relation/page condition persists in saved views through New view/Edit view,
+alongside typed property filters, sorting and columns. Removing a filter in a
+cancelled dialog does not change the saved view. The search dialog remembers
+valid conditions during the current window's lifetime.
+
 ## Query and language behavior
 
 Whitespace-separated terms are AND-combined. Each term is literal text; quote
@@ -51,7 +69,7 @@ index implementations. Canonical page/database joins determine availability.
 Related note, reference and search changes commit together. Failed index writes
 fail the save and retain pending edits.
 
-Search → Rebuild search index drops and reconstructs only the derived table from
+Search → Rebuild search and reference indexes reconstructs the derived tables from
 canonical notes/properties/references, then saves any pending edits. Page IDs,
 revisions and note text are unchanged by the rebuild itself. Backup restore also
 reconstructs the index. This repairs missing tables/rows but cannot repair damaged

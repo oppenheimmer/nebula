@@ -17,6 +17,11 @@ Do not introduce synchronization, hosted services, collaboration, accounts,
 telemetry, or runtime network dependencies. A spatial canvas is outside the agreed
 scope. Do not expand first-release scope implicitly.
 
+The user authorized M07.8 on 2026-10-30 as a narrow exception: fetching text from
+a web page when its link is pasted, for a removable text-only preview. Do not
+import images/thumbnails or refresh previews on opening notes. Other note
+operations must continue to work offline; no other runtime networking is implied.
+
 Development dependencies must remain isolated to this project's development
 environment. Use the existing Docker CLI with `Dockerfile.dev` and
 `scripts/dev.sh`; never install Qt or other project dependencies system-wide or

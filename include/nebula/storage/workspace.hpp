@@ -85,10 +85,12 @@ public:
     PageRecord restore_deleted_blocks(const std::string& id);
     void save_view(View& view);
     std::vector<View> views(const std::string& database) const;
+    std::vector<PageRecord> query_view(const View& view) const;
     std::vector<LinkEdge> backlinks(ReferenceKind kind, const std::string& id) const;
     std::vector<LinkEdge> outgoing_links(const std::string& page) const;
     void rebuild_links();
-    std::vector<SearchResult> search(const std::string& text, const std::string& database = {}) const;
+    std::vector<SearchResult> search(const std::string& text, const std::string& database = {},
+                                   const std::vector<LinkFilter>& filters = {}) const;
     void rebuild_search();
     InterchangeReport export_markdown(const std::filesystem::path& destination) const;
     InterchangeReport import_markdown(const std::filesystem::path& source, const std::string& database);

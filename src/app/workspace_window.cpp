@@ -75,6 +75,48 @@ PropertyValue parse_value(PropertyKind kind, const QString& text) {
     validate_value(kind,value); return value;
 }
 void error(QWidget* parent, const std::exception& e) { QMessageBox::warning(parent,"Nebula",q(e.what())); }
+std::vector<LinkFilter> selected_link_filters(QTableWidget* table)
+{
+    std::vector<LinkFilter> result;
+    for(int row=0;row<table->rowCount();++row) result.push_back({
+        LinkRelation(qobject_cast<QComboBox*>(table->cellWidget(row,0))->currentIndex()),
+        s(qobject_cast<QComboBox*>(table->cellWidget(row,1))->currentData().toString())});
+    validate_link_filters(result); return result;
+}
+QWidget* link_filter_controls(QWidget* parent,const Workspace& workspace,const std::vector<LinkFilter>& initial)
+{
+    auto* panel=new QWidget(parent); auto* layout=new QVBoxLayout(panel); layout->setContentsMargins(0,0,0,0);
+    layout->addWidget(new QLabel("Reference filters (all must match)",panel));
+    auto* table=new QTableWidget(0,3,panel); table->setObjectName("linkFilters"); table->setAccessibleName("Reference filters");
+    table->setHorizontalHeaderLabels({"Relation","Selected page","Remove"}); table->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
+    table->setMaximumHeight(180); layout->addWidget(table);
+    auto* add=new QPushButton("Add reference filter",panel); add->setObjectName("addLinkFilter"); layout->addWidget(add);
+    std::vector<std::pair<QString,QString>> choices;
+    for(const auto& db:workspace.databases(true)) for(const auto& page:workspace.pages(db.id,true))
+        choices.push_back({q(db.name)+" / "+q(page.title)+" ["+q(page.document.id.substr(0,8))+"]"+(db.trashed || page.trashed?" (trashed)":""),
+            q(page.document.id)});
+    auto append=[table,add,choices](const LinkFilter& filter) {
+        const auto row=table->rowCount(); table->insertRow(row);
+        auto* relation=new QComboBox(table); relation->setAccessibleName("Reference relation");
+        relation->addItems({"References selected page","Referenced by selected page"}); relation->setCurrentIndex(int(filter.relation));
+        auto* page=new QComboBox(table); page->setAccessibleName("Selected reference page"); page->addItem("Select a page",QString{});
+        for(const auto& choice:choices) page->addItem(choice.first,choice.second);
+        if(!filter.page_id.empty() && page->findData(q(filter.page_id))<0) page->addItem("Unavailable page ["+q(filter.page_id)+"]",q(filter.page_id));
+        page->setCurrentIndex(page->findData(q(filter.page_id))); page->setMinimumWidth(240);
+        auto* remove=new QPushButton("Remove",table); remove->setObjectName("removeLinkFilter"); remove->setAccessibleName("Remove reference filter");
+        table->setCellWidget(row,0,relation); table->setCellWidget(row,1,page); table->setCellWidget(row,2,remove);
+        QObject::connect(relation,&QComboBox::currentIndexChanged,table,[table]{emit table->cellChanged(0,0);});
+        QObject::connect(page,&QComboBox::currentIndexChanged,table,[table]{emit table->cellChanged(0,1);});
+        QObject::connect(remove,&QPushButton::clicked,table,[table,add,remove]{
+            for(int row=0;row<table->rowCount();++row) if(table->cellWidget(row,2)==remove){table->removeRow(row); break;}
+            add->setEnabled(table->rowCount()<8); emit table->cellChanged(0,0);
+        });
+        add->setEnabled(table->rowCount()<8);
+    };
+    for(const auto& filter:initial) append(filter);
+    QObject::connect(add,&QPushButton::clicked,panel,[append,table]{append({}); emit table->cellChanged(0,0);});
+    return panel;
+}
 } // namespace
 
 WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_path, QWidget* parent)
@@ -155,9 +197,9 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     }
     auto* search=search_menu->addAction("Find in workspace…"); search->setObjectName("searchWorkspace"); search->setShortcut(QKeySequence("Ctrl+Shift+F"));
     connect(search,&QAction::triggered,this,[this]{ try { show_search(); } catch(const std::exception& e){error(this,e);} });
-    auto* rebuild=search_menu->addAction("Rebuild search index"); rebuild->setObjectName("rebuildSearch");
+    auto* rebuild=search_menu->addAction("Rebuild search and reference indexes"); rebuild->setObjectName("rebuildSearch");
     connect(rebuild,&QAction::triggered,this,[this]{
-        try { workspace_.rebuild_search(); if (flush()) statusBar()->showMessage("Search index rebuilt from saved notes.",6000); }
+        try { workspace_.rebuild_links(); workspace_.rebuild_search(); if (flush()) statusBar()->showMessage("Search and reference indexes rebuilt from saved notes.",6000); }
         catch(const std::exception& e) {error(this,e);}
     });
     addToolBarBreak();
@@ -324,7 +366,7 @@ void WorkspaceWindow::refresh_table()
     const bool old_loading=loading_; loading_=true;
     const auto selected=session_.has_page()?session_.record().document.id:std::string{};
     definitions_=workspace_.properties(database_id_);
-    const auto rows=apply_view(workspace_.pages(database_id_),current_view_);
+    const auto rows=workspace_.query_view(current_view_);
     std::vector<PropertyDefinition> visible;
     for (const auto& id:current_view_.visible_properties)
         for (const auto& def:definitions_) if (def.id==id) visible.push_back(def);
@@ -463,11 +505,13 @@ void WorkspaceWindow::edit_view(bool create)
     for (const auto& filter:current_view_.filters) add_filter(filter);
     auto* more=new QPushButton("Add filter",&dialog); more->setObjectName("addViewFilter"); layout->addWidget(more); connect(more,&QPushButton::clicked,&dialog,[&]{ add_filter({}); });
     auto* remove=new QPushButton("Remove selected filter",&dialog); layout->addWidget(remove); connect(remove,&QPushButton::clicked,&dialog,[&]{ if (filters->currentRow()>=0) filters->removeRow(filters->currentRow()); });
+    auto* references=link_filter_controls(&dialog,workspace_,current_view_.link_filters); layout->addWidget(references);
     auto* message=new QLabel(&dialog); layout->addWidget(message);
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{
         try {
             View view; if (!create) view.id=current_view_.id; view.database_id=database_id_; view.name=s(name->text().trimmed()); view.sort_property=s(sort->currentData().toString()); view.ascending=ascending->isChecked();
+            view.link_filters=selected_link_filters(references->findChild<QTableWidget*>("linkFilters"));
             for (int i=0;i<visible->count();++i) if (visible->item(i)->checkState()==Qt::Checked) view.visible_properties.push_back(s(visible->item(i)->data(Qt::UserRole).toString()));
             for (int r=0;r<filters->rowCount();++r) {
                 const auto id=s(qobject_cast<QComboBox*>(filters->cellWidget(r,0))->currentData().toString());
@@ -483,7 +527,7 @@ void WorkspaceWindow::edit_view(bool create)
             views_->setCurrentIndex(index); loading_=false; refresh_table(); dialog.accept();
         } catch (const std::exception& e) { message->setText(q(e.what())); }
     });
-    dialog.exec();
+    dialog.resize(850,700); dialog.exec();
 }
 void WorkspaceWindow::show_trash()
 {
@@ -716,6 +760,8 @@ void WorkspaceWindow::show_search()
     for (const auto& db:workspace_.databases())
         scope->addItem(q(db.name)+" ["+q(db.id.substr(0,8))+"]",q(db.id));
     layout->addWidget(scope);
+    auto* references=link_filter_controls(&dialog,workspace_,last_search_filters_); layout->addWidget(references);
+    auto* reference_table=references->findChild<QTableWidget*>("linkFilters");
     auto* results=new QTreeWidget(&dialog); results->setObjectName("searchResults"); results->setHeaderLabels({"Page / database","Context"}); results->setRootIsDecorated(false); layout->addWidget(results);
     auto* state=new QLabel(&dialog); state->setTextFormat(Qt::PlainText); layout->addWidget(state);
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Open|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); buttons->button(QDialogButtonBox::Open)->setEnabled(false);
@@ -723,22 +769,25 @@ void WorkspaceWindow::show_search()
     auto run=[&]{
         results->clear(); buttons->button(QDialogButtonBox::Open)->setEnabled(false);
         try {
-            const auto matches=workspace_.search(s(query->text()),s(scope->currentData().toString()));
+            const auto selected=selected_link_filters(reference_table);
+            const auto matches=workspace_.search(s(query->text()),s(scope->currentData().toString()),selected);
             for (const auto& match:matches) {
                 auto* item=new QTreeWidgetItem(results,{q(match.title)+" / "+q(match.database_name)+" ["+q(match.page_id.substr(0,8))+"]",q(match.context).simplified().left(240)});
                 item->setData(0,Qt::UserRole,q(match.page_id)); item->setData(0,Qt::UserRole+1,q(match.block_id));
             }
-            state->setText(query->text().trimmed().isEmpty()?"Enter one or more words.":QString::number(matches.size())+" matching notes (up to 100). Select a result to open it.");
+            state->setText(query->text().trimmed().isEmpty() && selected.empty()?"Enter words or add a reference filter.":QString::number(matches.size())+" matching notes (up to 100). Select a result to open it.");
         } catch(const std::exception& e){state->setText(q(e.what()));}
     };
     connect(query,&QLineEdit::textChanged,&dialog,[&]{ debounce.start(); }); connect(&debounce,&QTimer::timeout,&dialog,run);
     connect(scope,&QComboBox::currentIndexChanged,&dialog,[&]{ debounce.stop(); run(); });
+    connect(reference_table,&QTableWidget::cellChanged,&dialog,[&]{debounce.stop(); run();});
     connect(results,&QTreeWidget::currentItemChanged,&dialog,[&](QTreeWidgetItem* item){buttons->button(QDialogButtonBox::Open)->setEnabled(item);});
     connect(results,&QTreeWidget::itemActivated,&dialog,[&]{ buttons->button(QDialogButtonBox::Open)->click(); });
     std::string page,block;
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=results->currentItem()) { page=s(item->data(0,Qt::UserRole).toString()); block=s(item->data(0,Qt::UserRole+1).toString()); dialog.accept(); } });
     connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-    run(); query->selectAll(); query->setFocus(); dialog.resize(900,500); dialog.exec(); last_search_=query->text();
+    run(); query->selectAll(); query->setFocus(); dialog.resize(950,700); dialog.exec(); last_search_=query->text();
+    try {last_search_filters_=selected_link_filters(reference_table);} catch(const std::invalid_argument&) {}
     activateWindow(); page_editor()->setFocus(); if (!page.empty()) open_page(page,block);
 }
 void WorkspaceWindow::markdown_interchange(bool importing)

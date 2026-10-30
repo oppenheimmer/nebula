@@ -78,6 +78,9 @@ private slots:
     void search_failure_rolls_back_and_rebuild_repairs();
     void version_seven_search_migration_and_backup_restore();
     void failed_search_migration_preserves_original_data();
+    void reference_queries_use_ids_and_current_block_owners_without_fts();
+    void saved_reference_views_combine_properties_and_survive_reopen();
+    void version_eight_preserves_legacy_views_and_rejects_invalid_link_filters();
 };
 void StorageTests::dates_and_types()
 {
@@ -865,6 +868,71 @@ void StorageTests::failed_search_migration_preserves_original_data()
     sql(file,"DROP TABLE page_search; PRAGMA user_version=7; UPDATE blocks SET payload='unsupported'");
     const auto before=bytes(file); QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::open(path(folder.path())));
     QCOMPARE(bytes(file),before);
+}
+void StorageTests::reference_queries_use_ids_and_current_block_owners_without_fts()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"), other=w.create_database("Other");
+    auto target=w.create_page(db.id,"Duplicate",{},{{"heading",{},BlockKind::Heading,{{"Heading"}}}}), destination=w.create_page(other.id,"Duplicate");
+    auto first=w.create_page(db.id,"First",{},{{"first",{},BlockKind::Paragraph,{
+        {"common page",false,false,Reference{ReferenceKind::Page,target.document.id}},
+        {" common block",false,false,Reference{ReferenceKind::Block,"heading"}}}}});
+    const auto second=w.create_page(other.id,"Second",{},{{"second",{},BlockKind::Paragraph,{{"common block",false,false,Reference{ReferenceKind::Block,"heading"}}}}});
+    auto unresolved=w.create_page(db.id,"Unresolved",{},{{"unresolved",{},BlockKind::Paragraph,{{"common Duplicate",false,false,Reference{ReferenceKind::Page,{},"Duplicate"}}}}});
+    const std::vector<LinkFilter> incoming{{LinkRelation::ReferencesPage,target.document.id}};
+    QCOMPARE(w.search("",{},incoming).size(),std::size_t(2)); QCOMPARE(w.search("common",{},incoming).size(),std::size_t(2));
+    QCOMPARE(w.search("absent",{},incoming).size(),std::size_t(0)); QCOMPARE(w.search("",db.id,incoming).size(),std::size_t(1));
+    auto outgoing=w.search("",{},{{LinkRelation::ReferencedByPage,first.document.id}});
+    QCOMPARE(outgoing.size(),std::size_t(1)); QCOMPARE(outgoing[0].page_id,target.document.id);
+    unresolved.document.blocks[0].runs.push_back({"first",false,false,Reference{ReferenceKind::Page,first.document.id}}); w.save_page(unresolved);
+    auto both=incoming; both.push_back({LinkRelation::ReferencedByPage,unresolved.document.id});
+    QCOMPARE(w.search("",{},both).size(),std::size_t(1)); QCOMPARE(w.search("",{},both)[0].page_id,first.document.id);
+    target.title="Renamed"; w.save_page(target); QCOMPARE(w.search("",{},incoming).size(),std::size_t(2));
+    const auto transfer=w.transfer_blocks(target,destination,"heading"); Q_UNUSED(transfer);
+    QCOMPARE(w.search("",{},incoming).size(),std::size_t(1)); QCOMPARE(w.search("",{},incoming)[0].page_id,first.document.id);
+    QCOMPARE(w.search("",{},{{LinkRelation::ReferencesPage,destination.document.id}}).size(),std::size_t(2));
+    w.trash_page(target.document.id,true); QCOMPARE(w.search("",{},incoming).size(),std::size_t(1));
+    w.trash_page(first.document.id,true); QVERIFY(w.search("",{},incoming).empty()); w.trash_page(first.document.id,false);
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search");
+    QCOMPARE(w.search("",{},incoming).size(),std::size_t(1)); // Structured queries do not depend on FTS.
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE links");
+    w.rebuild_links(); QCOMPARE(w.search("",{},incoming)[0].page_id,first.document.id); w.rebuild_search();
+    w.trash_database(other.id,true); QVERIFY(w.search("",{},{{LinkRelation::ReferencedByPage,second.document.id}}).empty());
+}
+void StorageTests::saved_reference_views_combine_properties_and_survive_reopen()
+{
+    QTemporaryDir folder; std::string database,view_id,first_id,target_id,number;
+    {
+        auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); database=db.id;
+        const auto score=w.add_property(db.id,"Score",PropertyKind::Number); number=score.id;
+        const auto target=w.create_page(db.id,"Target"); target_id=target.document.id;
+        auto first=w.create_page(db.id,"First",{{score.id,8.0}},{{"first",{},BlockKind::Paragraph,{{"target",false,false,Reference{ReferenceKind::Page,target_id}}}}}); first_id=first.document.id;
+        w.create_page(db.id,"Second",{{score.id,2.0}},{{"second",{},BlockKind::Paragraph,{{"target",false,false,Reference{ReferenceKind::Page,target_id}}}}});
+        View view; view.database_id=db.id; view.name="Incoming high scores"; view.link_filters={{LinkRelation::ReferencesPage,target_id}};
+        view.filters={{score.id,Comparison::Greater,5.0}}; w.save_view(view); view_id=view.id;
+        QCOMPARE(w.query_view(view).size(),std::size_t(1)); QCOMPARE(w.query_view(view)[0].document.id,first_id);
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument,apply_view(w.pages(db.id),view));
+    }
+    auto w=Workspace::open(path(folder.path())); auto view=w.views(database)[0]; QCOMPARE(view.id,view_id);
+    QCOMPARE(view.link_filters[0].page_id,target_id); QCOMPARE(w.query_view(view)[0].document.id,first_id);
+    auto first=w.load_page(first_id); first.properties[number]=0.0; w.save_page(first); QVERIFY(w.query_view(view).empty());
+    view.link_filters={{LinkRelation::ReferencedByPage,"missing-page"}}; w.save_view(view); QVERIFY(w.query_view(view).empty());
+    QCOMPARE(w.views(database)[0].link_filters[0].page_id,std::string("missing-page"));
+}
+void StorageTests::version_eight_preserves_legacy_views_and_rejects_invalid_link_filters()
+{
+    QTemporaryDir folder; std::string database;
+    {
+        auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); database=db.id; w.create_page(db.id,"Keep");
+        View view; view.database_id=db.id; view.name="Legacy"; w.save_view(view);
+    }
+    sql(folder.filePath("nebula.sqlite3"),R"(UPDATE saved_views SET settings='{"version":1,"visible":[],"filters":[],"sort":"","ascending":true}'; PRAGMA user_version=8)");
+    auto w=Workspace::open(path(folder.path())); auto view=w.views(database)[0]; QVERIFY(view.link_filters.empty()); QCOMPARE(w.query_view(view).size(),std::size_t(1));
+    for(const auto filters:{std::vector<LinkFilter>{{LinkRelation::ReferencesPage,{}}},
+        std::vector<LinkFilter>{{LinkRelation(99),"target"}},std::vector<LinkFilter>(9,{LinkRelation::ReferencesPage,"target"})}) {
+        view.link_filters=filters; QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.save_view(view));
+        QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.search("",{},filters));
+    }
+    QVERIFY(w.views(database)[0].link_filters.empty());
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

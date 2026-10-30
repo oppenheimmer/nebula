@@ -36,6 +36,7 @@ private slots:
     void json_rejects_unsupported_malformed_and_colliding_rows();
     void json_rejects_missing_changed_unsafe_and_unlisted_files();
     void json_rejects_duplicate_keys_including_escaped_names();
+    void json_preserves_reference_filters_and_reads_schema_eight_exports();
 };
 void InterchangeTests::markdown_subset_remaps_pages_blocks_and_files()
 {
@@ -246,6 +247,22 @@ void InterchangeTests::json_rejects_duplicate_keys_including_escaped_names()
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("duplicate"))));
     duplicate=original; duplicate.replace("\"checked\": false","\"checked\":false,\"check\\u0065d\":false"); QVERIFY(duplicate!=original); put(file,duplicate);
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("escaped"))));
+}
+void InterchangeTests::json_preserves_reference_filters_and_reads_schema_eight_exports()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes");
+    const auto target=w.create_page(db.id,"Target"); const auto source=w.create_page(db.id,"Source",{},
+        {{"source",{},BlockKind::Paragraph,{{"link",false,false,Reference{ReferenceKind::Block,target.document.blocks[0].id}}}}});
+    View view; view.database_id=db.id; view.name="References"; view.link_filters={{LinkRelation::ReferencesPage,target.document.id}}; w.save_view(view);
+    w.export_json(path(folder.filePath("export"))); auto imported=Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("imported")));
+    QCOMPARE(imported.views(db.id)[0].link_filters[0].page_id,target.document.id); QCOMPARE(imported.query_view(imported.views(db.id)[0])[0].document.id,source.document.id);
+    const auto file=folder.filePath("export/workspace.json"); auto legacy=object(file); legacy["schema"]=8;
+    auto data=legacy["tables"].toObject(); auto views=data["saved_views"].toArray(); auto row=views[0].toObject(); auto settings=row["settings"].toObject();
+    settings["version"]=1; settings.remove("link_filters"); row["settings"]=settings; views[0]=row; data["saved_views"]=views; legacy["tables"]=data; put(file,legacy);
+    auto old=Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("legacy")));
+    QVERIFY(old.views(db.id)[0].link_filters.empty()); QCOMPARE(old.query_view(old.views(db.id)[0]).size(),std::size_t(2));
+    settings["version"]=2; settings["link_filters"]=QJsonArray{}; row["settings"]=settings; views[0]=row; data["saved_views"]=views; legacy["tables"]=data; put(file,legacy);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("mismatched-schema"))));
 }
 QTEST_GUILESS_MAIN(InterchangeTests)
 #include "interchange_tests.moc"

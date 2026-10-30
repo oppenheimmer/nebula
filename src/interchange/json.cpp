@@ -74,8 +74,11 @@ void payload(const QString& name,const QJsonObject& object) {
     if (name=="payload") {Block block; decode_block(block,text); block_keys(object);}
     else if (name=="value_json") {decode_value(text); value_keys(object);}
     else if (name=="settings") {
-        View view; decode_view(view,text); keys(object,{"version","visible","filters","sort","ascending"});
+        View view; decode_view(view,text); auto allowed=QStringList{"version","visible","filters","sort","ascending"};
+        if(object["version"].toInt()>=2) allowed.push_back("link_filters");
+        keys(object,allowed);
         for (const auto& entry:object["filters"].toArray()) {const auto filter=entry.toObject(); keys(filter,{"property","comparison","value"},true); value_keys(filter["value"].toObject());}
+        for (const auto& entry:object["link_filters"].toArray()) keys(entry.toObject(),{"relation","page"},true);
     } else if (name=="fragment") {
         decode_document(text); keys(object,{"version","id","blocks"},true);
         for (const auto& entry:object["blocks"].toArray()) {const auto block=entry.toObject(); keys(block,{"id","parent","kind","payload"},true); block_keys(block["payload"].toObject());}
@@ -185,7 +188,7 @@ std::set<std::string> file_list(const fs::path& root) {
 } // namespace
 void Workspace::export_json(const std::filesystem::path& destination) const {
     using namespace interchange;
-    if(sql::scalar(database_.get(),"PRAGMA user_version")!="8") throw std::runtime_error("Open and upgrade the workspace before JSON export");
+    if(sql::scalar(database_.get(),"PRAGMA user_version")!="9") throw std::runtime_error("Open and upgrade the workspace before JSON export");
     reject_managed_destination(directory_,destination); files::WorkspaceLock lock(directory_,false); Snapshot snapshot(database_.get());
     validate_records(*this,database_.get()); const auto data=records(database_.get());
     for (const auto& issue:audit_attachments_unlocked()) if (issue.prevents_backup) throw std::runtime_error("Incomplete managed files: "+issue.message);
@@ -195,7 +198,7 @@ void Workspace::export_json(const std::filesystem::path& destination) const {
         const auto digest=files::copy_new(directory_/relative,destination/relative);
         files.append(QJsonObject{{"path",q(name)},{"size",QString::number(digest.size)},{"sha256",q(digest.sha256)}});
     }
-    const QJsonObject object{{"format","nebula-workspace"},{"version",1},{"schema",8},{"tables",data},{"files",files}};
+    const QJsonObject object{{"format","nebula-workspace"},{"version",1},{"schema",9},{"tables",data},{"files",files}};
     const auto content=QJsonDocument(object).toJson(QJsonDocument::Indented);
     if(content.size()>64*1024*1024) throw std::runtime_error("JSON manifest exceeds the supported 64 MiB limit");
     files::write_new(destination/"workspace.json",content.toStdString());
@@ -209,7 +212,7 @@ Workspace Workspace::import_json(const std::filesystem::path& source,const std::
     if(!source.is_absolute() || fs::is_symlink(source) || !fs::is_directory(source)) throw std::invalid_argument("Choose an existing JSON export folder");
     reject_managed_destination(fs::weakly_canonical(source),destination);
     const auto object=parse(read(source/"workspace.json")); keys(object,{"format","version","schema","tables","files"},true);
-    if(object["format"]!="nebula-workspace" || object["version"]!=1 || object["schema"]!=8) throw std::runtime_error("Unsupported JSON interchange version/schema");
+    if(object["format"]!="nebula-workspace" || object["version"]!=1 || (object["schema"]!=8 && object["schema"]!=9)) throw std::runtime_error("Unsupported JSON interchange version/schema");
     if(!object["tables"].isObject() || !object["files"].isArray()) throw std::runtime_error("Malformed JSON interchange collections");
     const auto data=object["tables"].toObject(); QStringList names; for(const auto& table:tables) names.push_back(table.name); keys(data,names,true);
     std::set<std::string> expected;
@@ -239,7 +242,12 @@ Workspace Workspace::import_json(const std::filesystem::path& source,const std::
                     const auto value=row[field.name];
                     if(field.type=='i') add.bind(column,integer(value));
                     else if(field.type=='b') {if(!value.isBool()) throw std::runtime_error("Expected boolean"); add.bind(column,value.toBool());}
-                    else if(field.type=='j') {if(!value.isObject()) throw std::runtime_error("Expected payload object"); payload(field.name,value.toObject()); add.bind(column,serialized(value.toObject()));}
+                    else if(field.type=='j') {
+                        if(!value.isObject()) throw std::runtime_error("Expected payload object");
+                        if(object["schema"]==8 && QString(field.name)=="settings" && value.toObject()["version"].toInt()>1)
+                            throw std::runtime_error("View payload is newer than its declared schema");
+                        payload(field.name,value.toObject()); add.bind(column,serialized(value.toObject()));
+                    }
                     else if(field.type=='n' && value.isNull()) add.bind_null(column);
                     else {
                         if(!value.isString()) throw std::runtime_error("Expected UTF-8 text");

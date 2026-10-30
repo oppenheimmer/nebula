@@ -91,6 +91,8 @@ private slots:
     void search_scope_cancel_and_rebuild_with_pending_edits();
     void markdown_controls_report_conversion_and_keep_existing_pages();
     void json_controls_open_an_owned_fresh_workspace_and_preserve_the_original();
+    void search_reference_filters_work_without_words_and_disambiguate_pages();
+    void view_controls_save_multiple_reference_filters_and_cancel_removal();
     void default_location_is_suggested_without_creating_it();
     void cancel_does_not_create_a_workspace();
     void accepting_expands_home_and_normalizes_path();
@@ -1048,6 +1050,7 @@ void DesktopTests::search_shortcut_opens_matching_block_and_preserves_history()
         results->setCurrentItem(results->topLevelItem(0)); opened=true; QTest::keyClick(results,Qt::Key_Return);
     });
     choose.start(10); QTimer::singleShot(3000,&window,[]{if (auto* d=qobject_cast<QDialog*>(QApplication::activeModalWidget())) d->reject();});
+    QTRY_VERIFY(window.isActiveWindow()); QTRY_VERIFY(editor->hasFocus());
     QTest::keyClick(editor,Qt::Key_F,Qt::ControlModifier|Qt::ShiftModifier); choose.stop(); QVERIFY(opened);
     QCOMPARE(editor->snapshot().id,target.document.id); QCOMPARE(editor->current_block_id(),QString("search-target"));
     QVERIFY(w.load_page(source.document.id).document.blocks[0].runs[0].text.find("pending source")!=std::string::npos);
@@ -1072,7 +1075,7 @@ void DesktopTests::search_scope_cancel_and_rebuild_with_pending_edits()
     choose.start(10); QTimer::singleShot(3000,&window,[]{if (auto* d=qobject_cast<QDialog*>(QApplication::activeModalWidget())) d->reject();});
     window.findChild<QAction*>("searchWorkspace")->trigger(); choose.stop(); QVERIFY(checked);
     QCOMPARE(window.page_editor()->snapshot().id,a.document.id);
-    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search"); QTest::keyClicks(window.page_editor(),"retainedpending");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search; DROP TABLE links"); QTest::keyClicks(window.page_editor(),"retainedpending");
     window.findChild<QAction*>("rebuildSearch")->trigger(); QCOMPARE(w.search("retainedpending").size(),std::size_t(1));
     QCOMPARE(w.pages(first.id).size(),std::size_t(1)); QCOMPARE(w.pages(second.id).size(),std::size_t(1));
 }
@@ -1119,6 +1122,63 @@ void DesktopTests::json_controls_open_an_owned_fresh_workspace_and_preserve_the_
     QCOMPARE(w.load_page(original.document.id).document.blocks[0].runs[0].text,std::string("saved export"));
     QPointer<WorkspaceWindow> pointer(copy); copy->close(); QTRY_VERIFY(pointer.isNull());
     QVERIFY(window.open_page(original.document.id)); QCOMPARE(w.pages(db.id).size(),std::size_t(1));
+}
+void DesktopTests::search_reference_filters_work_without_words_and_disambiguate_pages()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"), other=w.create_database("Other");
+    const auto target=w.create_page(db.id,"Duplicate"), duplicate=w.create_page(other.id,"Duplicate");
+    const auto source=w.create_page(db.id,"Source",{},{{"source",{},BlockKind::Paragraph,{{"link",false,false,Reference{ReferenceKind::Block,target.document.blocks[0].id}}}}});
+    const auto unrelated=w.create_page(db.id,"Unrelated",{},{{"unrelated",{},BlockKind::Paragraph,{{"link",false,false,Reference{ReferenceKind::Page,duplicate.document.id}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(unrelated.document.id)); QTimer choose; bool selected=false;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); if(!dialog || dialog->objectName()!="workspaceSearch") return;
+        auto* filters=dialog->findChild<QTableWidget*>("linkFilters");
+        if(filters->rowCount()==0) dialog->findChild<QPushButton*>("addLinkFilter")->click();
+        auto* page=qobject_cast<QComboBox*>(filters->cellWidget(0,1)); page->setCurrentIndex(page->findData(QString::fromStdString(target.document.id)));
+        auto* results=dialog->findChild<QTreeWidget*>("searchResults"); if(results->topLevelItemCount()!=1) return;
+        QCOMPARE(results->topLevelItem(0)->data(0,Qt::UserRole).toString(),QString::fromStdString(source.document.id));
+        QVERIFY(dialog->findChild<QLineEdit*>("searchText")->text().isEmpty()); selected=true;
+        results->setCurrentItem(results->topLevelItem(0)); QTest::keyClick(results,Qt::Key_Return);
+    });
+    choose.start(10); QTimer::singleShot(3000,&window,[]{if(auto* d=qobject_cast<QDialog*>(QApplication::activeModalWidget())) d->reject();});
+    window.findChild<QAction*>("searchWorkspace")->trigger(); choose.stop(); QVERIFY(selected); QCOMPARE(window.page_editor()->snapshot().id,source.document.id);
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+        auto* filters=dialog->findChild<QTableWidget*>("linkFilters"); QCOMPARE(filters->rowCount(),1);
+        auto* relation=qobject_cast<QComboBox*>(filters->cellWidget(0,0)); relation->setCurrentIndex(1);
+        auto* page=qobject_cast<QComboBox*>(filters->cellWidget(0,1)); page->setCurrentIndex(page->findData(QString::fromStdString(source.document.id)));
+        auto* results=dialog->findChild<QTreeWidget*>("searchResults"); QCOMPARE(results->topLevelItemCount(),1);
+        QCOMPARE(results->topLevelItem(0)->data(0,Qt::UserRole).toString(),QString::fromStdString(target.document.id)); dialog->reject();
+    });
+    window.findChild<QAction*>("searchWorkspace")->trigger(); QCOMPARE(window.page_editor()->snapshot().id,source.document.id);
+}
+void DesktopTests::view_controls_save_multiple_reference_filters_and_cancel_removal()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto target=w.create_page(db.id,"Target"); const auto source=w.create_page(db.id,"Source",{},
+        {{"source",{},BlockKind::Paragraph,{{"target",false,false,Reference{ReferenceKind::Page,target.document.id}}}}});
+    target.document.blocks[0].runs={{"source",false,false,Reference{ReferenceKind::Page,source.document.id}}}; w.save_page(target); w.create_page(db.id,"Unrelated");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->findChild<QLineEdit*>("viewName")->setText("A references");
+        for(int row=0;row<2;++row) {
+            dialog->findChild<QPushButton*>("addLinkFilter")->click(); auto* table=dialog->findChild<QTableWidget*>("linkFilters");
+            qobject_cast<QComboBox*>(table->cellWidget(row,0))->setCurrentIndex(row);
+            auto* page=qobject_cast<QComboBox*>(table->cellWidget(row,1)); page->setCurrentIndex(page->findData(QString::fromStdString(target.document.id)));
+        }
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Save)->click();
+    });
+    window.findChild<QAction*>("newView")->trigger(); auto views=w.views(db.id); auto saved=std::find_if(views.begin(),views.end(),[](const auto& v){return v.name=="A references";});
+    QVERIFY(saved!=views.end()); QCOMPARE(saved->link_filters.size(),std::size_t(2));
+    auto* table=window.findChild<QTableWidget*>("databaseTable"); QCOMPARE(table->rowCount(),1);
+    QCOMPARE(table->item(0,0)->data(Qt::UserRole).toString(),QString::fromStdString(source.document.id));
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); auto* filters=dialog->findChild<QTableWidget*>("linkFilters");
+        QCOMPARE(filters->rowCount(),2); qobject_cast<QPushButton*>(filters->cellWidget(1,2))->click(); QCOMPARE(filters->rowCount(),1); dialog->reject();
+    });
+    window.findChild<QAction*>("editView")->trigger(); views=w.views(db.id);
+    for(const auto& view:views) if(view.name=="A references") QCOMPARE(view.link_filters.size(),std::size_t(2));
+    QCOMPARE(table->rowCount(),1);
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

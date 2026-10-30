@@ -100,10 +100,14 @@ void storage_detail::refresh_search(sqlite3* database,const std::string& id,cons
     }
     for (const auto& page:affected) index_page(database,page);
 }
-std::vector<SearchResult> Workspace::search(const std::string& query,const std::string& database) const {
-    const auto match=expression(query); if (match.empty()) return {};
-    sql::Statement rows(database_.get(),"SELECT page_search.page_id,page_search.block_id,p.title,d.name,page_search.excerpt FROM page_search JOIN pages p ON p.id=page_search.page_id JOIN databases d ON d.id=p.database_id WHERE page_search MATCH ? AND NOT p.trashed AND NOT d.trashed AND (?='' OR p.database_id=?) ORDER BY bm25(page_search,0,0,2,1,4,0),p.title,page_search.block_id");
-    rows.bind(1,match).bind(2,database).bind(3,database); std::vector<SearchResult> result; std::unordered_set<std::string> seen;
+std::vector<SearchResult> Workspace::search(const std::string& query,const std::string& database,const std::vector<LinkFilter>& filters) const {
+    validate_link_filters(filters); const auto match=expression(query); if (match.empty() && filters.empty()) return {};
+    std::string command;
+    if (match.empty()) command="SELECT p.id,'',p.title,d.name,p.title FROM pages p JOIN databases d ON d.id=p.database_id WHERE NOT p.trashed AND NOT d.trashed AND (?='' OR p.database_id=?)"+storage_detail::link_predicate(filters)+" ORDER BY p.title,p.id";
+    else command="SELECT page_search.page_id,page_search.block_id,p.title,d.name,page_search.excerpt FROM page_search JOIN pages p ON p.id=page_search.page_id JOIN databases d ON d.id=p.database_id WHERE page_search MATCH ? AND NOT p.trashed AND NOT d.trashed AND (?='' OR p.database_id=?)"+storage_detail::link_predicate(filters)+" ORDER BY bm25(page_search,0,0,2,1,4,0),p.title,page_search.block_id";
+    sql::Statement rows(database_.get(),command.c_str()); int first=1; if (!match.empty()) rows.bind(first++,match);
+    rows.bind(first++,database); rows.bind(first++,database); storage_detail::bind_link_filters(rows,first,filters);
+    std::vector<SearchResult> result; std::unordered_set<std::string> seen;
     while (rows.row()) {
         const auto id=rows.text(0); if (!seen.insert(id).second) continue;
         result.push_back({id,rows.text(1),rows.text(2),rows.text(3),rows.text(4)}); if (result.size()>=100) break;

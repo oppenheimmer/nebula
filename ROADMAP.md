@@ -23,6 +23,7 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Area | Direction |
 | --- | --- |
 | Runtime | Local desktop application; no server, account, synchronization, or collaboration service. |
+| Pasted link previews | User-authorized exception: fetch a pasted web page once for a removable text-only preview. No images/thumbnails, background refresh, or network requirement for ordinary notes. |
 | Organization | User-defined databases containing pages; saved views share the underlying pages. |
 | Editor | Flowing document with movable, nestable blocks; not a spatial canvas. |
 | Block affordance | Active block has a thin outline and subtle shadow; mouse reordering will use grip dots as its drag target. |
@@ -253,7 +254,9 @@ from a proposed design. An in-memory editor prototype and test/build foundation
 now exist, with a workspace chooser and persistent SQLite database-to-page workflow.
 Content persistence, autosave, typed properties, and saved table views are
 implemented, including the interactive wiki workflow and managed attachments.
-Search/interchange and release validation remain unfinished.
+Local search, structured reference queries, Markdown conversion and lossless JSON
+interchange are implemented. Pasted-link previews and release validation remain
+unfinished.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -523,14 +526,20 @@ Deliverables: searchable notes and documented export/import formats.
   internal references consistently if imported identities must change.
 - [x] M07.6 Verify semantic round trips through the lossless format and test the
   documented Markdown limitations with representative fixtures.
-- [ ] M07.7 Add incoming/outgoing link filters to search and saved database views,
+- [x] M07.7 Add incoming/outgoing link filters to search and saved database views,
   including references to blocks on a selected page; verify structured link queries
   independently of full-text matches.
+- [ ] M07.8 When pasting a web link, try to extract a text-only preview that the
+  user can remove. Fetch text only as part of that paste action; do not import
+  pictures or thumbnails. Keep the pasted link usable when extraction fails and
+  verify removal, save/reopen, clipboard and undo/redo behavior.
 
 Exit criteria: edits and deletions appear correctly in search; rebuilding produces
 equivalent results. A full export imported into a fresh workspace preserves the
 supported model, reference relationships, and attachments, with equivalent backlinks
 after rebuilding derived indexes. Markdown limitations are visible and documented.
+Pasted web links can produce a removable text-only preview without importing
+images, while failed extraction leaves the pasted link usable.
 
 ### M08 — Reliability, accessibility, and performance
 
@@ -838,6 +847,26 @@ problems remain in the risk register until reproduced.
 - **Verification:** `registered_files_removed_inside_a_block_remain_available_for_undo`
   failed before the retention change and passes afterward, including backup/restore
   of retained bytes and subsequent reference restoration. Final checks are below.
+
+### BUG-014 — Intermittent native search shortcut check
+
+- **Milestone/state:** M07/M08; Investigating. One native suite run reported
+  a failed search shortcut assertion while other builds were running.
+- **Environment/reproduction:** RHEL 9.8 Xwayland display, Debian 13 container,
+  Qt 6.8.2/GCC 14.2.0. Run native editor/desktop checks alongside Clang/core builds.
+  The first desktop search test types pending text and sends Ctrl+Shift+F.
+- **Expected/actual:** the workspace search opens and its result is selected.
+  The retained failure was `opened == false`; that run reported two failed
+  assertions, with the other assertion's detail unavailable in retained output.
+  A complete retry captured to the ignored build folder passed all 60 desktop
+  cases without a product code change.
+- **Diagnosis/resolution:** no product defect has been established. Activation/
+  focus timing is a candidate, consistent with G16. The shortcut test now verifies
+  both preconditions before sending the key. Repeat integrated native checks in
+  M08 before treating this as resolved; the passing retry alone is not a fix claim.
+- **Latest verification:** a second captured native run, with the explicit
+  activation/focus preconditions, passed all 52 editor and 60 desktop cases.
+  Stress verification of the intermittent failure remains pending.
 
 For each future defect, record:
 
@@ -1421,6 +1450,57 @@ begin as part of this shutdown.
   All 69 task IDs, prose links/fences, Bash syntax and `git diff --check` passed.
 - **Next:** M07.7 structured incoming/outgoing reference filters in search and
   saved views. M07 remains In progress; M08–M10 remain Not started.
+
+### Pasted-link preview scope addition — 2026-10-30
+
+- Added M07.8 at the user's request: attempt a removable text-only preview on
+  pasted links, without pictures or thumbnails. The user explicitly selected
+  “Fetch text on paste only” after clarification of the prior no-runtime-network
+  rule. This authorizes one-off page text retrieval for the paste workflow;
+  ordinary notes, storage and existing local references remain usable offline.
+  Implementation and verification follow the current M07.7 checks.
+
+### Reference query checkpoint and execution stop — 2026-10-30
+
+- Pushed lossless interchange commit `841f851` to `origin/main`. Completed
+  M07.7 with stable-ID incoming/outgoing reference conditions in search and saved
+  views. Both include references to blocks on their current owning pages, work
+  without FTS terms, and combine with text/database/property filters. Duplicate
+  titles, unresolved names, renames, moves and trash retain explicit identities.
+  Up to eight AND-combined conditions are supported, including explicit missing
+  selected IDs. The UI preserves multiple conditions and cancelled edits.
+- Schema 9 marks view payload 2 while preserving legacy payload 1. JSON version 1
+  now exports schema 9 and also imports schema 8 with legacy view settings. Mixed
+  unsupported schema/view versions are rejected. Core property-only apply_view
+  refuses reference conditions requiring workspace context; Workspace::query_view
+  evaluates references and typed properties over the original pages.
+- Search's repair action reconstructs both reference and FTS indexes before
+  saving pending edits, including when either derived table is missing. This
+  leaves canonical note IDs, timestamps and revisions untouched by repair itself.
+  Contract details are in [SEARCH.md](docs/SEARCH.md),
+  [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) and
+  [INTERCHANGE.md](docs/INTERCHANGE.md).
+- **Verification:** GCC/Clang passed all seven CTest entries, including 51 storage,
+  11 interchange, 60 desktop, 52 editor and 23 core cases plus launcher/smoke.
+  Core-only passed without Qt/SQLite. Focused checks cover independent structured
+  queries with a missing FTS table, both relation directions, block transfer
+  ownership, duplicate titles, combined conditions, trash, index repair, typed
+  saved views/reopen, v8 migration, invalid condition rejection, lossless filter
+  round trips and old JSON schema compatibility. Native checks initially failed
+  two assertions; the retained search shortcut failure is tracked as BUG-014.
+  Two captured retries passed all 52 editor and 60 desktop cases, the final one
+  with explicit activation/focus preconditions. No product fix is inferred from
+  those passing retries; further stress checks remain M08 work. The development
+  environment is unchanged. All 70 task IDs are unique and ordered; status,
+  documentation link/fence and `git diff --check` checks passed.
+- **User-requested stop:** finish this checkpoint, commit/push and wait for the
+  user to resume after usage resets. M07.1–M07.7 are complete; M07 remains
+  In progress because the newly requested M07.8 is not implemented. Its scope
+  explicitly permits text retrieval on paste only, with removable previews and no
+  images/thumbnails. AGENTS.md records that narrow exception. No preview network
+  code/dependency was introduced in this checkpoint. M08–M10 remain Not started.
+  Resume with M07.8, then reliability/accessibility/performance and release work;
+  actual OS IME, screen-reader and macOS verification remain unperformed.
 
 ## Technical references discussed
 

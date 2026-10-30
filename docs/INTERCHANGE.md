@@ -56,7 +56,7 @@ The folder contains UTF-8 workspace.json and attachments/. The root has exactly:
 | --- | --- |
 | format | String `nebula-workspace`. |
 | version | JSON number 1. |
-| schema | JSON number 8, identifying the canonical record contract. |
+| schema | JSON number 9, identifying the current canonical record contract. Earlier schema 8 exports are also accepted. |
 | tables | Object with exactly the nine arrays below. |
 | files | Array of `path`, `size`, `sha256` objects. |
 
@@ -85,6 +85,9 @@ Block, property, view and fragment payload versions follow
 [WORKSPACE_FORMAT.md](WORKSPACE_FORMAT.md). Supported older block payloads retain
 their version/fields semantically; JSON whitespace/key order is not significant.
 Unknown payload fields/versions are refused instead of discarded.
+Schema 8 exports accept view payload 1 only. Schema 9 supports view payloads 1–2,
+including structured reference filters. Importing schema 8 creates a current
+workspace without rewriting legacy view settings or changing model identities.
 Dates remain date-only properties. UTC creation/modification/removal timestamps
 remain distinct strings, with no timezone conversion during interchange.
 

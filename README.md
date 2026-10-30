@@ -62,8 +62,11 @@ cleared when switching pages and does not survive restart.
 
 Ctrl+Shift+F opens local workspace search over titles, blocks and properties.
 Select a database or search all active notes, then open a matching page/block.
-Words are AND-combined; a trailing * requests a prefix. Search → Rebuild search
-index repairs derived search data. Language behavior and limits are documented in
+Words are AND-combined; a trailing * requests a prefix. Add reference filter finds
+incoming/outgoing page and block references, including with no search words.
+New view/Edit view saves the same reference conditions alongside properties.
+Search → Rebuild search and reference indexes repairs derived data. Language
+behavior and limits are documented in
 [SEARCH.md](docs/SEARCH.md).
 
 Import / Export provides Markdown folder conversion with a visible report.

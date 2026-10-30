@@ -1,7 +1,7 @@
-# Workspace format, version 8
+# Workspace format, version 9
 
 A workspace contains `nebula.sqlite3`, `attachments/`, and `.nebula.lock`. The database has SQLite
-application ID `0x4e454255` and `user_version = 8`. The application refuses unknown
+application ID `0x4e454255` and `user_version = 9`. The application refuses unknown
 versions. Version 1 contained only workspace identity; upgrading to version 2
 adds the persistent record tables in one transaction and preserves that identity.
 Version 3 adds deleted-block recovery. Version 4 records deletion operation IDs and
@@ -12,7 +12,8 @@ default/custom reference labels with block payload version 2. Its marker upgrade
 preserves version 1 payloads and deleted fragments; legacy labels remain custom.
 Version 7 adds managed attachment metadata and block payload version 3; older
 representation-only cards retain empty attachment IDs. Version 8 adds rebuildable
-FTS5 page/block/property search. Versions 1–7 migrate
+FTS5 page/block/property search. Version 9 enables view payload 2 with structured
+reference filters, preserving existing view payload 1. Versions 1–8 migrate
 transactionally; existing version 3 fragments retain their content and original
 parent/next-sibling anchors.
 Failed migrations roll back. Managed attachment paths and database files cannot be
@@ -90,12 +91,22 @@ Numbers sort numerically, dates lexically in ISO order, and tags lexicographical
 Unset values sort before populated values in ascending order. Ties use page ID.
 Text comparison is case-sensitive; locale-aware collation is not implied.
 
-View JSON version 1 stores `visible` property IDs, AND-combined `filters`, a `sort`
+View JSON versions 1–2 store `visible` property IDs, AND-combined `filters`, a `sort`
 property ID (empty means title), and `ascending`. A filter stores `property`,
 `comparison` (equal 0, contains 1, less 2, greater 3, empty 4, not-empty 5), and a
 typed property value. Contains means a case-sensitive substring for text or an
 exact tag match. Empty means unset. Views never copy pages. The desktop tags field
 uses comma-separated entry; labels containing commas need a future entry control.
+
+View payload 2 additionally requires `link_filters`, an AND-combined array of
+`relation` (references selected page 0, referenced by selected page 1) and stable
+`page` ID objects. At most eight filters are accepted. Page references and block
+references to a selected page's current blocks both match. Missing selected IDs
+remain explicit conditions; names never replace them. Selected pages may be
+trashed, while result pages/databases are active only. These filters use the
+rebuildable link index and do not require an FTS term. Core property-only
+apply_view refuses link filters because they require workspace context;
+Workspace::query_view evaluates both kinds before sorting the same underlying pages.
 
 Saving a page uses one `BEGIN IMMEDIATE` transaction for metadata, the complete
 block tree, property values, and derived link edges. The revision must match the

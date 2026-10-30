@@ -72,6 +72,7 @@ private:
     void markdown_interchange(bool importing);
     void json_interchange(bool importing);
     QString last_search_;
+    std::vector<LinkFilter> last_search_filters_;
     void switch_database();
     void mark_pending();
     void update_links();

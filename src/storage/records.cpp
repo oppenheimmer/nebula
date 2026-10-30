@@ -403,6 +403,7 @@ PageRecord Workspace::restore_deleted_blocks(const std::string& id)
 }
 void Workspace::save_view(View& view)
 {
+    validate_link_filters(view.link_filters);
     name_required(view.name);
     const auto defs = properties(view.database_id);
     const auto known = [&](const std::string& id) {
@@ -472,7 +473,14 @@ std::vector<LinkEdge> Workspace::outgoing_links(const std::string& id) const
 void Workspace::rebuild_links()
 {
     sql::Transaction transaction(database_.get());
-    sql::execute(database_.get(),"DELETE FROM links");
+    sql::execute(database_.get(),R"(
+        DROP TABLE IF EXISTS links;
+        CREATE TABLE links(source_page TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+            source_block TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+            run_index INTEGER NOT NULL, target_kind INTEGER NOT NULL CHECK(target_kind IN(0,1)),
+            target_id TEXT NOT NULL, PRIMARY KEY(source_block,run_index));
+        CREATE INDEX links_target ON links(target_kind,target_id);
+    )");
     Statement pages(database_.get(),"SELECT id FROM pages");
     while (pages.row()) {
         const auto page = load_page(pages.text(0));

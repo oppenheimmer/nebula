@@ -115,16 +115,17 @@ std::string encode_value(const PropertyValue& value) { return serialize(value_ob
 PropertyValue decode_value(const std::string& json) { return read_value(parse(json)); }
 std::string encode_view(const View& view)
 {
-    QJsonArray visible, filters;
+    validate_link_filters(view.link_filters); QJsonArray visible, filters, links;
+    for (const auto& filter:view.link_filters) links.append(QJsonObject{{"relation",int(filter.relation)},{"page",q(filter.page_id)}});
     for (const auto& id : view.visible_properties) visible.append(q(id));
     for (const auto& filter : view.filters) filters.append(QJsonObject{{"property", q(filter.property_id)},
         {"comparison", int(filter.comparison)}, {"value", value_object(filter.value)}});
-    return serialize({{"version", 1}, {"visible", visible}, {"filters", filters},
-        {"sort", q(view.sort_property)}, {"ascending", view.ascending}});
+    return serialize({{"version", 2}, {"visible", visible}, {"filters", filters},
+        {"sort", q(view.sort_property)}, {"ascending", view.ascending},{"link_filters",links}});
 }
 void decode_view(View& view, const std::string& json)
 {
-    const auto obj = parse(json);
+    const auto obj = parse(json,2);
     view.visible_properties.clear(); view.filters.clear();
     for (const auto& id : array(obj["visible"])) view.visible_properties.push_back(s(id));
     for (const auto& item : array(obj["filters"])) {
@@ -133,6 +134,11 @@ void decode_view(View& view, const std::string& json)
             read_value(object(filter["value"]))});
     }
     view.sort_property = s(obj["sort"]); view.ascending = flag(obj["ascending"]);
+    view.link_filters.clear();
+    if (obj["version"].toInt()>=2) for (const auto& entry:array(obj["link_filters"])) {
+        const auto filter=object(entry); view.link_filters.push_back({LinkRelation(integer(filter["relation"],1)),s(filter["page"])});
+    }
+    validate_link_filters(view.link_filters);
 }
 std::string encode_document(const Page& page)
 {

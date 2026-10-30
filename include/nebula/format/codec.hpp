@@ -2,7 +2,7 @@
 #include "nebula/core/database.hpp"
 
 namespace nebula {
-// Application-owned block JSON v3 (reads v1/v2); other envelopes remain v1.
+// Application-owned block JSON v3 (reads v1/v2), view v2 (reads v1), other envelopes v1.
 // Public interfaces contain no Qt types.
 std::string encode_block(const Block& block);
 void decode_block(Block& block, const std::string& json);

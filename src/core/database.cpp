@@ -72,6 +72,7 @@ bool matches(const PropertyValue& actual, const Filter& filter)
 }
 std::vector<PageRecord> apply_view(std::vector<PageRecord> pages, const View& view)
 {
+    if (!view.link_filters.empty()) throw std::invalid_argument("Reference filters require a workspace query");
     const auto value = [](const PageRecord& page, const std::string& id) -> PropertyValue {
         if (id.empty()) return page.title;
         const auto found = page.properties.find(id);
@@ -88,5 +89,12 @@ std::vector<PageRecord> apply_view(std::vector<PageRecord> pages, const View& vi
         return view.ascending ? order < 0 : order > 0;
     });
     return pages;
+}
+void validate_link_filters(const std::vector<LinkFilter>& filters)
+{
+    if (filters.size()>8) throw std::invalid_argument("Use at most eight reference filters");
+    for (const auto& filter:filters)
+        if (int(filter.relation)<0 || int(filter.relation)>1 || filter.page_id.empty() || filter.page_id.find('\0')!=std::string::npos)
+            throw std::invalid_argument("Select a stable page identity and reference relation");
 }
 } // namespace nebula
