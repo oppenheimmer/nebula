@@ -26,8 +26,11 @@ inline bool operator!=(const Reference& a, const Reference& b) { return !(a==b);
 struct ReferenceLocation { std::string block; std::size_t first_run = 0, run_count = 0; };
 
 struct Asset {
+    Asset(bool is_image=false, std::string name={}, std::string attachment={})
+        : image(is_image), label(std::move(name)), attachment_id(std::move(attachment)) {}
     bool image = false;
     std::string label;
+    std::string attachment_id;
 };
 
 struct Run {
@@ -45,16 +48,17 @@ struct Run {
 
 struct Block {
     Block(std::string identity = {}, std::string parent = {}, BlockKind type = BlockKind::Paragraph,
-          std::vector<Run> content = {}, std::string label = {}, bool is_checked = false)
+          std::vector<Run> content = {}, std::string label = {}, bool is_checked = false, std::string attachment={})
         : id(std::move(identity)), parent_id(std::move(parent)), kind(type),
-          runs(std::move(content)), asset_label(std::move(label)), checked(is_checked) {}
+          runs(std::move(content)), asset_label(std::move(label)), checked(is_checked), attachment_id(std::move(attachment)) {}
 
     std::string id;
     std::string parent_id; // Empty for a root; vector order is tree preorder.
     BlockKind kind = BlockKind::Paragraph;
     std::vector<Run> runs;
-    std::string asset_label; // Prototype card only, not a managed file path.
+    std::string asset_label;
     bool checked = false;
+    std::string attachment_id; // Empty for legacy representation-only cards.
 };
 
 struct Page {
@@ -77,6 +81,8 @@ bool relocate_subtree(Page& page, const std::string& block_id,
 // Invalid input leaves both pages unchanged.
 void transfer_subtree(Page& source, Page& destination, const std::string& block_id,
                       const std::string& empty_source_id);
+void insert_attachment(Page& page, const std::string& after, const std::string& attachment,
+    const std::string& name, bool image, const std::string& card, const std::string& following);
 bool indent(Page& page, const std::string& block_id);
 bool outdent(Page& page, const std::string& block_id);
 Page sample_page();

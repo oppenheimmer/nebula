@@ -48,7 +48,8 @@ The following remain implementation decisions rather than settled facts:
 - Minimum Linux distribution/compiler baseline and macOS deployment target.
 - Linux packaging format and the eventual macOS distribution method.
 - Benchmark thresholds and supported search languages/tokenization behavior.
-- Exact rich-text payload schema and supported Markdown import/export subset.
+- Lossless interchange schema and supported Markdown import/export subset; current
+  rich-text/asset payloads are documented in [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 - Markdown interchange mapping for duplicate titles, custom labels, precise
   targets and unresolved references; interactive wiki syntax is defined in
   [LINKS.md](docs/LINKS.md).
@@ -204,7 +205,7 @@ The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`
 UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
 Initialization occurs in a transaction; reopening preserves that identity.
 Unrelated databases and unsupported versions are rejected without modifying their
-contents. **Version 1 stores no pages or notes.** The current version 6 format
+contents. **Version 1 stores no pages or notes.** The current version 7 format
 adds persistent databases, pages, block payloads, properties, views, derived link
 edges, and deleted-block recovery. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
 schema, JSON versions, ownership, autosave/undo boundaries, and backup contract.
@@ -251,8 +252,8 @@ Record partial progress explicitly; do not infer completion from code existing o
 from a proposed design. An in-memory editor prototype and test/build foundation
 now exist, with a workspace chooser and persistent SQLite database-to-page workflow.
 Content persistence, autosave, typed properties, and saved table views are
-implemented, including the interactive wiki workflow. Managed attachment import,
-search/interchange, and release validation remain unfinished.
+implemented, including the interactive wiki workflow and managed attachments.
+Search/interchange and release validation remain unfinished.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -269,7 +270,7 @@ including material data-handling limitations, rather than a running progress log
 | M03 | Persistent workspace and recovery foundations | M02 | Complete |
 | M04 | Database-to-page workflow | M03 | Complete |
 | M05 | Complete first-release block editing | M01, M04 | Complete |
-| M06 | Attachments and diary workflow | M03, M05 | In progress |
+| M06 | Attachments and diary workflow | M03, M05 | Complete |
 | M07 | Search and portable interchange | M04, M06 | Not started |
 | M08 | Reliability, accessibility, and performance | M04–M07 | Not started |
 | M09 | Linux release | M08 | Not started |
@@ -380,7 +381,7 @@ records, and an initial backup/restore path.
 - [x] M03.9 Verify interrupted operations, reopening, rollback, migration, and
   backup/restore using representative persisted fixtures.
 
-Current implementation: version 6 stores application-owned block JSON and typed
+Current implementation: version 7 stores application-owned block JSON and typed
 properties, with deferred same-page parent foreign keys, global block IDs,
 transactional page/index replacement, and optimistic revisions. `PageSession`
 owns pending values and save failures; the Qt adapter owns per-page undo. Autosave
@@ -391,7 +392,8 @@ hierarchy, and sibling order across restart; restoration preserves already retur
 edits. Unresolved references retain their intended names and database scope without
 binding by title. GCC/Clang tests verify migrations from versions 1–3, recovery,
 and index rebuilding. Native window tests verify the restore and link controls.
-Managed attachment ownership and complete file recovery remain M06 deliverables.
+Managed attachment ownership and verified manifest backup/restore are documented
+in [ATTACHMENTS.md](docs/ATTACHMENTS.md).
 
 Exit criteria: supported records survive closing/reopening; failed operations do
 not leave partial logical edits; migrations and database backup/restore preserve
@@ -480,11 +482,11 @@ coverage. [LINKS.md](docs/LINKS.md) defines entry, labels and navigation behavio
 Deliverables: image/file blocks, reliable managed attachments, complete workspace
 backup, and a useful daily journal workflow.
 
-- [ ] M06.1 Implement managed file import, attachment metadata, image display, and
+- [x] M06.1 Implement managed file import, attachment metadata, image display, and
   file attachment blocks; removing the source file must not break imported data.
-- [ ] M06.2 Handle interrupted imports, missing files, and orphan detection;
+- [x] M06.2 Handle interrupted imports, missing files, and orphan detection;
   cleanup must account for live documents, trash, and active backups.
-- [ ] M06.3 Complete database-plus-attachment backup/restore with a consistent
+- [x] M06.3 Complete database-plus-attachment backup/restore with a consistent
   manifest and verification of referenced files.
 - [x] M06.4 Add a Journal template with Title, Entry date, Mood, and Tags, plus a
   convenient way to create an entry for a chosen day.
@@ -494,6 +496,13 @@ backup, and a useful daily journal workflow.
 Exit criteria: create a dated entry with an image and file, move/remove the original
 source files, restart, and restore the workspace into a fresh location. The entry,
 properties, blocks, and attachments remain usable.
+
+Completion evidence: managed import/preview/copy, file availability and checksum
+audit, conservative undo/recovery retention, locked manifest backup/restore, and
+dated journal restoration pass GCC/Clang and native-window tests. Schema 7 and block
+payload 3 preserve prior notes/cards/recovery through migration. Registered imports
+remain retained; cleanup removes unregistered leftovers only. Contracts and
+data-handling limits are in [ATTACHMENTS.md](docs/ATTACHMENTS.md).
 
 ### M07 — Search and portable interchange
 
@@ -810,6 +819,26 @@ problems remain in the risk register until reproduced.
   the fix and passes after it. The focused keyboard test now also follows a link
   immediately after insertion; final compiler/native results are recorded below.
 
+### BUG-013 — Cleanup could remove bytes still needed by editor undo
+
+- **Milestone/state/impact:** M06; fixed during managed-file implementation.
+  Deleting a card's object while retaining the block ID made its imported file
+  appear unused even though the editor could still undo that deletion.
+- **Environment/reproduction:** Debian 13 development image, Qt 6.8.2/SQLite
+  3.46.1; import a file, remove its reference without removing the block, save, then
+  ask cleanup to remove the file. The focused test observed deletion succeeding.
+- **Expected:** cleanup must retain bytes that may still be restored by undo.
+- **Cause:** deleted-block recovery records removed block identities, not every
+  object/text edit inside a surviving block. Current canonical references alone
+  therefore did not represent all in-memory retention needs.
+- **Resolution:** registered imports are retained conservatively and included in
+  backups even when unreferenced. Manual cleanup removes only unregistered
+  interrupted-import leftovers after rechecking references and file locks. A
+  permanent registered-file purge policy is not claimed.
+- **Verification:** `registered_files_removed_inside_a_block_remain_available_for_undo`
+  failed before the retention change and passes afterward, including backup/restore
+  of retained bytes and subsequent reference restoration. Final checks are below.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -892,6 +921,11 @@ milestone, evidence, and the resulting action.
   BUG-011 reproduced unnecessary autosaves and revision conflicts. Keep read-only
   keyboard actions outside mutation groups; exercise shortcuts in the full window
   in addition to triggering their QAction directly.
+- **G22 — Block archives do not cover every attachment undo (2026-10-30, M06):**
+  BUG-013 removes an object while keeping its block ID, so no deleted-block
+  fragment exists. Retain registered imports independently of current reference
+  counts; clean only unregistered leftovers until a deliberate purge policy can
+  account for undo, recovery and retained backups.
 
 ## Work log
 
@@ -1221,6 +1255,57 @@ begin as part of this shutdown.
   In progress; M07–M10 remain Not started. Current schema/payload contracts are in
   [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md), and interactive behavior is in
   [LINKS.md](docs/LINKS.md).
+
+### Managed attachments and verified file recovery checkpoint — 2026-10-30
+
+- Pushed M05 completion commit `6ab3ab7` to `origin/main` with no trailers.
+- Completed M06.1–M06.3 and the milestone's exit workflow. New image/file imports
+  copy regular source bytes into managed storage, preserve basename/size/SHA-256,
+  and atomically commit metadata/page/index changes. File and directory flushes
+  precede the SQLite commit; failures retain the old page and clean uncommitted
+  files where possible. Source modification/removal does not change managed bytes.
+  Symlinks/special files are rejected, including before image-reader access.
+- Added a separate `nebula_files` adapter using existing Qt Core hash/JSON and
+  Linux/macOS file APIs. Image cards preview managed bytes through existing Qt Gui
+  readers with bounded decode/cache sizes. File IDs survive clipboard, movement,
+  deletion/undo and reopen. Local open/copy and availability/audit controls are
+  keyboard-accessible. The Docker launcher adds only an explicitly selected
+  read-only `/imports` mount through `--import-root`; source folders stay unchanged.
+- Schema 7 adds the attachment registry; block payload 3 carries block/inline
+  managed IDs while reading payloads 1–2. Versions 1–6 migrate with preserved notes,
+  legacy label-only cards and recovery fragments. No new external library was
+  added. macOS compilation/filesystem behavior remains M10 work.
+- Shared backup locks and exclusive import/cleanup locks protect immutable files.
+  Backups copy a consistent SQLite snapshot and all retained attachment bytes,
+  validate registered metadata/hashes, and durably write manifest version 1.
+  Restore verifies paths, exact file list, sizes, hashes and workspace identity
+  before making a new workspace; the backup is unchanged. Missing/corrupt bytes
+  reject backup and remove partial output. Legacy pre-7 backups remain supported.
+- Fixed BUG-013 with a failing-before/passing-after cleanup/undo regression.
+  Registered imports are retained even if current references disappear inside a
+  surviving block. Cleanup deletes only selected unregistered leftovers after
+  fresh reference/lock checks; live/trash/recovery records and retained backup
+  bytes remain protected. No permanent registered-file purge is claimed.
+- **Verification:** GCC/Clang passed all six CTest entries: 23 core, 42 storage,
+  52 editor and 54 desktop cases plus launcher/smoke. Core-only passed without
+  Qt/SQLite. Native Xwayland passed all 52 editor and 54 desktop cases, including
+  actual dialog interaction, image pixels from copied bytes after original removal,
+  unavailable-image rendering, export copies, undo/reopen, audit cleanup and a
+  restored dated journal with both image/file bytes. Tests cover import rollback,
+  stale revisions, FIFO/symlink refusal, orphan fixtures, recovery/trash retention,
+  active file locks, modified/missing files and malformed/tampered manifests.
+- A real `dev.sh run --workspace … --import-root … --smoke-test` succeeded with
+  Unicode, spaces, commas and quotes in host folders. Real headless Docker backup
+  and fresh restore succeeded with a manifest and unchanged source fixture. The
+  image/toolchain is unchanged from M05; no host packages were installed. Bash
+  syntax, ordered tasks, local links, fences and `git diff --check` passed.
+  Interrupted-import handling uses orphan fixtures and transactional failures;
+  process-kill tests at every file/rename/commit boundary remain M08 work. External
+  desktop-handler opening, actual OS IME/reader and macOS checks remain unperformed.
+  Imports/audits are synchronous; large-file responsiveness is not claimed.
+- **Next:** M07.1–M07.2 indexed search/tokenization and navigation, M07.3–M07.6
+  Markdown/lossless interchange and validation, and M07.7 reference filters in
+  search/views. M00–M06 are Complete; M07–M10 remain Not started at this checkpoint.
 
 ## Technical references discussed
 

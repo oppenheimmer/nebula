@@ -40,7 +40,8 @@ the optional project-local SDK workflow are described in
 
 The launcher rebuilds the executable, then asks where to keep the workspace. It
 suggests `~/Document/nebula/`. Choose an existing Nebula folder or enter a new
-location; Open workspace creates `nebula.sqlite3` and `attachments/` there.
+location; Open workspace creates `nebula.sqlite3`, `attachments/`, and the file
+coordination lock `.nebula.lock` there.
 Cancel leaves the location untouched. The selected host folder survives container
 exit and is shown above the editor.
 
@@ -114,7 +115,16 @@ a new identity and transfers its children there; structural edits can be undone.
 Enter on an empty list/to-do block returns it to a paragraph. Consecutive typing
 forms one undo group until navigation, another command, a focus change, or a pause
 of at least one second.
-Image and file cards are layout representations; files are not imported yet.
+Use Attachments → Import image… / Import file… to save a managed copy and insert
+a card. Moving or deleting the original source does not affect the note. Image
+cards preview local files; Open current attachment and Save a copy… use the
+selected card. Import is undoable and saves immediately.
+
+For importing host files in Docker, use `./scripts/dev.sh run --import-root
+/path/to/source-folder`; the chosen folder appears read-only at `/imports`.
+Check managed files… reports missing/changed bytes and can clean unregistered
+interrupted imports. Registered imports remain retained for undo and recovery.
+See [ATTACHMENTS.md](docs/ATTACHMENTS.md) for retention and preview limits.
 
 Workspace → Move page to database… keeps the page and block identities. Property
 values follow by matching name and type; missing destination properties are added.
@@ -165,8 +175,9 @@ completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
 These commands work without a display. Destinations must be new folders outside
 the source workspace. The source is mounted read-only; the database is copied
 using SQLite's backup API. Restore creates a new workspace copy and preserves the
-original backup. The attachment directory is copied, but managed file import and
-complete attachment recovery are not implemented yet. The format and durability
+original backup. Managed attachment availability and hashes are verified; a
+manifest covers the database and attachment files. Missing or changed files fail
+the backup, and restore rejects an incomplete or modified backup. The format and durability
 rules are documented in [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
 ## Checks and measurements

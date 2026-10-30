@@ -14,7 +14,7 @@ Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh test-native
        ./scripts/dev.sh backup SOURCE_FOLDER NEW_BACKUP_FOLDER
        ./scripts/dev.sh restore BACKUP_FOLDER NEW_WORKSPACE_FOLDER
-       ./scripts/dev.sh run [prototype options]
+       ./scripts/dev.sh run [--import-root HOST_FOLDER] [prototype options]
        ./scripts/dev.sh shell
 
 Qt and development packages are installed inside the image only.
@@ -22,6 +22,7 @@ Source is mounted read-only; build output uses build-container-<compiler>/.
 Tests and benchmarks run with networking disabled and an offscreen Qt backend.
 Run shares the X11 display socket and a single authorization file explicitly.
 Run asks for a workspace folder; --workspace HOST_FOLDER selects one directly.
+--import-root exposes one existing host folder read-only at /imports for file import.
 The chooser sees your home read-only. Only the chosen folder is mounted writable.
 Run rebuilds the executable automatically. --demo opens the editor without a workspace.
 HELP
@@ -126,11 +127,21 @@ case "$command_name" in
             exec "${gui[@]}" "$image" sh -ec '/build/editor_tests && /build/desktop_tests'
         fi
         host_workspace=
+        host_import_root=
         skip_picker=false
         app_args=()
         shift
         while (( $# )); do
             case "$1" in
+                --import-root)
+                    if (( $# < 2 )); then printf '%s\n' '--import-root needs an existing host folder.' >&2; exit 2; fi
+                    host_import_root=$2
+                    [[ -n "$host_import_root" ]] || { printf '%s\n' '--import-root needs an existing host folder.' >&2; exit 2; }
+                    shift 2 ;;
+                --import-root=*)
+                    host_import_root=${1#--import-root=}
+                    [[ -n "$host_import_root" ]] || { printf '%s\n' '--import-root needs an existing host folder.' >&2; exit 2; }
+                    shift ;;
                 --workspace)
                     if (( $# < 2 )); then printf '%s\n' '--workspace needs a host folder.' >&2; exit 2; fi
                     host_workspace=$2
@@ -150,6 +161,12 @@ case "$command_name" in
                 --mount "$(mount_spec "$HOME" "$HOME" readonly)" \
                 "$image" /build/nebula_prototype --select-workspace)
             [[ -n "$host_workspace" ]] || exit 0
+        fi
+        if [[ -n "$host_import_root" ]]; then
+            [[ "$host_import_root" != '~' ]] || host_import_root=$HOME
+            [[ "$host_import_root" != '~/'* ]] || host_import_root="$HOME/${host_import_root:2}"
+            host_import_root=$(CDPATH= cd -- "$host_import_root" && pwd -P)
+            gui+=(--mount "$(mount_spec "$host_import_root" /imports readonly)")
         fi
         if [[ -n "$host_workspace" ]]; then
             [[ "$host_workspace" != '~' ]] || host_workspace=$HOME

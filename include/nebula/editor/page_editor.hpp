@@ -42,6 +42,9 @@ public:
     bool select_reference_at(const ReferenceLocation& location);
     std::optional<ReferenceLocation> selected_reference_location() const;
     void replace_selected_reference(const Reference& reference, const QString& label);
+    void set_attachment_resolver(std::function<std::optional<std::string>(const std::string&)> resolver);
+    void apply_document(const Page& page, const QString& focus = {});
+    std::string current_attachment_id() const;
     void insert_card(bool image, const QString& label);
     void insert_divider();
     void toggle_bold();
@@ -91,6 +94,7 @@ private:
     QCompleter* wiki_completer_ = nullptr;
     QString fallback_title_;
     std::function<std::optional<std::string>(const Reference&)> label_resolver_;
+    std::function<std::optional<std::string>(const std::string&)> attachment_resolver_;
     void refresh_reference_labels(const Page* before = nullptr, const QString& before_title = {});
     int wiki_start() const;
     void process_wiki_input();

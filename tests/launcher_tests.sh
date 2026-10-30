@@ -89,6 +89,25 @@ has_argument --demo || fail 'demo must bypass workspace'
 has_argument --workspace && fail 'demo should not open storage'
 
 reset_calls
+import_folder="$fixture/Import 日本語, \"files\""
+mkdir -p -- "$import_folder"
+bash "$launcher" run --workspace "$fixture/import-workspace" --import-root "$import_folder" --smoke-test
+count_calls 2
+load_call 1
+escaped_import=${import_folder//\"/\"\"}
+has_argument "type=bind,\"source=$escaped_import\",\"target=/imports\",readonly" || fail 'imports must be one explicit read-only mount'
+has_argument --import-root && fail 'host import flag must not reach the app'
+has_argument "type=bind,\"source=$HOME\",\"target=$HOME\",readonly" && fail 'import must not implicitly expose home'
+
+reset_calls
+if bash "$launcher" run --workspace "$fixture/invalid-import" --import-root '' 2>/dev/null; then fail 'empty import root must fail'; fi
+count_calls 1
+reset_calls
+if bash "$launcher" run --workspace "$fixture/missing-import-workspace" --import-root "$fixture/no-such-import-root" 2>/dev/null; then fail 'missing import root must fail'; fi
+[[ ! -e "$fixture/missing-import-workspace" ]] || fail 'invalid import root must not create the workspace'
+count_calls 1
+
+reset_calls
 if bash "$launcher" run --workspace '' 2>/dev/null; then fail 'empty workspace must fail'; fi
 count_calls 1
 reset_calls

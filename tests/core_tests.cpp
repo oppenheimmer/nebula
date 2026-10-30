@@ -153,6 +153,15 @@ int main()
                 {" and custom",false,false,Reference{ReferenceKind::Block,"heading"}}}};
             check(reference_title(heading)=="See [link] and custom","Default reference label expanded recursively");
         }},
+        {"managed cards insert after a subtree with a following paragraph", [] {
+            auto page=tree(); insert_attachment(page,"a","file-id","notes.txt",false,"card","following");
+            check(ids(page)=="a,a1,a2,card,following,b,b1,c,","Card split the existing subtree");
+            check(page.blocks[3].attachment_id=="file-id" && page.blocks[3].kind==BlockKind::Attachment,"Managed file identity lost");
+            check(page.blocks[4].kind==BlockKind::Paragraph && page.blocks[4].attachment_id.empty(),"Following paragraph invalid");
+            const auto before=ids(page); rejects([&]{insert_attachment(page,"a","file","image.png",true,"card","other");});
+            check(ids(page)==before,"Invalid insertion changed the tree");
+            page.blocks[3].kind=BlockKind::Paragraph; rejects([&]{validate(page);});
+        }},
         {"long-page fixture", [] {
             const auto page = long_page(1000); validate(page);
             check(page.blocks.size() == 1000, "Wrong fixture size");

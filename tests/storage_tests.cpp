@@ -1,12 +1,18 @@
 #include "nebula/storage/workspace.hpp"
 #include "nebula/format/codec.hpp"
 #include "nebula/app/page_session.hpp"
+#include "nebula/attachments/files.hpp"
+#include "nebula/attachments/manifest.hpp"
 #include <QFile>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QTest>
 #include <sqlite3.h>
 #include <limits>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <sys/stat.h>
 
 using namespace nebula;
 namespace {
@@ -19,6 +25,7 @@ void sql(const QString& file, const char* command) {
         throw std::runtime_error(sqlite3_errmsg(raw));
 }
 QByteArray bytes(const QString& file) { QFile in(file); if (!in.open(QIODevice::ReadOnly)) return {}; return in.readAll(); }
+void put(const QString& file,const QByteArray& data) { QFile out(file); if (!out.open(QIODevice::WriteOnly) || out.write(data)!=data.size()) throw std::runtime_error("Cannot write test file"); }
 }
 class StorageTests : public QObject {
     Q_OBJECT
@@ -57,6 +64,14 @@ private slots:
     void version_five_migration_keeps_legacy_labels_and_reads_new_modes();
     void creating_reference_target_commits_page_and_source_together();
     void failed_reference_creation_leaves_no_page_or_partial_binding();
+    void managed_import_survives_original_removal_and_reopen();
+    void failed_or_unsafe_import_preserves_page_and_source();
+    void attachment_audit_retains_trash_recovery_and_cleans_orphans();
+    void missing_or_corrupt_files_fail_backup_without_partial_output();
+    void attachment_manifest_restores_and_rejects_tampered_inputs();
+    void file_locks_protect_active_backups_and_imports_from_cleanup();
+    void version_six_migration_preserves_old_cards_and_recovery();
+    void registered_files_removed_inside_a_block_remain_available_for_undo();
 };
 void StorageTests::dates_and_types()
 {
@@ -323,7 +338,7 @@ void StorageTests::version_two_upgrade_preserves_notes()
 {
     QTemporaryDir folder; std::string id;
     { auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); id=w.create_page(db.id,"Older notes").document.id; }
-    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE deleted_blocks; PRAGMA user_version=2");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE deleted_blocks; DROP TABLE attachments; PRAGMA user_version=2");
     auto w=Workspace::open(path(folder.path())); QCOMPARE(w.load_page(id).title,std::string("Older notes")); QVERIFY(w.deleted_blocks().empty());
 }
 void StorageTests::restoring_siblings_in_reverse_order_keeps_their_order()
@@ -355,7 +370,7 @@ void StorageTests::version_three_upgrade_preserves_deleted_fragments()
         DROP TABLE deleted_blocks;
         ALTER TABLE legacy_deleted_blocks RENAME TO deleted_blocks;
         CREATE INDEX deleted_blocks_page ON deleted_blocks(page_id,restored);
-        PRAGMA user_version=3;
+        DROP TABLE attachments; PRAGMA user_version=3;
         COMMIT;
     )SQL");
     auto w=Workspace::open(path(folder.path())); QCOMPARE(w.id(),workspace_id);
@@ -386,7 +401,7 @@ void StorageTests::divider_migration_preserves_tree_links_and_recovery()
         auto page=w.create_page(db.id,"Before divider migration",{},sample_page().blocks); id=page.document.id;
         page.document.blocks.erase(page.document.blocks.begin()+7); w.save_page(page); group=w.deleted_blocks()[0].id;
     }
-    sql(folder.filePath("source/nebula.sqlite3"),"PRAGMA user_version=4");
+    sql(folder.filePath("source/nebula.sqlite3"),"DROP TABLE attachments; PRAGMA user_version=4");
     auto w=Workspace::open(path(folder.filePath("source"))); auto page=w.load_page(id);
     QCOMPARE(page.document.blocks[3].parent_id,std::string("list")); QCOMPARE(w.backlinks(ReferenceKind::Block,"heading").size(),std::size_t(1));
     page.document.blocks.push_back({"divider","",BlockKind::Divider,{}}); w.save_page(page);
@@ -580,7 +595,7 @@ void StorageTests::version_five_migration_keeps_legacy_labels_and_reads_new_mode
     const auto legacy=w.create_page(db.id,"Legacy"); const auto identity=w.id();
     sql(folder.filePath("source/nebula.sqlite3"),R"SQL(
         UPDATE blocks SET payload='{"version":1,"runs":[{"text":"Legacy label","bold":true,"italic":false,"reference":{"kind":0,"target":"legacy-target"}}],"asset_label":"","checked":false}';
-        PRAGMA user_version=5;
+        DROP TABLE attachments; PRAGMA user_version=5;
     )SQL");
     auto upgraded=Workspace::open(path(folder.filePath("source"))); QCOMPARE(upgraded.id(),identity);
     auto page=upgraded.load_page(legacy.document.id); QVERIFY(page.document.blocks[0].runs[0].reference->custom_label);
@@ -624,6 +639,134 @@ void StorageTests::failed_reference_creation_leaves_no_page_or_partial_binding()
     source=w.load_page(source.document.id); w.trash_database(b.id,true);
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.create_reference_target(source,{"source",0,1},b.id,"Future"));
     QVERIFY(w.pages(b.id,true).empty());
+}
+void StorageTests::managed_import_survives_original_removal_and_reopen()
+{
+    QTemporaryDir folder; const auto original=folder.filePath(QString::fromUtf8(u8"資料 notes.bin"));
+    const QByteArray payload("notes\n\0binary",13); put(original,payload);
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source");
+    const auto imported=w.import_attachment(page,page.document.blocks[0].id,path(original),false);
+    QCOMPARE(page.document.blocks.size(),std::size_t(3)); QCOMPARE(page.document.blocks[1].attachment_id,imported.file.id);
+    QCOMPARE(imported.file.size,std::int64_t(payload.size())); QCOMPARE(imported.file.name,std::string(u8"資料 notes.bin"));
+    QCOMPARE(bytes(QString::fromStdString(w.attachment_path(imported.file.id).u8string())),payload);
+    put(original,"changed original"); QCOMPARE(bytes(QString::fromStdString(w.attachment_path(imported.file.id).u8string())),payload);
+    QVERIFY(QFile::remove(original)); auto reopened=Workspace::open(path(folder.filePath("workspace")));
+    QCOMPARE(reopened.load_page(page.document.id).document.blocks[1].attachment_id,imported.file.id);
+    QCOMPARE(bytes(QString::fromStdString(reopened.attachment_path(imported.file.id).u8string())),payload);
+    QVERIFY(reopened.audit_attachments().empty());
+}
+void StorageTests::failed_or_unsafe_import_preserves_page_and_source()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("source.bin"); put(original,"keep source");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source"); const auto before=page;
+    sql(folder.filePath("workspace/nebula.sqlite3"),"CREATE TRIGGER fail_import BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT,'injected import failure'); END;");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,path(original),false));
+    QCOMPARE(page.revision,before.revision); QCOMPARE(encode_document(w.load_page(page.document.id).document),encode_document(before.document));
+    QVERIFY(w.attachments().empty()); QVERIFY(w.audit_attachments().empty()); QCOMPARE(bytes(original),QByteArray("keep source"));
+    sql(folder.filePath("workspace/nebula.sqlite3"),"DROP TRIGGER fail_import;");
+    auto changed=page; changed.title="Changed"; w.save_page(changed);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,path(original),false)); QVERIFY(w.attachments().empty());
+    page=w.load_page(page.document.id);
+    QVERIFY(QFile::link(original,folder.filePath("symlink")));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,path(folder.filePath("symlink")),false));
+    const auto fifo=path(folder.filePath("pipe")); QVERIFY(::mkfifo(fifo.c_str(),0600)==0);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,fifo,false));
+    QVERIFY(w.attachments().empty()); QVERIFY(w.audit_attachments().empty());
+}
+void StorageTests::attachment_audit_retains_trash_recovery_and_cleans_orphans()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("source.txt"); put(original,"keep through recovery");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source");
+    const auto imported=w.import_attachment(page,page.document.blocks[0].id,path(original),false);
+    w.trash_page(page.document.id,true); w.trash_database(db.id,true); QVERIFY(w.audit_attachments().empty());
+    w.trash_database(db.id,false); w.trash_page(page.document.id,false); page=w.load_page(page.document.id);
+    page.document.blocks.erase(page.document.blocks.begin()+1,page.document.blocks.end()); w.save_page(page);
+    QVERIFY(w.audit_attachments().empty()); QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.remove_unused_attachment(imported.file.id));
+    const auto groups=w.deleted_blocks(); const auto file_group=std::find_if(groups.begin(),groups.end(),[](const auto& group){return group.label=="source.txt";}); QVERIFY(file_group!=groups.end());
+    page=w.restore_deleted_blocks(file_group->id); QCOMPARE(page.document.blocks[1].attachment_id,imported.file.id);
+    put(folder.filePath("workspace/attachments/.import-interrupted"),"incomplete");
+    auto issues=w.audit_attachments(); QCOMPARE(issues.size(),std::size_t(1)); QVERIFY(issues[0].removable);
+    w.remove_unused_attachment(".import-interrupted"); QVERIFY(w.audit_attachments().empty());
+    QVERIFY(QFile::exists(QString::fromStdString(w.attachment_path(imported.file.id).u8string())));
+    QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.remove_unused_attachment("../nebula.sqlite3"));
+}
+void StorageTests::missing_or_corrupt_files_fail_backup_without_partial_output()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("source.txt"); put(original,"original bytes");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source");
+    const auto imported=w.import_attachment(page,page.document.blocks[0].id,path(original),false);
+    const auto managed=QString::fromStdString(w.attachment_path(imported.file.id).u8string()); put(managed,"changed bytes");
+    auto issues=w.audit_attachments(); QVERIFY(!issues.empty()); QVERIFY(!issues[0].removable);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.backup_to(path(folder.filePath("corrupt-backup"))));
+    QVERIFY(!QFile::exists(folder.filePath("corrupt-backup"))); QVERIFY(QFile::remove(managed));
+    QVERIFY(!w.audit_attachments().empty()); page.title="Still editable"; w.save_page(page);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.backup_to(path(folder.filePath("missing-backup"))));
+    QVERIFY(!QFile::exists(folder.filePath("missing-backup"))); put(managed,"original bytes"); QVERIFY(w.audit_attachments().empty());
+    w.backup_to(path(folder.filePath("good-backup"))); QVERIFY(QFile::exists(folder.filePath("good-backup/backup-manifest.json")));
+}
+void StorageTests::attachment_manifest_restores_and_rejects_tampered_inputs()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("source.txt"); put(original,"restore me");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source");
+    const auto imported=w.import_attachment(page,page.document.blocks[0].id,path(original),false); QVERIFY(QFile::remove(original));
+    const auto backup=folder.filePath("backup"); w.backup_to(path(backup)); const auto manifest=bytes(backup+"/backup-manifest.json");
+    auto restored=Workspace::restore(path(backup),path(folder.filePath("restored")));
+    QCOMPARE(restored.load_page(page.document.id).document.blocks[1].attachment_id,imported.file.id);
+    QCOMPARE(bytes(QString::fromStdString(restored.attachment_path(imported.file.id).u8string())),QByteArray("restore me"));
+    QCOMPARE(bytes(backup+"/backup-manifest.json"),manifest); QVERIFY(!QFile::exists(folder.filePath("restored/backup-manifest.json")));
+    const auto file=backup+"/attachments/"+QString::fromStdString(imported.file.id); put(file,"tampered");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::restore(path(backup),path(folder.filePath("reject-file"))));
+    QVERIFY(!QFile::exists(folder.filePath("reject-file"))); put(file,"restore me");
+    auto object=QJsonDocument::fromJson(manifest).object(); auto entries=object["files"].toArray(); auto entry=entries[0].toObject(); entry["path"]="../outside"; entries[0]=entry; object["files"]=entries;
+    put(backup+"/backup-manifest.json",QJsonDocument(object).toJson());
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::restore(path(backup),path(folder.filePath("reject-path"))));
+    QVERIFY(!QFile::exists(folder.filePath("reject-path"))); put(backup+"/backup-manifest.json",manifest);
+    put(backup+"/attachments/unlisted","extra");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::restore(path(backup),path(folder.filePath("reject-extra"))));
+    QVERIFY(QFile::remove(backup+"/attachments/unlisted")); QVERIFY(QFile::remove(backup+"/backup-manifest.json"));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::restore(path(backup),path(folder.filePath("reject-missing-manifest"))));
+}
+void StorageTests::file_locks_protect_active_backups_and_imports_from_cleanup()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("source.txt"); put(original,"file");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source");
+    put(folder.filePath("workspace/attachments/orphan"),"unused");
+    {
+        files::WorkspaceLock active_backup(w.directory(),false);
+        QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.remove_unused_attachment("orphan"));
+        QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,path(original),false));
+        w.backup_to(path(folder.filePath("concurrent-read-backup")));
+    }
+    {
+        files::WorkspaceLock active_import(w.directory(),true);
+        QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.backup_to(path(folder.filePath("busy-backup"))));
+        QVERIFY(!QFile::exists(folder.filePath("busy-backup")));
+    }
+    w.remove_unused_attachment("orphan"); QVERIFY(w.audit_attachments().empty());
+}
+void StorageTests::version_six_migration_preserves_old_cards_and_recovery()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Old cards",{},{{"keep","",BlockKind::Paragraph,{{"Text"}}},{"old-card","",BlockKind::Attachment,{},"Legacy label"}});
+    page.document.blocks.pop_back(); w.save_page(page); const auto group=w.deleted_blocks()[0].id; const auto identity=w.id();
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE attachments; PRAGMA user_version=6;");
+    auto upgraded=Workspace::open(path(folder.path())); QCOMPARE(upgraded.id(),identity); QVERIFY(upgraded.attachments().empty());
+    const auto restored=upgraded.restore_deleted_blocks(group); QCOMPARE(restored.document.blocks[1].asset_label,std::string("Legacy label"));
+    QVERIFY(restored.document.blocks[1].attachment_id.empty());
+}
+void StorageTests::registered_files_removed_inside_a_block_remain_available_for_undo()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("source.txt"); put(original,"undo bytes");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source");
+    const auto imported=w.import_attachment(page,page.document.blocks[0].id,path(original),false); const auto before=page.document;
+    page.document.blocks[1].attachment_id.clear(); page.document.blocks[1].asset_label.clear(); page.document.blocks[1].kind=BlockKind::Paragraph; w.save_page(page);
+    QVERIFY(w.deleted_blocks().empty());
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.remove_unused_attachment(imported.file.id));
+    w.backup_to(path(folder.filePath("retained-backup")));
+    auto restored=Workspace::restore(path(folder.filePath("retained-backup")),path(folder.filePath("retained-restored")));
+    QCOMPARE(bytes(QString::fromStdString(restored.attachment_path(imported.file.id).u8string())),QByteArray("undo bytes"));
+    QCOMPARE(bytes(QString::fromStdString(w.attachment_path(imported.file.id).u8string())),QByteArray("undo bytes"));
+    page.document=before; w.save_page(page); QVERIFY(w.audit_attachments().empty());
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

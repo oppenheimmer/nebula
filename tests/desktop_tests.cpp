@@ -13,6 +13,8 @@
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileDialog>
+#include <QImage>
 #include <QLabel>
 #include <QInputDialog>
 #include <QLineEdit>
@@ -133,6 +135,11 @@ private slots:
     void unresolved_creation_chooses_database_and_undo_keeps_created_page();
     void unresolved_existing_choice_replaces_only_the_selected_reference();
     void unresolved_creation_failure_keeps_reference_and_no_orphan_page();
+    void managed_file_import_export_undo_and_reopen();
+    void managed_image_preview_uses_copied_bytes_and_reports_missing_file();
+    void import_cancel_and_invalid_image_preserve_page();
+    void attachment_audit_control_removes_only_unused_files();
+    void journal_with_image_and_file_restores_into_fresh_window();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -931,6 +938,94 @@ void DesktopTests::unresolved_creation_failure_keeps_reference_and_no_orphan_pag
     choose.start(0); QTest::keyClick(window.page_editor(),Qt::Key_Return,Qt::ControlModifier); choose.stop();
     QVERIFY(saw_error); QVERIFY(w.pages(b.id).empty()); QVERIFY(window.page_editor()->snapshot().blocks[0].runs[0].reference->target_id.empty());
     QCOMPARE(w.load_page(source.document.id).revision,source.revision); QCOMPARE(window.page_editor()->toPlainText(),QString("Future"));
+}
+void DesktopTests::managed_file_import_export_undo_and_reopen()
+{
+    QTemporaryDir folder; const auto original=folder.filePath(QString::fromUtf8(u8"資料.txt"));
+    { QFile out(original); QVERIFY(out.open(QIODevice::WriteOnly)); out.write("managed bytes\n"); }
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); const auto page=w.create_page(db.id,"Files");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    QTimer::singleShot(0,&window,[&]{ auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->selectFile(original); QMetaObject::invokeMethod(dialog,"accept"); });
+    window.findChild<QAction*>("importFile")->trigger();
+    auto* editor=window.page_editor(); const auto imported=w.load_page(page.document.id);
+    QCOMPARE(imported.document.blocks.size(),std::size_t(3)); const auto file=imported.document.blocks[1].attachment_id; QVERIFY(!file.empty());
+    QCOMPARE(window.findChild<QLabel*>("saveState")->text(),QString("Saved locally")); QVERIFY(QFile::remove(original));
+    QVERIFY(editor->go_to_block(QString::fromStdString(imported.document.blocks[1].id))); QVERIFY(window.findChild<QAction*>("exportAttachment")->isEnabled());
+    const auto exported=folder.filePath("exported.txt");
+    QTimer::singleShot(0,&window,[&]{ auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->selectFile(exported); QMetaObject::invokeMethod(dialog,"accept"); });
+    window.findChild<QAction*>("exportAttachment")->trigger(); QCOMPARE(contents(exported),QByteArray("managed bytes\n"));
+    editor->undo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(page.document.id).document.blocks.size(),std::size_t(1));
+    QVERIFY(w.audit_attachments().empty()); QVERIFY(w.attachment(file));
+    editor->redo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(page.document.id).document.blocks[1].attachment_id,file);
+    auto reopened=Workspace::open(path(folder.filePath("workspace"))); QCOMPARE(reopened.load_page(page.document.id).document.blocks[1].attachment_id,file);
+    QCOMPARE(contents(QString::fromStdString(reopened.attachment_path(file).u8string())),QByteArray("managed bytes\n"));
+}
+void DesktopTests::managed_image_preview_uses_copied_bytes_and_reports_missing_file()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("image.png"); QImage picture(80,60,QImage::Format_RGB32); picture.fill(QColor("#ee2020")); QVERIFY(picture.save(original));
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); const auto page=w.create_page(db.id,"Images");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    QTimer::singleShot(0,&window,[&]{ auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->selectFile(original); QMetaObject::invokeMethod(dialog,"accept"); });
+    window.findChild<QAction*>("importImage")->trigger(); const auto saved=w.load_page(page.document.id);
+    QCOMPARE(saved.document.blocks[1].kind,BlockKind::Image); const auto id=saved.document.blocks[1].attachment_id; QVERIFY(!id.empty());
+    QVERIFY(QFile::remove(original)); auto* editor=window.page_editor(); QVERIFY(editor->go_to_block(QString::fromStdString(saved.document.blocks[1].id)));
+    auto red_pixels=[&]{
+        const auto image=editor->viewport()->grab().toImage(); int count=0;
+        for (int y=0;y<image.height();++y) for (int x=0;x<image.width();++x) { const auto c=image.pixelColor(x,y); if (c.red()>200 && c.green()<60 && c.blue()<60) ++count; }
+        return count;
+    };
+    QTRY_VERIFY(red_pixels()>500); QVERIFY(QFile::remove(QString::fromStdString(w.attachment_path(id).u8string()))); editor->viewport()->update();
+    QTRY_COMPARE(red_pixels(),0); QVERIFY(!w.audit_attachments().empty());
+    QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+        auto* issues=dialog->findChild<QListWidget*>("attachmentIssues"); QVERIFY(issues && issues->count()>0); issues->setCurrentRow(0);
+        QVERIFY(!dialog->findChild<QPushButton*>("removeUnusedAttachment")->isEnabled()); dialog->accept(); });
+    window.findChild<QAction*>("auditAttachments")->trigger(); QCOMPARE(editor->snapshot().blocks[1].attachment_id,id);
+}
+void DesktopTests::import_cancel_and_invalid_image_preserve_page()
+{
+    QTemporaryDir folder; const auto original=folder.filePath("text.txt"); { QFile out(original); QVERIFY(out.open(QIODevice::WriteOnly)); out.write("not an image"); }
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); const auto page=w.create_page(db.id,"Source");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->reject(); });
+    window.findChild<QAction*>("importFile")->trigger(); QCOMPARE(w.load_page(page.document.id).revision,page.revision); QVERIFY(w.attachments().empty());
+    QTimer choose; bool saw_error=false;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        if (auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) { saw_error=true; box->accept(); }
+        else if (auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) { dialog->selectFile(original); QMetaObject::invokeMethod(dialog,"accept"); }
+    });
+    choose.start(0); window.findChild<QAction*>("importImage")->trigger(); choose.stop();
+    QVERIFY(saw_error); QVERIFY(w.attachments().empty()); QCOMPARE(w.load_page(page.document.id).revision,page.revision); QCOMPARE(contents(original),QByteArray("not an image"));
+}
+void DesktopTests::attachment_audit_control_removes_only_unused_files()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); const auto page=w.create_page(db.id,"Keep");
+    const auto orphan=folder.filePath("attachments/.import-abandoned"); { QFile out(orphan); QVERIFY(out.open(QIODevice::WriteOnly)); out.write("orphan"); }
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    QTimer::singleShot(0,&window,[]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); auto* issues=dialog->findChild<QListWidget*>("attachmentIssues"); QCOMPARE(issues->count(),1);
+        issues->setCurrentRow(0); auto* remove=dialog->findChild<QPushButton*>("removeUnusedAttachment"); QVERIFY(remove->isEnabled()); remove->click(); QCOMPARE(issues->count(),0); dialog->accept();
+    });
+    window.findChild<QAction*>("auditAttachments")->trigger(); QVERIFY(!QFile::exists(orphan)); QCOMPARE(w.load_page(page.document.id).document.id,page.document.id);
+}
+void DesktopTests::journal_with_image_and_file_restores_into_fresh_window()
+{
+    QTemporaryDir folder; const auto image_source=folder.filePath("journal.png"), file_source=folder.filePath("journal.txt");
+    QImage picture(50,40,QImage::Format_RGB32); picture.fill(QColor("#2456ab")); QVERIFY(picture.save(image_source));
+    { QFile out(file_source); QVERIFY(out.open(QIODevice::WriteOnly)); out.write("journal attachment"); }
+    auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Journal"); const auto date=w.add_property(db.id,"Entry date",PropertyKind::Date);
+    auto page=w.create_page(db.id,"2024-03-10",{{date.id,Date{"2024-03-10"}}});
+    const auto image=w.import_attachment(page,page.document.blocks[0].id,path(image_source),true);
+    const auto file=w.import_attachment(page,image.following,path(file_source),false);
+    QVERIFY(QFile::remove(image_source)); QVERIFY(QFile::remove(file_source));
+    w.backup_to(path(folder.filePath("backup"))); auto restored=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
+    const auto recovered=restored.load_page(page.document.id); QCOMPARE(std::get<Date>(recovered.properties.at(date.id)).iso,std::string("2024-03-10"));
+    QCOMPARE(contents(QString::fromStdString(restored.attachment_path(file.file.id).u8string())),QByteArray("journal attachment"));
+    QImage decoded(QString::fromStdString(restored.attachment_path(image.file.id).u8string())); QVERIFY(!decoded.isNull()); QCOMPARE(decoded.pixelColor(1,1),QColor("#2456ab"));
+    WorkspaceWindow window(restored); show_window(window); QVERIFY(window.open_page(page.document.id));
+    QCOMPARE(window.findChild<QLineEdit*>("pageTitle")->text(),QString("2024-03-10"));
+    QVERIFY(window.page_editor()->go_to_block(QString::fromStdString(image.card))); QCOMPARE(window.page_editor()->current_attachment_id(),image.file.id);
+    QVERIFY(window.page_editor()->go_to_block(QString::fromStdString(file.card))); QVERIFY(window.findChild<QAction*>("exportAttachment")->isEnabled());
+    QVERIFY(restored.audit_attachments().empty());
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

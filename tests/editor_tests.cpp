@@ -111,6 +111,7 @@ private slots:
     void title_and_default_page_labels_undo_together();
     void editing_a_default_label_makes_it_custom_and_undo_restores_mode();
     void resolving_custom_reference_preserves_rich_label_and_undo();
+    void managed_card_identity_survives_clipboard_reorder_delete_and_undo();
 };
 
 void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
@@ -227,6 +228,21 @@ void EditorTests::resolving_custom_reference_preserves_rich_label_and_undo()
     QVERIFY(block.runs[0].bold); QVERIFY(block.runs[1].italic); QCOMPARE(block.runs[1].reference->target_id,std::string("target"));
     editor.undo(); QCOMPARE(editor.snapshot().blocks[0].runs[1].reference->unresolved_name,std::string("Future"));
     editor.redo(); QCOMPARE(editor.snapshot().blocks[0].runs[0].reference->target_id,std::string("target"));
+}
+void EditorTests::managed_card_identity_survives_clipboard_reorder_delete_and_undo()
+{
+    const Page original{"page",{{"image","",BlockKind::Image,{},"image.png",false,"owned-file"},
+        {"following","",BlockKind::Paragraph,{{"Text"}}}}};
+    PageEditor editor; ready(editor,original); QCOMPARE(editor.snapshot().blocks[0].attachment_id,std::string("owned-file"));
+    QCOMPARE(editor.snapshot().blocks[0].runs[0].asset->attachment_id,std::string("owned-file"));
+    auto selected=editor.textCursor(); selected.select(QTextCursor::Document); editor.setTextCursor(selected); editor.copy();
+    PageEditor target; ready(target,{"target",{{"empty","",BlockKind::Paragraph,{}}}}); target.paste();
+    QCOMPARE(target.snapshot().blocks[0].attachment_id,std::string("owned-file"));
+    QCOMPARE(target.snapshot().blocks[0].runs[0].asset->attachment_id,std::string("owned-file"));
+    editor.go_to_block("image"); QVERIFY(editor.move_current(1)); QCOMPARE(editor.snapshot().blocks[1].attachment_id,std::string("owned-file"));
+    editor.undo(); editor.go_to_block("image"); QTest::keyClick(&editor,Qt::Key_Delete);
+    QCOMPARE(editor.snapshot().blocks[0].kind,BlockKind::Paragraph); QVERIFY(editor.snapshot().blocks[0].attachment_id.empty());
+    editor.undo(); QCOMPARE(editor.snapshot().blocks[0].attachment_id,std::string("owned-file"));
 }
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
 {

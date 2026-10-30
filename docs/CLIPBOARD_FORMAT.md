@@ -5,8 +5,8 @@ HTML. Its payload is the version 1 document envelope used for recovery fragments
 `version`, source page `id`, and a preorder `blocks` array. Each block contains
 `id`, `parent`, numeric `kind`, and a version 1 `payload` with rich-text runs.
 Run and block fields are defined in [WORKSPACE_FORMAT.md](WORKSPACE_FORMAT.md).
-Writers use block payload version 2 within the version 1 envelope; readers also
-accept legacy version 1 blocks. Default/custom label modes survive copying and
+Writers use block payload version 3 within the version 1 envelope; readers also
+accept legacy version 1–2 blocks. Default/custom label modes survive copying and
 internal target remapping. Older readers reject the new nested payload version.
 This is application-owned JSON, not QTextDocument serialization.
 
@@ -27,7 +27,7 @@ Cut/paste also creates pasted identities. It is not an identity-preserving move
 between pages; references from elsewhere still identify the original blocks.
 Use Workspace → Move block to page… for an identity-preserving subtree transfer.
 Clipboard data does not transfer page properties, database definitions, views,
-workspace identity, or managed files. Asset cards currently carry representations
+workspace identity, or managed file bytes. Asset cards retain their managed IDs
 and labels. A reference copied from another workspace can remain unavailable.
 
 For external HTML, the supported subset is paragraphs, headings, lists, bold,

@@ -64,6 +64,10 @@ private:
     void complete_wiki(const QString& prefix, bool active);
     void enter_wiki_link(const QString& syntax);
     void resolve_unresolved(const QString& name, const QString& scope);
+    void import_attachment(bool image);
+    void export_attachment();
+    void show_attachment_audit();
+    void update_attachment_actions();
     void switch_database();
     void mark_pending();
     void update_links();

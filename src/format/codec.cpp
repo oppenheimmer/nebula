@@ -84,15 +84,16 @@ std::string encode_block(const Block& block)
         if (run.reference) out["reference"] = QJsonObject{{"kind", int(run.reference->kind)}, {"target", q(run.reference->target_id)},
             {"unresolved_name",q(run.reference->unresolved_name)},{"scope",q(run.reference->database_scope)},
             {"custom_label",run.reference->custom_label}};
-        if (run.asset) out["asset"] = QJsonObject{{"image", run.asset->image}, {"label", q(run.asset->label)}};
+        if (run.asset) out["asset"] = QJsonObject{{"image", run.asset->image}, {"label", q(run.asset->label)}, {"attachment_id",q(run.asset->attachment_id)}};
         runs.append(out);
     }
-    return serialize({{"version", 2}, {"runs", runs}, {"asset_label", q(block.asset_label)}, {"checked", block.checked}});
+    return serialize({{"version", 3}, {"runs", runs}, {"asset_label", q(block.asset_label)}, {"checked", block.checked}, {"attachment_id",q(block.attachment_id)}});
 }
 void decode_block(Block& block, const std::string& json)
 {
-    const auto obj = parse(json,2);
+    const auto obj = parse(json,3);
     block.runs.clear(); block.asset_label = s(obj["asset_label"]); block.checked = flag(obj["checked"]);
+    block.attachment_id=obj["version"].toInt()>=3?s(obj["attachment_id"]):std::string{};
     for (const auto& item : array(obj["runs"])) {
         const auto run = object(item);
         Run out{s(run["text"]), flag(run["bold"]), flag(run["italic"])};
@@ -101,11 +102,11 @@ void decode_block(Block& block, const std::string& json)
             out.reference = Reference{static_cast<ReferenceKind>(integer(ref["kind"], 1)), s(ref["target"])};
             if (ref.contains("unresolved_name")) out.reference->unresolved_name=s(ref["unresolved_name"]);
             if (ref.contains("scope")) out.reference->database_scope=s(ref["scope"]);
-            if (obj["version"].toInt()==2) out.reference->custom_label=flag(ref["custom_label"]);
+            if (obj["version"].toInt()>=2) out.reference->custom_label=flag(ref["custom_label"]);
         }
         if (run.contains("asset")) {
             const auto asset = object(run["asset"]);
-            out.asset = Asset{flag(asset["image"]), s(asset["label"])};
+            out.asset = Asset{flag(asset["image"]), s(asset["label"]),obj["version"].toInt()>=3?s(asset["attachment_id"]):std::string{}};
         }
         block.runs.push_back(std::move(out));
     }
@@ -137,7 +138,7 @@ std::string encode_document(const Page& page)
 {
     validate(page); QJsonArray blocks;
     for (const auto& block:page.blocks) blocks.append(QJsonObject{{"id",q(block.id)},
-        {"parent",q(block.parent_id)},{"kind",int(block.kind)},{"payload",parse(encode_block(block),2)}});
+        {"parent",q(block.parent_id)},{"kind",int(block.kind)},{"payload",parse(encode_block(block),3)}});
     return serialize({{"version",1},{"id",q(page.id)},{"blocks",blocks}});
 }
 Page decode_document(const std::string& json)

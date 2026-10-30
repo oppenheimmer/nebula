@@ -8,6 +8,14 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDate>
+#include <QDesktopServices>
+#include <QFileDialog>
+#include <QFile>
+#include <QDir>
+#include <QImageReader>
+#include <QSaveFile>
+#include <QUrl>
+#include <QCryptographicHash>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QHeaderView>
@@ -121,6 +129,19 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     connect(forward,&QAction::triggered,this,[this]{ navigate_history(true); });
     connect(follow,&QAction::triggered,this,[this]{ if (page_editor()->hasFocus()) page_editor()->activate_current_reference(); });
     update_navigation_actions();
+    auto* attachments_menu=menuBar()->addMenu("&Attachments");
+    auto attachment_action=[&](const char* text,const char* name,auto callback) {
+        auto* action=attachments_menu->addAction(text); action->setObjectName(name);
+        connect(action,&QAction::triggered,this,[this,callback]{ try { callback(); } catch(const std::exception& e) { error(this,e); } });
+    };
+    attachment_action("Import image…","importImage",[this]{ import_attachment(true); });
+    attachment_action("Import file…","importFile",[this]{ import_attachment(false); });
+    attachment_action("Open current attachment","openAttachment",[this]{
+        const auto path=workspace_.attachment_path(page_editor()->current_attachment_id());
+        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(q(path.u8string())))) throw std::runtime_error("No desktop application could open this file; use Save a copy…");
+    });
+    attachment_action("Save a copy…","exportAttachment",[this]{ export_attachment(); });
+    attachment_action("Check managed files…","auditAttachments",[this]{ show_attachment_audit(); });
     addToolBarBreak();
     auto* bar=addToolBar("Database controls"); bar->setObjectName("databaseControls"); bar->setMovable(false);
     auto add=[&](const char* text,const char* name,auto callback) {
@@ -165,6 +186,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     autosave_=new QTimer(this); autosave_->setSingleShot(true); autosave_->setInterval(500);
     connect(autosave_,&QTimer::timeout,this,[this]{ flush(); });
     connect(page_editor(),&QTextEdit::textChanged,this,&WorkspaceWindow::mark_pending);
+    connect(page_editor(),&QTextEdit::cursorPositionChanged,this,&WorkspaceWindow::update_attachment_actions);
     connect(title_,&QLineEdit::textEdited,this,[this](const QString& title){
         if (!loading_) { page_editor()->set_page_title(title); mark_pending(); }
     });
@@ -207,6 +229,9 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         completing_=false;
     });
     page_editor()->set_reference_label_resolver([this](const Reference& reference){ return workspace_.reference_label(reference); });
+    page_editor()->set_attachment_resolver([this](const std::string& id) -> std::optional<std::string> {
+        try { return workspace_.attachment_path(id).u8string(); } catch (const std::exception&) { return {}; }
+    });
     connect(page_editor(),&PageEditor::unresolved_reference_activated,this,[this](const QString& name,const QString& scope){
         try { resolve_unresolved(name,scope); } catch(const std::exception& e) { error(this,e); }
     });
@@ -655,6 +680,94 @@ void WorkspaceWindow::update_transfer_actions()
     findChild<QAction*>("moveBlockToPage")->setEnabled(session_.has_page());
     findChild<QAction*>("undoBlockTransfer")->setEnabled(last_transfer_ && last_transfer_->applied);
     findChild<QAction*>("redoBlockTransfer")->setEnabled(last_transfer_ && !last_transfer_->applied);
+    update_attachment_actions();
+}
+void WorkspaceWindow::update_attachment_actions()
+{
+    for (const auto* name:{"importImage","importFile"}) findChild<QAction*>(name)->setEnabled(session_.has_page());
+    const bool active=session_.has_page() && !page_editor()->current_attachment_id().empty();
+    for (const auto* name:{"openAttachment","exportAttachment"}) findChild<QAction*>(name)->setEnabled(active);
+}
+void WorkspaceWindow::import_attachment(bool image)
+{
+    if (!session_.has_page() || !flush()) return;
+    const auto after=s(page_editor()->current_block_id());
+    QFileDialog dialog(this,image?"Import image":"Import file",QDir("/imports").exists()?"/imports":QDir::homePath());
+    dialog.setObjectName("attachmentImport"); dialog.setOption(QFileDialog::DontUseNativeDialog);
+    dialog.setOption(QFileDialog::DontResolveSymlinks);
+    dialog.setFileMode(QFileDialog::ExistingFile);
+    if (image) dialog.setNameFilter("Images (*.png *.jpg *.jpeg *.gif *.bmp *.webp);;All files (*)");
+    const bool accepted=dialog.exec()==QDialog::Accepted; activateWindow(); page_editor()->setFocus();
+    if (!accepted || dialog.selectedFiles().isEmpty()) return;
+    const auto source_path=dialog.selectedFiles().first();
+    const auto selected_path=std::filesystem::u8path(s(source_path));
+    if (std::filesystem::is_symlink(selected_path) || !std::filesystem::is_regular_file(selected_path))
+        throw std::invalid_argument("Choose a regular file; symlinks and special files cannot be imported");
+    if (image) { QImageReader reader(source_path); reader.setDecideFormatFromContent(true); if (!reader.canRead()) throw std::invalid_argument("This file is not a supported image"); }
+    auto page=session_.record(); page.document=page_editor()->snapshot();
+    const auto imported=workspace_.import_attachment(page,after,selected_path,image);
+    session_.adopt_saved(std::move(page)); loading_=true;
+    page_editor()->apply_document(session_.record().document,q(imported.following));
+    loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links(); update_attachment_actions();
+    statusBar()->showMessage("Imported and saved a managed copy of "+q(imported.file.name),8000);
+}
+void WorkspaceWindow::export_attachment()
+{
+    const auto id=page_editor()->current_attachment_id(); const auto info=workspace_.attachment(id);
+    if (!info) throw std::runtime_error("Attachment metadata is unavailable");
+    const auto source=workspace_.attachment_path(id);
+    QFileDialog dialog(this,"Save a copy of attachment",q(workspace_.directory().u8string()));
+    dialog.setObjectName("attachmentExport"); dialog.setOption(QFileDialog::DontUseNativeDialog);
+    dialog.setAcceptMode(QFileDialog::AcceptSave); dialog.selectFile(q(info->name));
+    const bool accepted=dialog.exec()==QDialog::Accepted; activateWindow(); page_editor()->setFocus();
+    if (!accepted || dialog.selectedFiles().isEmpty()) return;
+    const auto destination=std::filesystem::weakly_canonical(std::filesystem::u8path(s(dialog.selectedFiles().first())));
+    const auto relative=destination.lexically_relative(workspace_.directory()/"attachments");
+    if (relative.empty() || *relative.begin()!="..") throw std::invalid_argument("Save copies outside the managed attachments directory");
+    if (destination.parent_path()==workspace_.directory()) {
+        const auto name=destination.filename().u8string();
+        if (name.rfind("nebula.sqlite3",0)==0 || name==".nebula.lock" || name=="backup-manifest.json")
+            throw std::invalid_argument("Choose a destination other than a workspace storage file");
+    }
+    QFile input(q(source.u8string())); QSaveFile output(q(destination.u8string()));
+    if (!input.open(QIODevice::ReadOnly) || !output.open(QIODevice::WriteOnly)) throw std::runtime_error("Cannot open the attachment or export destination");
+    QCryptographicHash hash(QCryptographicHash::Sha256); std::int64_t size=0;
+    while (!input.atEnd()) {
+        const auto bytes=input.read(65536);
+        if (bytes.isEmpty() && input.error()!=QFile::NoError) throw std::runtime_error("Cannot read the managed attachment");
+        hash.addData(bytes); size+=bytes.size();
+        if (output.write(bytes)!=bytes.size()) throw std::runtime_error("Cannot write the attachment copy");
+    }
+    if (size!=info->size || hash.result().toHex().toStdString()!=info->sha256) throw std::runtime_error("Managed attachment bytes differ from their import checksum");
+    if (!output.commit()) throw std::runtime_error("Cannot persist the attachment copy");
+    statusBar()->showMessage("Attachment copy saved.",6000);
+}
+void WorkspaceWindow::show_attachment_audit()
+{
+    if (!flush()) return;
+    QDialog dialog(this); dialog.setObjectName("attachmentAudit"); dialog.setWindowTitle("Managed files"); auto* layout=new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel("Registered imports remain retained for notes, undo and recovery. Cleanup removes only unregistered leftovers; backups keep independent copies.",&dialog));
+    auto* list=new QListWidget(&dialog); list->setObjectName("attachmentIssues"); layout->addWidget(list);
+    auto* state=new QLabel(&dialog); state->setWordWrap(true); layout->addWidget(state);
+    auto* refresh=new QPushButton("Check files",&dialog); layout->addWidget(refresh);
+    auto* remove=new QPushButton("Delete selected unregistered file permanently",&dialog); remove->setObjectName("removeUnusedAttachment"); remove->setEnabled(false); layout->addWidget(remove);
+    auto reload=[&]{
+        list->clear(); const auto issues=workspace_.audit_attachments();
+        for (const auto& issue:issues) {
+            auto* item=new QListWidgetItem(q(issue.message)+" — "+q(issue.path.empty()?issue.attachment_id:issue.path),list);
+            item->setData(Qt::UserRole,q(issue.path)); item->setData(Qt::UserRole+1,issue.removable);
+        }
+        state->setText(issues.empty()?"All managed attachment files are available and match their checksums.":QString::number(issues.size())+" file notices found. Registered imports and referenced files remain retained.");
+        remove->setEnabled(false);
+    };
+    connect(refresh,&QPushButton::clicked,&dialog,[&]{try {reload();} catch(const std::exception& e){state->setText(q(e.what()));}});
+    connect(list,&QListWidget::currentItemChanged,&dialog,[&](QListWidgetItem* item){remove->setEnabled(item && item->data(Qt::UserRole+1).toBool());});
+    connect(remove,&QPushButton::clicked,&dialog,[&]{
+        if (auto* item=list->currentItem()) try { workspace_.remove_unused_attachment(s(item->data(Qt::UserRole).toString())); reload(); }
+            catch(const std::exception& e) {state->setText(q(e.what()));}
+    });
+    auto* close=new QDialogButtonBox(QDialogButtonBox::Close,&dialog); layout->addWidget(close); connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::accept);
+    reload(); dialog.resize(800,450); dialog.exec(); activateWindow(); page_editor()->setFocus();
 }
 void WorkspaceWindow::reload_page(const std::string& block)
 {

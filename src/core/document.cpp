@@ -60,6 +60,8 @@ void validate(const Page& page)
         ancestors.push_back(block.id);
         if (block.kind==BlockKind::Divider && !block.runs.empty())
             throw std::invalid_argument("Divider blocks cannot contain text");
+        if (!block.attachment_id.empty() && block.kind!=BlockKind::Image && block.kind!=BlockKind::Attachment)
+            throw std::invalid_argument("Only file/image blocks can own a block attachment reference");
         for (const auto& run : block.runs) {
             if (run.text.find('\n') != std::string::npos || run.text.find('\r') != std::string::npos)
                 throw std::invalid_argument("Hard line breaks must be separate blocks");
@@ -206,6 +208,20 @@ void transfer_subtree(Page& source, Page& destination, const std::string& block_
     }
     validate(next_source); validate(next_destination);
     source=std::move(next_source); destination=std::move(next_destination);
+}
+void insert_attachment(Page& page, const std::string& after, const std::string& attachment,
+    const std::string& name, bool image, const std::string& card, const std::string& following)
+{
+    validate(page);
+    if (attachment.empty() || name.empty() || card.empty() || following.empty() || card==following)
+        throw std::invalid_argument("Attachment insertion needs identities and a file name");
+    for (const auto& block:page.blocks) if (block.id==card || block.id==following)
+        throw std::invalid_argument("Inserted blocks need fresh identities");
+    const auto start=find(page,after), end=subtree_end(page,start); auto next=page;
+    next.blocks.insert(next.blocks.begin()+end,{
+        {card,page.blocks[start].parent_id,image?BlockKind::Image:BlockKind::Attachment,{},name,false,attachment},
+        {following,page.blocks[start].parent_id,BlockKind::Paragraph,{}}});
+    validate(next); page=std::move(next);
 }
 
 Page sample_page()

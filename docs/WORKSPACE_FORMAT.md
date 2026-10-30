@@ -1,7 +1,7 @@
-# Workspace format, version 6
+# Workspace format, version 7
 
-A workspace contains `nebula.sqlite3` and `attachments/`. The database has SQLite
-application ID `0x4e454255` and `user_version = 6`. The application refuses unknown
+A workspace contains `nebula.sqlite3`, `attachments/`, and `.nebula.lock`. The database has SQLite
+application ID `0x4e454255` and `user_version = 7`. The application refuses unknown
 versions. Version 1 contained only workspace identity; upgrading to version 2
 adds the persistent record tables in one transaction and preserves that identity.
 Version 3 adds deleted-block recovery. Version 4 records deletion operation IDs and
@@ -10,7 +10,8 @@ different order. Version 5 adds divider blocks, rebuilding block/link tables in
 one transaction while preserving their records. Version 6 enables explicit
 default/custom reference labels with block payload version 2. Its marker upgrade
 preserves version 1 payloads and deleted fragments; legacy labels remain custom.
-Versions 1–5 migrate
+Version 7 adds managed attachment metadata and block payload version 3; older
+representation-only cards retain empty attachment IDs. Versions 1–6 migrate
 transactionally; existing version 3 fragments retain their content and original
 parent/next-sibling anchors.
 Failed migrations roll back. Managed attachment paths and database files cannot be
@@ -27,6 +28,7 @@ symlinks.
 | `saved_views` | Permanent ID, database, name, and versioned presentation/query settings. |
 | `links` | Rebuildable source page/block/run to target page/block edges, indexed by target identity. |
 | `deleted_blocks` | Deleted subtree fragments, original parent/next sibling, deletion operation ID, original position, page, timestamp, and restored state; saved atomically with page edits. |
+| `attachments` | Permanent file ID, original basename, byte count, SHA-256, and image/file presentation flag. Bytes live in the managed directory, not SQLite BLOBs. |
 
 Block kinds are paragraph (0), heading (1), bullet (2), to-do (3), image card (4),
 attachment card (5), and divider (6). Dividers have no text runs. Positions are
@@ -34,20 +36,22 @@ unique within a page. The block vector is
 tree preorder; roots have a null parent, and descendants are contiguous. A deferred
 composite foreign key requires parents to belong to the same page. The core
 additionally validates active ancestry, cycles, IDs, and paragraph boundaries.
-Pages always have at least one block. Image/file cards currently contain labels
-and representations; they do not establish managed attachment ownership.
+Pages always have at least one block. Image/file cards with an attachment ID own
+a reference to managed metadata/bytes. Legacy cards with empty IDs retain their
+label-only representation.
 
-Block payload JSON version 2 contains `version`, `runs`, `asset_label`, and
-`checked`. Every run has UTF-8 `text`, `bold`, and `italic`. An optional `reference`
+Block payload JSON version 3 contains `version`, `runs`, `asset_label`,
+`attachment_id`, and `checked`. Every run has UTF-8 `text`, `bold`, and `italic`. An optional `reference`
 contains `kind` (page 0 or block 1) and either permanent `target`, or an
 `unresolved_name` with optional database `scope`. Exactly one target form is valid.
-Version 2 references also require a boolean `custom_label`. True preserves explicit
+Versions 2–3 references also require a boolean `custom_label`. True preserves explicit
 label text; false derives a current label by stable ID and uses stored text as an
 unavailable-target fallback. Readers accept version 1 payloads with all labels
 treated as custom. Absent name/scope fields in older version 1 payloads mean empty strings. Unresolved
 names are never bound by title during load, rendering, indexing, or navigation.
 An optional `asset`
-contains `image` and `label`. Soft breaks use U+2028; hard paragraph boundaries are
+contains `image`, `label`, and (in version 3) `attachment_id`. Version 1–2 blocks
+and inline assets have empty attachment IDs. Soft breaks use U+2028; hard paragraph boundaries are
 separate blocks. QTextDocument/HTML serialization is never authoritative. Unknown
 payload versions and malformed or mistyped fields fail explicitly.
 
@@ -149,10 +153,12 @@ returned fragments restored. Recovery persists across restart and backup; this i
 deleted-block recovery, not version history for every text change inside a block.
 
 `nebula_workspace backup SOURCE NEW_DESTINATION` uses SQLite's online backup API
-with a read-only source connection, then copies the attachment directory. It
-rejects existing destinations, destinations within the source, symlinks, and
-special attachment files; failed output is removed. `restore` makes a fresh copy
-and validates/migrates that copy without modifying the backup. No overwrite-based
-restore exists. A manifest, managed-asset consistency, and retention/reconciliation
-rules remain necessary before claiming complete attachment recovery. Do not modify
-attachment files externally during backup.
+with a read-only source connection and a shared attachment lock, copies immutable
+attachment bytes, verifies registered hashes/availability, and writes a versioned
+database/file manifest. Existing/nested destinations, symlinks, special files and
+missing/changed managed bytes are rejected; failed output is removed. Restore
+verifies the complete manifest before creating a fresh copy, then validates and
+migrates that copy without modifying the backup. Legacy backups without a manifest
+remain accepted only for pre-7 schemas. No overwrite-based restore exists.
+The precise file format, import ordering, retained-file cleanup policy and
+manifest rules are in [ATTACHMENTS.md](ATTACHMENTS.md).

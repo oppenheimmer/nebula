@@ -32,6 +32,16 @@ struct BlockTransfer {
     std::int64_t source_revision = 0, destination_revision = 0;
     bool applied = true;
 };
+struct AttachmentInfo {
+    std::string id, name, sha256;
+    std::int64_t size = 0;
+    bool image = false;
+};
+struct ImportedAttachment { AttachmentInfo file; std::string card, following; };
+struct AttachmentIssue {
+    std::string path, attachment_id, message;
+    bool removable = false, prevents_backup = false;
+};
 
 class Workspace {
 public:
@@ -61,6 +71,13 @@ public:
     std::optional<std::string> reference_label(const Reference& reference) const;
     PageRecord create_reference_target(PageRecord& source, const ReferenceLocation& location,
                                        const std::string& database, const std::string& title);
+    ImportedAttachment import_attachment(PageRecord& page, const std::string& after,
+        const std::filesystem::path& source, bool image);
+    std::optional<AttachmentInfo> attachment(const std::string& id) const;
+    std::vector<AttachmentInfo> attachments() const;
+    std::filesystem::path attachment_path(const std::string& id) const;
+    std::vector<AttachmentIssue> audit_attachments() const;
+    void remove_unused_attachment(const std::string& relative_path);
     void trash_page(const std::string& id, bool trashed);
     std::vector<DeletedBlockGroup> deleted_blocks() const;
     PageRecord restore_deleted_blocks(const std::string& id);
@@ -83,6 +100,7 @@ private:
     PageRecord create_page_in_transaction(const std::string& database, const std::string& title,
         const std::map<std::string,PropertyValue>& properties, const std::vector<Block>& blocks);
     void save_page_in_transaction(PageRecord& page);
+    std::vector<AttachmentIssue> audit_attachments_unlocked() const;
 };
 
 } // namespace nebula

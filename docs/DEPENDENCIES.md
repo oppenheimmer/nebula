@@ -68,6 +68,14 @@ the editor's versioned clipboard payload. It uses the existing Qt Core dependenc
 internally, exposes standard C++ values, and has no SQLite or Widgets dependency.
 The editor does not link the storage module.
 
+`nebula_files` provides managed-file copy/flush/locking and backup manifests. It
+uses the existing Qt Core SHA-256/JSON facilities and a narrow Linux/macOS file
+adapter; no separate hashing or image library was added. The desktop previews
+images using Qt Gui's existing image readers. Filesystem operations require
+regular files, durable directory/file flushes, same-directory hard links and Unix
+shared/exclusive locks. Linux checks do not establish macOS filesystem behavior;
+M10 must validate that adapter and the image-reader/plugin distribution.
+
 ## Licensing and references
 
 The user selected MIT for Nebula's own source on 2026-10-29. The root `LICENSE`

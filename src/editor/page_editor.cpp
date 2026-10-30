@@ -21,6 +21,8 @@
 #include <QApplication>
 #include <QCompleter>
 #include <QAbstractItemView>
+#include <QCache>
+#include <QImageReader>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -43,6 +45,7 @@ constexpr int RefName = QTextFormat::UserProperty + 9;
 constexpr int RefScope = QTextFormat::UserProperty + 10;
 constexpr int RefCustom = QTextFormat::UserProperty + 11;
 constexpr int PageTitle = QTextFormat::UserProperty + 12;
+constexpr int AttachmentId = QTextFormat::UserProperty + 13;
 constexpr int CardObject = QTextFormat::UserObject + 1;
 constexpr auto ClipboardFormat = "application/x-nebula-blocks+json";
 
@@ -52,10 +55,11 @@ class CardRenderer final : public QObject, public QTextObjectInterface {
     Q_OBJECT
     Q_INTERFACES(QTextObjectInterface)
 public:
-    explicit CardRenderer(QObject* parent) : QObject(parent) {}
+    explicit CardRenderer(QObject* parent,std::function<std::optional<std::string>(const std::string&)> resolve)
+        : QObject(parent),resolve_(std::move(resolve)),images_(32*1024) {}
     QSizeF intrinsicSize(QTextDocument*, int, const QTextFormat& format) override
     {
-        return {340, format.boolProperty(CardImage) ? 100.0 : 48.0};
+        return {340, format.boolProperty(CardImage) ? (format.stringProperty(AttachmentId).isEmpty()?100.0:220.0) : 48.0};
     }
     void drawObject(QPainter* painter, const QRectF& rect, QTextDocument*, int,
                     const QTextFormat& format) override
@@ -65,6 +69,32 @@ public:
         painter->setPen(QColor("#a6bac3"));
         painter->setBrush(QColor(image ? "#e3eff0" : "#f0f2f4"));
         painter->drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6);
+        const auto identity=format.stringProperty(AttachmentId).toStdString();
+        if (!identity.empty()) {
+            const auto path=resolve_(identity); QString label=format.stringProperty(AssetLabel);
+            QImage* preview=nullptr;
+            if (path && image) {
+                const auto key=QString::fromStdString(identity); preview=images_.object(key);
+                if (!preview) {
+                    QImageReader reader(QString::fromStdString(*path)); reader.setDecideFormatFromContent(true);
+                    const auto size=reader.size();
+                    if (size.isValid() && qint64(size.width())*size.height()<=40000000) {
+                        reader.setScaledSize(size.scaled(QSize(640,480),Qt::KeepAspectRatio));
+                        auto decoded=reader.read();
+                        if (!decoded.isNull()) { images_.insert(key,new QImage(decoded),std::max(1,int(decoded.sizeInBytes()/1024))); preview=images_.object(key); }
+                    }
+                }
+            }
+            if (!path) label="Unavailable: "+label;
+            else if (image && !preview) label="Preview unavailable: "+label;
+            if (preview) {
+                const auto area=rect.adjusted(8,8,-8,-38); const auto size=QSizeF(preview->size()).scaled(area.size(),Qt::KeepAspectRatio);
+                painter->drawImage(QRectF(area.center()-QPointF(size.width()/2,size.height()/2),size),*preview);
+            }
+            painter->setPen(QColor("#263c45"));
+            painter->drawText(image?rect.adjusted(10,rect.height()-34,-10,-6):rect.adjusted(16,8,-10,-8),Qt::AlignVCenter|Qt::TextWordWrap,label);
+            painter->restore(); return;
+        }
         if (image) {
             painter->setPen(Qt::NoPen);
             painter->setBrush(QColor("#74a5a4"));
@@ -78,6 +108,9 @@ public:
                           format.stringProperty(AssetLabel));
         painter->restore();
     }
+private:
+    std::function<std::optional<std::string>(const std::string&)> resolve_;
+    QCache<QString,QImage> images_;
 };
 
 QTextCharFormat run_format(const Run& run)
@@ -100,6 +133,7 @@ QTextCharFormat run_format(const Run& run)
         format.setObjectType(CardObject);
         format.setProperty(CardImage, run.asset->image);
         format.setProperty(AssetLabel, QString::fromStdString(run.asset->label));
+        format.setProperty(AttachmentId,QString::fromStdString(run.asset->attachment_id));
     }
     return format;
 }
@@ -108,7 +142,7 @@ Block read_block(const QTextBlock& qt_block, int start=0, int end=std::numeric_l
 {
     const auto format=qt_block.blockFormat();
     Block block{format.stringProperty(Id).toStdString(),format.stringProperty(ParentId).toStdString(),
-        BlockKind(format.intProperty(Kind)),{},format.stringProperty(AssetLabel).toStdString(),format.boolProperty(Checked)};
+        BlockKind(format.intProperty(Kind)),{},format.stringProperty(AssetLabel).toStdString(),format.boolProperty(Checked),format.stringProperty(AttachmentId).toStdString()};
     for (auto it=qt_block.begin();!it.atEnd();++it) {
         const auto fragment=it.fragment();
         if (!fragment.isValid()) continue;
@@ -120,7 +154,7 @@ Block read_block(const QTextBlock& qt_block, int start=0, int end=std::numeric_l
         if (character.hasProperty(RefTarget)) run.reference=Reference{ReferenceKind(character.intProperty(RefKind)),
             character.stringProperty(RefTarget).toStdString(),character.stringProperty(RefName).toStdString(),character.stringProperty(RefScope).toStdString(),
             !character.hasProperty(RefCustom) || character.boolProperty(RefCustom)};
-        if (character.objectType()==CardObject) run.asset=Asset{character.boolProperty(CardImage),character.stringProperty(AssetLabel).toStdString()};
+        if (character.objectType()==CardObject) run.asset=Asset{character.boolProperty(CardImage),character.stringProperty(AssetLabel).toStdString(),character.stringProperty(AttachmentId).toStdString()};
         block.runs.push_back(std::move(run));
     }
     return block;
@@ -164,6 +198,7 @@ void apply_block_format(QTextCursor& cursor,const Block& block,int level)
     format.setProperty(ParentId,QString::fromStdString(block.parent_id));
     format.setProperty(Kind,int(block.kind)); format.setProperty(AssetLabel,QString::fromStdString(block.asset_label));
     format.setProperty(Checked,block.checked); format.setIndent(level); format.setBottomMargin(10);
+    format.setProperty(AttachmentId,QString::fromStdString(block.attachment_id));
     format.setHeadingLevel(block.kind==BlockKind::Heading?1:0); cursor.setBlockFormat(format);
     if (block.kind==BlockKind::Bullet || block.kind==BlockKind::Todo) {
         QTextListFormat list; list.setStyle(QTextListFormat::ListDisc); list.setIndent(level+1); cursor.createList(list);
@@ -214,7 +249,7 @@ PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
         else if (drag_position_.y()>viewport()->height()-24) amount=20;
         if (amount) { verticalScrollBar()->setValue(verticalScrollBar()->value()+amount); update_drop(); }
     });
-    document()->documentLayout()->registerHandler(CardObject, new CardRenderer(this));
+    document()->documentLayout()->registerHandler(CardObject, new CardRenderer(this,[this](const std::string& id){return attachment_resolver_?attachment_resolver_(id):std::nullopt;}));
     connect(this, &QTextEdit::cursorPositionChanged, viewport(), QOverload<>::of(&QWidget::update));
     connect(this, &QTextEdit::textChanged, viewport(), QOverload<>::of(&QWidget::update));
     set_page({"untitled", {{"first-block", "", BlockKind::Paragraph, {}}}});
@@ -307,6 +342,7 @@ void PageEditor::write_page(const Page& page, const QString& focus_id)
         format.setProperty(Kind, static_cast<int>(block.kind));
         format.setProperty(AssetLabel, QString::fromStdString(block.asset_label));
         format.setProperty(Checked, block.checked);
+        format.setProperty(AttachmentId,QString::fromStdString(block.attachment_id));
         format.setIndent(level);
         format.setBottomMargin(10);
         format.setHeadingLevel(block.kind == BlockKind::Heading ? 1 : 0);
@@ -333,7 +369,7 @@ void PageEditor::write_page(const Page& page, const QString& focus_id)
         }
         if (block.runs.empty() && (block.kind == BlockKind::Image || block.kind == BlockKind::Attachment)) {
             Run run;
-            run.asset = Asset{block.kind == BlockKind::Image, block.asset_label};
+            run.asset = Asset{block.kind == BlockKind::Image, block.asset_label,block.attachment_id};
             cursor.insertText(QString(QChar::ObjectReplacementCharacter), run_format(run));
         } else {
             for (const auto& run : block.runs) {
@@ -433,6 +469,22 @@ void PageEditor::set_page_title(const QString& title)
 void PageEditor::set_reference_label_resolver(std::function<std::optional<std::string>(const Reference&)> resolver)
 {
     label_resolver_=std::move(resolver);
+}
+void PageEditor::set_attachment_resolver(std::function<std::optional<std::string>(const std::string&)> resolver)
+{
+    attachment_resolver_=std::move(resolver); viewport()->update();
+}
+void PageEditor::apply_document(const Page& page,const QString& focus)
+{
+    if (page.id!=page_id_) throw std::invalid_argument("Use set_page when navigating to a different page");
+    write_page(page,focus);
+}
+std::string PageEditor::current_attachment_id() const
+{
+    auto cursor=textCursor(); const auto block=cursor.blockFormat().stringProperty(AttachmentId);
+    if (!block.isEmpty()) return block.toStdString();
+    if (cursor.positionInBlock()<cursor.block().length()-1) cursor.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
+    return cursor.charFormat().stringProperty(AttachmentId).toStdString();
 }
 void PageEditor::refresh_reference_labels(const Page* before, const QString& before_title)
 {
@@ -571,6 +623,7 @@ void PageEditor::normalize(const Page& before)
             && !block.text().contains(QChar::ObjectReplacementCharacter)) {
             format.setProperty(Kind, static_cast<int>(BlockKind::Paragraph));
             format.clearProperty(AssetLabel);
+            format.clearProperty(AttachmentId);
         }
         if (format != block.blockFormat()) {
             QTextCursor cursor(block);
@@ -600,6 +653,7 @@ void PageEditor::split_block(QTextCursor& cursor, bool exit_empty_list)
     format.setMarker(original_kind == BlockKind::Todo ? QTextBlockFormat::MarkerType::Unchecked
                                                      : QTextBlockFormat::MarkerType::NoMarker);
     format.clearProperty(AssetLabel);
+    format.clearProperty(AttachmentId);
     format.setProperty(Checked, false);
     cursor.insertBlock(format, QTextCharFormat{});
     if (!list && cursor.currentList())
@@ -878,8 +932,9 @@ void PageEditor::set_block_kind(BlockKind kind)
     for (auto& block : page.blocks) {
         if (block.id == id.toStdString()) {
             block.kind = kind;
-            if (kind != BlockKind::Image && kind != BlockKind::Attachment)
-                block.asset_label.clear();
+            if (kind != BlockKind::Image && kind != BlockKind::Attachment) {
+                block.asset_label.clear(); block.attachment_id.clear();
+            }
         }
     }
     write_page(page, id);
