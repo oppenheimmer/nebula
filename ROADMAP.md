@@ -2898,7 +2898,12 @@ begin as part of this shutdown.
   trash and managed-file create/verify checks and all production interchange.
   A final matching CMake edit links that fixture only to storage, removing its
   unused direct interchange/Qt Core dependencies. The local package check below
-  preceded this final target-link change; fresh CI must verify that final graph.
+  preceded this final target-link change; fresh CI's GCC build/CTest step passed
+  for implementation `347beb28c83e9ecff0347ef43655ed405e1275e1`, verifying the
+  final graph. Formatting also passed on that runner. The remaining compiler,
+  sanitizer, fuzz, package and real-OS desktop steps were still running when this
+  cleanup record was finalized; their completion is not claimed here. See
+  [run 41062711159](https://github.com/oppenheimmer/nebula/actions/runs/41062711159).
 - **Verification before reclaiming builds:** Bash syntax and launcher regressions
   passed; container `format --check` passed. The full isolated Debian package
   check rebuilt the retained fixture with GCC 14.2/Qt 6.8.2 and passed install,
@@ -2909,8 +2914,10 @@ begin as part of this shutdown.
   nine behavior cases (11 including setup/cleanup), using OpenSSL 3.5.7.
   Real OS input/reader acceptance was not repeated for this tooling removal.
 - **Local space recovery:** the main checkout fell from 1,352,404,992 bytes
-  (about 1.26 GiB) to about 9.1 MiB including Git history; source/docs outside Git
-  occupy about 1.6 MiB. Removed ignored build output, sanitizer/fuzz/transfer
+  (about 1.26 GiB) to about 2.6 MiB including Git history; source/docs outside Git
+  occupy about 1.6 MiB. `git gc --no-prune` compressed the retained objects;
+  `git fsck --full` passed, with unreachable objects preserved. Removed ignored
+  build output, sanitizer/fuzz/transfer
   fixtures, speech logs, preview packages and index caches. Also removed 12
   confirmed generated Nebula build folders in old temporary snapshots
   (248,311,808 bytes, about 237 MiB), preserving their sources and all workspaces,
@@ -2933,6 +2940,10 @@ begin as part of this shutdown.
   34 gotchas, accurate release/audit dependencies and `git diff --check`.
   Scope scanning retains only third-party license identifiers for the withdrawn
   targets.
+- Cleanup commits `0362fcc` and `347beb2` were pushed to `origin/main` with the
+  configured author and subject-only messages. Final documentation changes record
+  compression and verification outcomes only; they do not require rebuilding the
+  removed local images. Markdown heading links and Git integrity checks passed.
 
 ## Technical references discussed
 
