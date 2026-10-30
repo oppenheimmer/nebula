@@ -622,11 +622,11 @@ Deliverables: native FreeBSD and OpenBSD packages for amd64, using the same core
 and workspace format, with separate platform verification and installation
 instructions. Other BSD systems and architectures are outside this milestone.
 
-- [ ] M10.1 Compile and smoke-test the core, storage, and desktop targets on a
+- [x] M10.1 Compile and smoke-test the core, storage, and desktop targets on a
   real FreeBSD amd64 machine, VM or runner. Keep dependencies in that isolated
   development environment; run applicable tests and record OS version, compiler,
   Qt, SQLite, display environment and actual outcomes.
-- [ ] M10.2 Repeat the build and applicable checks independently on OpenBSD amd64
+- [x] M10.2 Repeat the build and applicable checks independently on OpenBSD amd64
   in an isolated machine, VM or runner, recording the same environment details.
 - [ ] M10.3 Resolve issues found by M10.1/M10.2; choose and document minimum OS,
   compiler and dependency versions separately for FreeBSD and OpenBSD. Confirm
@@ -1031,7 +1031,7 @@ problems remain in the risk register until reproduced.
 
 ### BUG-021 — Large export read transactions can delay GUI autosave
 
-- **Milestone/state:** M08.4/M08.13/M09.2; Fixed and verified on Linux. Pending
+- **Milestone/state:** M08.4/M08.13/M09.2; Fixed and verified on Linux, FreeBSD and OpenBSD. Pending
   edits remain available; no lost saved notes were observed.
 - **Environment/reproduction:** pinned Debian 13 Docker, Qt 6.8.2, SQLite 3.46.1,
   GCC Debug ASan/UBSan. Type in the full window while a second process repeatedly
@@ -1053,7 +1053,25 @@ problems remain in the risk register until reproduced.
   during an active source transaction. GCC, Clang and ASan/UBSan pass 15/15
   groups; native Xwayland passes all interaction/reliability cases. The expanded
   worker covers JSON and Markdown without any save-failure status. M08.13 is
-  complete again; both BSD systems will separately recheck this later source.
+  complete again. Both native BSD guests independently passed this later source
+  in run 41033901370, including the new regression and snapshot invariants.
+
+### BUG-022 — Installed documentation linked to omitted project files
+
+- **Milestone/state:** M09.3; Fixed and verified. Broken local navigation in the
+  development package's documentation.
+- **Environment/reproduction:** Debian 13 amd64 development `.deb`. The installed
+  README and guides link to `LICENSE`, `AGENTS.md` and `ROADMAP.md`, but the install
+  manifest initially omitted those three files.
+- **Expected/actual:** these relative links resolve; the target files were absent
+  from the package. The separate MIT copyright notice was already included.
+- **Diagnosis/resolution:** install all linked project documents, retain their
+  original names/relative layout and check their presence after package install.
+  Debian slim's separate documentation-exclusion policy required an explicit
+  include for Nebula docs in the verification image (G30).
+- **Verification:** the new presence check failed before the fix; after inclusion,
+  the complete isolated offline package check passes, including reinstall/removal
+  preservation, window editing/search, interchange, backup/restore and TLS.
 
 For each future defect, record:
 
@@ -1177,6 +1195,13 @@ milestone, evidence, and the resulting action.
   M08):** BUG-020 reproduced a false integrity failure after another connection
   committed. A normal FTS read within the export snapshot refreshes SQLite 3.46.1
   state without dropping integrity or canonical-content checks.
+
+- **G30 — Slim images can list documentation excluded during unpacking (2026-10-30,
+  M09):** `dpkg-query -L` listed the README while no Markdown existed on disk.
+  Debian slim's dpkg path-exclude policy intentionally drops it. The verification
+  image explicitly includes `/usr/share/doc/nebula/*` before installation so local
+  documentation checks exercise the actual files. That include applies only to
+  the verification image.
 
 ## Suggestions
 
@@ -2672,6 +2697,50 @@ begin as part of this shutdown.
   address/engine. Merely discovering those facilities does not complete actual
   OS IME/Orca acceptance; M08.2 stays open. Both native BSD guests will recheck
   the new source and print their Qt package/test metadata.
+
+### Native source verification and package-documentation closure — 2026-10-30
+
+- Completed M10.1 and M10.2 independently at implementation revision
+  `01f9535d45a42bd3ef31f75d1b10725362f075ad`:
+  [native run 41033901370](https://github.com/oppenheimmer/nebula/actions/runs/41033901370).
+  Each guest passed core-only 2/2 and the full 15/15 CTest groups with Clang
+  warnings-as-errors, including BUG-021, private snapshot consistency/cleanup,
+  file locks, migration/recovery, attachments, references, interchange and TLS.
+
+| Native guest | Recorded environment | Concurrent backup / JSON / Markdown |
+| --- | --- | --- |
+| FreeBSD amd64 | 14.3-RELEASE GENERIC; Clang 19.1.7; CMake 3.31.12; SQLite 3.53.4; Qt 6.11.2 (package 6.11.2_1); offscreen; OpenSSL 3.0.16 | 69,496,832-byte DB; two cycles, 13 typing events, 12 autosaves, zero save failures |
+| OpenBSD amd64 | 7.8 GENERIC.MP#28; Clang 19.1.7; CMake 3.31.8; SQLite 3.50.7; Qt 6.8.3 (package 6.8.3p4); offscreen; LibreSSL 4.2.0 | 69,480,448-byte DB; one cycle, 16 typing events, 15 autosaves, zero save failures |
+
+- Each BSD run intentionally skipped the one container-specific multilingual
+  font-profile case; native font/desktop/input-method/reader acceptance was not
+  performed. These are native Release checks, not BSD sanitizer results. M10.3–
+  M10.7 still require supported-baseline decisions, remaining platform/desktop
+  checks, actual cross-system backup/export transfer and native packages. M10
+  remains In progress; these runs establish no supported BSD desktop release.
+- Fixed BUG-022 after checking installed documentation navigation. Package tests
+  now require the README, original LICENSE, project instructions, roadmap and
+  install guide on disk. Added an app-specific dpkg path include to the slim
+  **verification image** so it retains those docs. The complete offline package
+  check passes after this change, including all 60 desktop and nine preview cases.
+- Current local preview artifact (replacing the earlier checkpoint's build):
+  `build-container-gcc/packages/nebula-0.1.0~dev1-x86_64.deb`, SHA-256
+  `313c29e387ebd46b9df0dc9aef1d9f666009306add00a0b034d306418d4f98a2`.
+  The binary implementation is `01f9535` plus the locally verified package-doc
+  fix; subsequent work-log bookkeeping is not embedded retrospectively. Package
+  output stays ignored. A pinned recipe is verified; bit-identical builds are
+  not claimed.
+- Final source documentation links/fences, 78 unique milestone IDs, shell syntax,
+  formatter and `git diff --check` pass. Existing commit/push authorization was
+  used with configured authorship and no trailers. M08.2, M09.4 and M10.3–M10.7
+  remain open; no milestone or public release is marked complete without its
+  remaining acceptance evidence.
+- Real Linux CI passed implementation `01f9535d45a42bd3ef31f75d1b10725362f075ad`:
+  [run 41033879972](https://github.com/oppenheimmer/nebula/actions/runs/41033879972).
+  This includes GCC, Clang, core-only, ASan/UBSan, format, five coverage-guided
+  parsers, Debian install/offline-runtime checks and ten interaction repetitions.
+  The later package-documentation inclusion fix was checked locally with the full
+  package script; this earlier CI run is not claimed to certify that later edit.
 
 ## Technical references discussed
 

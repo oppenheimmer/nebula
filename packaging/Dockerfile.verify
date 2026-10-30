@@ -5,6 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libqt6widgets6 libqt6network6 qt6-qpa-plugins libsqlite3-0 libxcb-cursor0 \
         ca-certificates fonts-dejavu-core libqt6test6 fonts-noto-cjk fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
+# Debian slim excludes documentation by default. Keep this package's docs so the
+# verification checks its local navigation as on a normal desktop installation.
+RUN printf 'path-include=/usr/share/doc/nebula/*\n' > /etc/dpkg/dpkg.cfg.d/zz-nebula-docs
 COPY nebula.deb /tmp/nebula.deb
 RUN --network=none dpkg -i /tmp/nebula.deb
 COPY package-fixture /opt/package-fixture

@@ -4,6 +4,9 @@ test -x /usr/bin/nebula
 test -x /usr/bin/nebula_workspace
 test -f /usr/share/applications/nebula.desktop
 test -f /usr/share/doc/nebula/copyright
+for name in README.md LICENSE AGENTS.md ROADMAP.md docs/INSTALL.md; do
+    test -f "/usr/share/doc/nebula/$name"
+done
 if command -v c++ >/dev/null 2>&1 || command -v cmake >/dev/null 2>&1; then
     printf '%s\n' 'Package verification must use a runtime environment without a build toolchain.' >&2
     exit 1
