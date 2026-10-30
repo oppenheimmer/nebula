@@ -8,6 +8,16 @@
 namespace nebula {
 namespace {
 using sql::Statement;
+LinkEdge read_edge(const Statement& row) {
+    LinkEdge edge; edge.source_page=row.text(0); edge.source_block=row.text(1);
+    edge.source_title=row.text(2); edge.target_id=row.text(3); edge.kind=ReferenceKind(row.number(4));
+    edge.run_index=row.number(5); edge.position=row.number(6);
+    Block block; decode_block(block,row.text(7));
+    for (const auto& run:block.runs) edge.source_context+=run.text;
+    if (edge.source_context.empty()) edge.source_context=block.asset_label;
+    if (edge.run_index>=0 && std::size_t(edge.run_index)<block.runs.size()) edge.label=block.runs[std::size_t(edge.run_index)].text;
+    return edge;
+}
 void name_required(const std::string& name) {
     if (name.empty() || name.find('\0') != std::string::npos) throw std::invalid_argument("A nonempty name is required");
 }
@@ -365,9 +375,30 @@ std::vector<View> Workspace::views(const std::string& database) const
 std::vector<LinkEdge> Workspace::backlinks(ReferenceKind kind, const std::string& id) const
 {
     if (id.empty()) return {};
-    Statement query(database_.get(), "SELECT l.source_page,l.source_block,p.title,l.target_id,l.target_kind FROM links l JOIN pages p ON p.id=l.source_page JOIN databases d ON d.id=p.database_id WHERE NOT p.trashed AND NOT d.trashed AND ((l.target_kind=? AND l.target_id=?) OR (?=0 AND l.target_kind=1 AND l.target_id IN (SELECT id FROM blocks WHERE page_id=?))) ORDER BY p.title,l.source_block,l.run_index");
+    Statement query(database_.get(), "SELECT l.source_page,l.source_block,p.title,l.target_id,l.target_kind,l.run_index,b.position,b.payload FROM links l JOIN pages p ON p.id=l.source_page JOIN databases d ON d.id=p.database_id JOIN blocks b ON b.id=l.source_block WHERE NOT p.trashed AND NOT d.trashed AND ((l.target_kind=? AND l.target_id=?) OR (?=0 AND l.target_kind=1 AND l.target_id IN (SELECT id FROM blocks WHERE page_id=?))) ORDER BY p.title,b.position,l.run_index");
     query.bind(1,int(kind)).bind(2,id).bind(3,int(kind)).bind(4,id); std::vector<LinkEdge> result;
-    while (query.row()) result.push_back({query.text(0),query.text(1),query.text(2),query.text(3),ReferenceKind(query.number(4))});
+    while (query.row()) result.push_back(read_edge(query));
+    return result;
+}
+std::vector<LinkEdge> Workspace::outgoing_links(const std::string& id) const
+{
+    if (resolve_reference({ReferenceKind::Page,id}).state!=ReferenceState::Available) return {};
+    Statement query(database_.get(),"SELECT l.source_page,l.source_block,p.title,l.target_id,l.target_kind,l.run_index,b.position,b.payload FROM links l JOIN blocks b ON b.id=l.source_block JOIN pages p ON p.id=l.source_page WHERE l.source_block IN (SELECT id FROM blocks WHERE page_id=?) ORDER BY b.position,l.run_index");
+    query.bind(1,id); std::vector<LinkEdge> result;
+    while (query.row()) result.push_back(read_edge(query));
+    const auto page=load_page(id);
+    for (std::size_t position=0;position<page.document.blocks.size();++position) {
+        const auto& block=page.document.blocks[position]; std::string context;
+        for (const auto& run:block.runs) context+=run.text;
+        for (std::size_t i=0;i<block.runs.size();++i) {
+            const auto& run=block.runs[i]; if (!run.reference || !run.reference->target_id.empty()) continue;
+            LinkEdge edge; edge.source_page=id; edge.source_block=block.id; edge.source_title=page.title;
+            edge.kind=run.reference->kind; edge.label=run.text; edge.source_context=context;
+            edge.unresolved_name=run.reference->unresolved_name; edge.database_scope=run.reference->database_scope;
+            edge.position=std::int64_t(position); edge.run_index=std::int64_t(i); result.push_back(std::move(edge));
+        }
+    }
+    std::sort(result.begin(),result.end(),[](const auto& a,const auto& b){return a.position==b.position?a.run_index<b.run_index:a.position<b.position;});
     return result;
 }
 void Workspace::rebuild_links()

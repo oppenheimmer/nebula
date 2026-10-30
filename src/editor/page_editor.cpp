@@ -317,6 +317,47 @@ Page PageEditor::snapshot() const
 
 QString PageEditor::current_block_id() const { return textCursor().blockFormat().stringProperty(Id); }
 
+EditorPosition PageEditor::capture_position() const
+{
+    const auto cursor=textCursor(); auto anchor=cursor; anchor.setPosition(cursor.anchor());
+    return {current_block_id().toStdString(),anchor.blockFormat().stringProperty(Id).toStdString(),
+        cursor.positionInBlock(),anchor.positionInBlock(),verticalScrollBar()->value()};
+}
+bool PageEditor::restore_position(const EditorPosition& position)
+{
+    auto locate=[&](const std::string& id) {
+        for (auto block=document()->begin();block.isValid();block=block.next())
+            if (block.blockFormat().stringProperty(Id).toStdString()==id) return block;
+        return QTextBlock{};
+    };
+    const auto block=locate(position.block), anchor=locate(position.anchor_block);
+    if (!block.isValid()) { go_to_block(document()->begin().blockFormat().stringProperty(Id)); return false; }
+    QTextCursor cursor(document());
+    const auto end=block.position()+std::clamp(position.offset,0,block.length()-1);
+    cursor.setPosition(anchor.isValid()?anchor.position()+std::clamp(position.anchor_offset,0,anchor.length()-1):end);
+    cursor.setPosition(end,QTextCursor::KeepAnchor); setTextCursor(cursor); ensureCursorVisible();
+    verticalScrollBar()->setValue(position.scroll); return true;
+}
+std::optional<Reference> PageEditor::current_reference() const
+{
+    auto cursor=textCursor();
+    if (cursor.hasSelection()) cursor.setPosition(cursor.selectionStart());
+    const auto before=cursor.charFormat();
+    if (cursor.positionInBlock()<cursor.block().length()-1) cursor.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
+    auto format=cursor.charFormat();
+    if (!format.hasProperty(RefTarget)) format=before;
+    if (!format.hasProperty(RefTarget)) return {};
+    return Reference{ReferenceKind(format.intProperty(RefKind)),format.stringProperty(RefTarget).toStdString(),
+        format.stringProperty(RefName).toStdString(),format.stringProperty(RefScope).toStdString()};
+}
+bool PageEditor::activate_current_reference()
+{
+    const auto reference=current_reference(); if (!reference) return false;
+    if (reference->target_id.empty()) emit unresolved_reference_activated(QString::fromStdString(reference->unresolved_name),QString::fromStdString(reference->database_scope));
+    else emit reference_activated(int(reference->kind),QString::fromStdString(reference->target_id));
+    return true;
+}
+
 bool PageEditor::go_to_block(const QString& id)
 {
     for (auto block = document()->begin(); block.isValid(); block = block.next()) {
@@ -463,6 +504,9 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
     if (modifiers == Qt::AltModifier && (event->key() == Qt::Key_Up || event->key() == Qt::Key_Down)) {
         move_current(event->key() == Qt::Key_Up ? -1 : 1);
         return;
+    }
+    if (modifiers==Qt::ControlModifier && (key==Qt::Key_Return || key==Qt::Key_Enter)) {
+        typing_position_=-1; activate_current_reference(); return;
     }
     if (event->key() == Qt::Key_Tab && modifiers == Qt::NoModifier) {
         indent_current();
@@ -854,9 +898,7 @@ void PageEditor::mouseReleaseEvent(QMouseEvent* event)
         cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
         const auto format = cursor.charFormat();
         if (format.hasProperty(RefTarget)) {
-            if (!format.stringProperty(RefName).isEmpty())
-                emit unresolved_reference_activated(format.stringProperty(RefName),format.stringProperty(RefScope));
-            else emit reference_activated(format.intProperty(RefKind), format.stringProperty(RefTarget));
+            setTextCursor(cursorForPosition(event->position().toPoint())); activate_current_reference();
             event->accept();
             return;
         }

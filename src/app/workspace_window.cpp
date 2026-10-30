@@ -84,7 +84,11 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     save_state_=new QLabel("Select an entry or create a page.",page_panel); save_state_->setObjectName("saveState");
     page_layout->insertWidget(1,title_); page_layout->insertWidget(2,save_state_);
     backlinks_=new QListWidget(page_panel); backlinks_->setObjectName("backlinks"); backlinks_->setMaximumHeight(90);
+    backlinks_->setAccessibleName("Incoming references with source context");
     page_layout->addWidget(new QLabel("Backlinks — pages that link here",page_panel)); page_layout->addWidget(backlinks_);
+    outgoing_=new QListWidget(page_panel); outgoing_->setObjectName("outgoingLinks"); outgoing_->setMaximumHeight(90);
+    outgoing_->setAccessibleName("Outgoing references");
+    page_layout->addWidget(new QLabel("Outgoing links",page_panel)); page_layout->addWidget(outgoing_);
     auto* navigation=new QWidget;
     auto* navigation_layout=new QVBoxLayout(navigation);
     databases_=new QComboBox(navigation); databases_->setObjectName("databases"); databases_->setAccessibleName("Database");
@@ -109,6 +113,14 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     operation("Move block to page…","moveBlockToPage",[this]{ move_block(); })->setShortcut(QKeySequence("Ctrl+Shift+M"));
     operation("Undo block transfer","undoBlockTransfer",[this]{ undo_block_transfer(false); })->setShortcut(QKeySequence("Ctrl+Alt+Z"));
     operation("Redo block transfer","redoBlockTransfer",[this]{ undo_block_transfer(true); })->setShortcut(QKeySequence("Ctrl+Alt+Shift+Z"));
+    auto* navigation_menu=menuBar()->addMenu("&Navigate");
+    auto* back=navigation_menu->addAction("Back"); back->setObjectName("navigateBack"); back->setShortcut(QKeySequence("Alt+Left"));
+    auto* forward=navigation_menu->addAction("Forward"); forward->setObjectName("navigateForward"); forward->setShortcut(QKeySequence("Alt+Right"));
+    auto* follow=navigation_menu->addAction("Follow reference at cursor"); follow->setObjectName("followReference"); follow->setShortcut(QKeySequence("Ctrl+Return"));
+    connect(back,&QAction::triggered,this,[this]{ navigate_history(false); });
+    connect(forward,&QAction::triggered,this,[this]{ navigate_history(true); });
+    connect(follow,&QAction::triggered,this,[this]{ if (page_editor()->hasFocus()) page_editor()->activate_current_reference(); });
+    update_navigation_actions();
     addToolBarBreak();
     auto* bar=addToolBar("Database controls"); bar->setObjectName("databaseControls"); bar->setMovable(false);
     auto add=[&](const char* text,const char* name,auto callback) {
@@ -175,6 +187,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
             flush();
         } catch (const std::exception& e) { error(this,e); refresh_table(); }
     });
+    disconnect(page_editor(),&PageEditor::reference_activated,this,nullptr);
     connect(page_editor(),&PageEditor::reference_activated,this,[this](int kind,const QString& id){ follow_reference(ReferenceKind(kind),s(id)); });
     link_completer_=new QCompleter(this); link_completer_->setObjectName("wikiCompleter");
     completion_model_=new QStandardItemModel(this); link_completer_->setModel(completion_model_);
@@ -195,6 +208,13 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         statusBar()->showMessage("Unresolved link: "+name+". Select its text and use Link… to choose a target.",8000);
     });
     connect(backlinks_,&QListWidget::itemActivated,this,[this](QListWidgetItem* item){ open_page(s(item->data(Qt::UserRole).toString()),s(item->data(Qt::UserRole+1).toString())); });
+    connect(outgoing_,&QListWidget::itemActivated,this,[this](QListWidgetItem* item){
+        const auto id=item->data(Qt::UserRole+1).toString();
+        if (id.isEmpty()) {
+            page_editor()->go_to_block(item->data(Qt::UserRole+2).toString()); page_editor()->setFocus();
+            page_editor()->unresolved_reference_activated(item->data(Qt::UserRole+3).toString(),item->data(Qt::UserRole+4).toString());
+        } else follow_reference(ReferenceKind(item->data(Qt::UserRole).toInt()),s(id));
+    });
     if (workspace_.databases(true).empty()) {
         const auto db=workspace_.create_database("Journal");
         View all; all.database_id=db.id; all.name="All entries";
@@ -233,10 +253,11 @@ void WorkspaceWindow::refresh_databases()
 void WorkspaceWindow::switch_database()
 {
     if (!flush()) { QSignalBlocker guard(databases_); databases_->setCurrentIndex(databases_->findData(q(database_id_))); return; }
+    if (session_.has_page() && !history_navigation_) detached_position_=current_position();
     session_.close(); pending_=false; loading_=true;
     database_id_=s(databases_->currentData().toString());
     page_editor()->set_page({"no-page",{{"placeholder","",BlockKind::Paragraph,{}}}});
-    page_editor()->setEnabled(false); title_->clear(); title_->setEnabled(false); backlinks_->clear();
+    page_editor()->setEnabled(false); title_->clear(); title_->setEnabled(false); backlinks_->clear(); outgoing_->clear();
     update_transfer_actions();
     for (auto* bar:findChildren<QToolBar*>()) if (bar->objectName()!="databaseControls") bar->setEnabled(false);
     save_state_->setText("Select an entry or create a page.");
@@ -276,9 +297,17 @@ void WorkspaceWindow::refresh_table()
 bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
 {
     try {
-        if (session_.has_page() && session_.record().document.id==id) { if (!block.empty()) page_editor()->go_to_block(q(block)); return true; }
+        const auto previous=current_position();
+        if (session_.has_page() && session_.record().document.id==id) {
+            if (!block.empty()) {
+                if (!flush() || !page_editor()->go_to_block(q(block))) return false;
+                remember_navigation(previous); page_editor()->setFocus();
+            }
+            return true;
+        }
         if (!flush()) return false;
         const auto target=workspace_.load_page(id);
+        if (target.trashed) throw std::runtime_error("This page is in trash; restore it first");
         const int database_index=databases_->findData(q(target.database_id));
         if (database_index<0) throw std::runtime_error("This page's database is in trash");
         if (target.database_id!=database_id_) { databases_->setCurrentIndex(database_index); }
@@ -289,6 +318,7 @@ bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
         loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
         update_transfer_actions();
         if (!block.empty()) page_editor()->go_to_block(q(block));
+        remember_navigation(previous); detached_position_.reset();
         page_editor()->setFocus(); return true;
     } catch (const std::exception& e) { save_state_->setText(q(e.what())); return false; }
 }
@@ -299,10 +329,62 @@ void WorkspaceWindow::create_page(const QString& title)
 }
 void WorkspaceWindow::update_links()
 {
-    backlinks_->clear(); if (!session_.has_page()) return;
+    backlinks_->clear(); outgoing_->clear(); if (!session_.has_page()) return;
     for (const auto& edge:workspace_.backlinks(ReferenceKind::Page,session_.record().document.id)) {
-        auto* item=new QListWidgetItem(q(edge.source_title),backlinks_); item->setData(Qt::UserRole,q(edge.source_page)); item->setData(Qt::UserRole+1,q(edge.source_block));
+        auto* item=new QListWidgetItem(q(edge.source_title)+" — "+q(edge.source_context).left(100)
+            +" → "+(edge.kind==ReferenceKind::Page?QString("page"):"block ["+q(edge.target_id)+"]"),backlinks_);
+        item->setData(Qt::UserRole,q(edge.source_page)); item->setData(Qt::UserRole+1,q(edge.source_block));
+        item->setToolTip("Source block: "+q(edge.source_block)+"\nTarget: "+q(edge.target_id));
     }
+    for (const auto& edge:workspace_.outgoing_links(session_.record().document.id)) {
+        QString destination;
+        if (edge.target_id.empty()) destination="Unresolved: "+q(edge.unresolved_name);
+        else {
+            const auto target=workspace_.resolve_reference({edge.kind,edge.target_id});
+            if (!target.page_id.empty()) destination=q(workspace_.load_page(target.page_id).title);
+            if (edge.kind==ReferenceKind::Block) destination+=" / block ["+q(edge.target_id)+"]";
+            if (target.state==ReferenceState::PageTrashed || target.state==ReferenceState::DatabaseTrashed) destination+=" (in trash)";
+            else if (target.state!=ReferenceState::Available) destination="Unavailable ["+q(edge.target_id)+"]";
+        }
+        auto* item=new QListWidgetItem(q(edge.label)+" → "+destination+" — "+q(edge.source_context).left(100),outgoing_);
+        item->setData(Qt::UserRole,int(edge.kind)); item->setData(Qt::UserRole+1,q(edge.target_id));
+        item->setData(Qt::UserRole+2,q(edge.source_block)); item->setData(Qt::UserRole+3,q(edge.unresolved_name)); item->setData(Qt::UserRole+4,q(edge.database_scope));
+        item->setToolTip("Source block: "+q(edge.source_block)+"\nTarget: "+q(edge.target_id));
+    }
+}
+std::optional<WorkspaceWindow::NavigationPosition> WorkspaceWindow::current_position() const
+{
+    if (session_.has_page()) return NavigationPosition{session_.record().document.id,page_editor()->capture_position()};
+    return detached_position_;
+}
+void WorkspaceWindow::update_navigation_actions()
+{
+    findChild<QAction*>("navigateBack")->setEnabled(!back_history_.empty());
+    findChild<QAction*>("navigateForward")->setEnabled(!forward_history_.empty());
+}
+void WorkspaceWindow::remember_navigation(const std::optional<NavigationPosition>& previous)
+{
+    if (history_navigation_ || !previous || !session_.has_page()) return;
+    const auto now=page_editor()->capture_position(); const auto& old=previous->editor;
+    if (previous->page==session_.record().document.id && old.block==now.block && old.offset==now.offset
+        && old.anchor_block==now.anchor_block && old.anchor_offset==now.anchor_offset && old.scroll==now.scroll) return;
+    back_history_.push_back(*previous); if (back_history_.size()>200) back_history_.erase(back_history_.begin());
+    forward_history_.clear(); update_navigation_actions();
+}
+void WorkspaceWindow::navigate_history(bool forward)
+{
+    auto& from=forward?forward_history_:back_history_;
+    auto& to=forward?back_history_:forward_history_;
+    if (from.empty()) return;
+    const auto target=from.back(); const auto previous=current_position();
+    history_navigation_=true;
+    const bool opened=open_page(target.page);
+    history_navigation_=false;
+    if (!opened) { statusBar()->showMessage("Cannot open history destination: "+save_state_->text(),8000); return; }
+    const bool restored=page_editor()->restore_position(target.editor);
+    from.pop_back(); if (previous) to.push_back(*previous);
+    update_navigation_actions(); page_editor()->setFocus();
+    if (!restored) statusBar()->showMessage("The previous block is unavailable; opened its original page.",8000);
 }
 void WorkspaceWindow::add_property()
 {
@@ -517,7 +599,7 @@ void WorkspaceWindow::reload_page(const std::string& block)
     const auto id=session_.record().document.id;
     // These operations have committed outside the page editor. Reload its revision
     // and clear local undo so it cannot recreate transferred block identities.
-    session_.close(); open_page(id,block);
+    history_navigation_=true; session_.close(); open_page(id,block); history_navigation_=false;
 }
 void WorkspaceWindow::move_page()
 {

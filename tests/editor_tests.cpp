@@ -105,6 +105,8 @@ private slots:
     void modifier_keys_do_not_change_document_or_undo_history();
     void wiki_typing_selects_only_the_token_and_conversion_undoes();
     void wiki_composition_and_escaped_opening();
+    void positions_restore_selection_scroll_and_clamp_missing_content();
+    void keyboard_reference_activation_preserves_document();
 };
 
 void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
@@ -144,6 +146,33 @@ void EditorTests::wiki_composition_and_escaped_opening()
     QCOMPARE(requests.size(),1); QCOMPARE(requests[0][0].toString(),QString::fromUtf8(u8"[[日本語]]"));
     QCOMPARE(editor.textCursor().selectedText(),QString::fromUtf8(u8"[[日本語]]"));
     QCOMPARE(editor.snapshot().blocks.size(),std::size_t(3));
+}
+void EditorTests::positions_restore_selection_scroll_and_clamp_missing_content()
+{
+    PageEditor editor; auto page=long_page(100); ready(editor,page);
+    editor.go_to_block("block-49"); auto cursor=editor.textCursor(); cursor.setPosition(cursor.position()+3);
+    const auto anchor=cursor.position(); editor.go_to_block("block-50"); const auto end=editor.textCursor().position()+8;
+    cursor.setPosition(anchor); cursor.setPosition(end,QTextCursor::KeepAnchor); editor.setTextCursor(cursor);
+    editor.verticalScrollBar()->setValue(1234); const auto original=editor.capture_position();
+    editor.go_to_block("block-1"); QVERIFY(editor.restore_position(original));
+    QCOMPARE(editor.textCursor().anchor(),anchor); QCOMPARE(editor.textCursor().position(),end);
+    QCOMPARE(editor.verticalScrollBar()->value(),original.scroll);
+    page.blocks[50].runs={{"x"}}; editor.set_page(page); QVERIFY(editor.restore_position(original));
+    QCOMPARE(editor.textCursor().positionInBlock(),1); QCOMPARE(editor.capture_position().anchor_offset,3);
+    page.blocks.erase(page.blocks.begin()+50); editor.set_page(page); QVERIFY(!editor.restore_position(original));
+    QCOMPARE(editor.current_block_id(),QString("block-0"));
+}
+void EditorTests::keyboard_reference_activation_preserves_document()
+{
+    PageEditor editor; ready(editor,{"page",{{"ref","",BlockKind::Paragraph,{{"Jump",false,false,Reference{ReferenceKind::Block,"target"}}}},
+        {"missing","",BlockKind::Paragraph,{{"Future",false,false,Reference{ReferenceKind::Page,"","Future","db"}}}}}});
+    QSignalSpy resolved(&editor,&PageEditor::reference_activated), unresolved(&editor,&PageEditor::unresolved_reference_activated);
+    QSignalSpy changes(&editor,&QTextEdit::textChanged);
+    QTest::keyClick(&editor,Qt::Key_Return,Qt::ControlModifier); QCOMPARE(resolved.size(),1);
+    QCOMPARE(resolved[0][1].toString(),QString("target"));
+    editor.go_to_block("missing"); QTest::keyClick(&editor,Qt::Key_Enter,Qt::ControlModifier);
+    QCOMPARE(unresolved.size(),1); QCOMPARE(unresolved[0][0].toString(),QString("Future"));
+    QCOMPARE(changes.size(),0); QVERIFY(!editor.document()->isUndoAvailable());
 }
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
 {

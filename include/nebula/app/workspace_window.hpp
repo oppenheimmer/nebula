@@ -1,6 +1,7 @@
 #pragma once
 #include "nebula/app/prototype_window.hpp"
 #include "nebula/app/page_session.hpp"
+#include "nebula/editor/page_editor.hpp"
 
 class QComboBox;
 class QLineEdit;
@@ -32,6 +33,7 @@ private:
     QLineEdit* title_;
     QLabel* save_state_;
     QListWidget* backlinks_;
+    QListWidget* outgoing_;
     QTimer* autosave_;
     std::vector<PropertyDefinition> definitions_;
     std::vector<View> saved_views_;
@@ -50,6 +52,14 @@ private:
     QStandardItemModel* completion_model_;
     std::vector<LinkCandidate> completion_targets_;
     bool completing_ = false;
+    struct NavigationPosition { std::string page; EditorPosition editor; };
+    std::vector<NavigationPosition> back_history_, forward_history_;
+    std::optional<NavigationPosition> detached_position_;
+    bool history_navigation_ = false;
+    std::optional<NavigationPosition> current_position() const;
+    void remember_navigation(const std::optional<NavigationPosition>& previous);
+    void navigate_history(bool forward);
+    void update_navigation_actions();
     std::vector<LinkCandidate> link_candidates() const;
     void complete_wiki(const QString& prefix, bool active);
     void enter_wiki_link(const QString& syntax);

@@ -125,6 +125,10 @@ private slots:
     void typed_wiki_links_persist_page_heading_block_and_unresolved_targets();
     void wiki_completion_selects_a_specific_duplicate_target();
     void ambiguous_wiki_links_require_explicit_choice_or_preserve_text();
+    void keyboard_reference_follow_and_same_page_history_restore_positions();
+    void cross_database_history_preserves_selection_scroll_and_forward_branch();
+    void outgoing_and_backlink_lists_navigate_exact_blocks_with_keyboard();
+    void history_refuses_trash_and_failed_saves_without_losing_entries();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -450,7 +454,8 @@ void DesktopTests::persistent_links_navigate_and_show_backlinks()
     window.page_editor()->reference_activated(int(ReferenceKind::Page),QString::fromStdString(target.document.id));
     QCOMPARE(window.page_editor()->snapshot().id,target.document.id);
     QCOMPARE(window.findChild<QListWidget*>("backlinks")->count(),1);
-    QCOMPARE(window.findChild<QListWidget*>("backlinks")->item(0)->text(),QString("Source"));
+    QVERIFY(window.findChild<QListWidget*>("backlinks")->item(0)->text().startsWith("Source — "));
+    QVERIFY(window.findChild<QListWidget*>("backlinks")->item(0)->text().contains("Target"));
 }
 void DesktopTests::view_dialog_saves_filter_and_column_settings()
 {
@@ -770,6 +775,74 @@ void DesktopTests::ambiguous_wiki_links_require_explicit_choice_or_preserve_text
     QVERIFY(window.flush()); const auto saved=w.load_page(source.document.id).document.blocks[0].runs[0];
     QCOMPARE(saved.text,std::string("chosen")); QCOMPARE(saved.reference->target_id,desired.document.id);
     QCOMPARE(w.pages(a.id).size()+w.pages(b.id).size(),std::size_t(3));
+}
+void DesktopTests::keyboard_reference_follow_and_same_page_history_restore_positions()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto page=w.create_page(db.id,"Local navigation",{},{{"ref","",BlockKind::Paragraph,{{"Jump here",false,false,Reference{ReferenceKind::Block,"target-heading"}}}},
+        {"between","",BlockKind::Paragraph,{{"Between"}}},{"target-heading","",BlockKind::Heading,{{"Heading"}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id)); auto* editor=window.page_editor();
+    auto cursor=editor->textCursor(); cursor.setPosition(2); editor->setTextCursor(cursor);
+    QTest::keyClick(editor,Qt::Key_Return,Qt::ControlModifier);
+    QCOMPARE(editor->current_block_id(),QString("target-heading")); QVERIFY(window.findChild<QAction*>("navigateBack")->isEnabled());
+    QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier);
+    QCOMPARE(editor->current_block_id(),QString("ref")); QCOMPARE(editor->textCursor().positionInBlock(),2);
+    QTest::keyClick(editor,Qt::Key_Right,Qt::AltModifier); QCOMPARE(editor->current_block_id(),QString("target-heading"));
+    QCOMPARE(w.load_page(page.document.id).revision,page.revision);
+}
+void DesktopTests::cross_database_history_preserves_selection_scroll_and_forward_branch()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("First"), b=w.create_database("Second");
+    const auto source=w.create_page(a.id,"Long",{},long_page(90).blocks), target=w.create_page(b.id,"Target");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id)); auto* editor=window.page_editor();
+    editor->go_to_block("block-49"); auto cursor=editor->textCursor(); const auto anchor=cursor.position()+3;
+    editor->go_to_block("block-50"); const auto end=editor->textCursor().position()+8;
+    cursor.setPosition(anchor); cursor.setPosition(end,QTextCursor::KeepAnchor); editor->setTextCursor(cursor);
+    editor->verticalScrollBar()->setValue(1234); const auto original=editor->capture_position();
+    auto* databases=window.findChild<QComboBox*>("databases"); databases->setCurrentIndex(databases->findData(QString::fromStdString(b.id)));
+    QVERIFY(window.open_page(target.document.id)); QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier);
+    QCOMPARE(editor->snapshot().id,source.document.id); QCOMPARE(editor->textCursor().anchor(),anchor); QCOMPARE(editor->textCursor().position(),end);
+    QCOMPARE(editor->verticalScrollBar()->value(),original.scroll);
+    QVERIFY(window.findChild<QAction*>("navigateForward")->isEnabled());
+    const auto third=w.create_page(a.id,"Third"); QVERIFY(window.open_page(third.document.id));
+    QVERIFY(!window.findChild<QAction*>("navigateForward")->isEnabled());
+    window.findChild<QAction*>("navigateBack")->trigger(); QCOMPARE(editor->snapshot().id,source.document.id);
+}
+void DesktopTests::outgoing_and_backlink_lists_navigate_exact_blocks_with_keyboard()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto target=w.create_page(db.id,"Target",{},{{"target-heading","",BlockKind::Heading,{{"Meeting"}}}});
+    const auto source=w.create_page(db.id,"Source",{},{{"intro","",BlockKind::Paragraph,{{"Introduction"}}},
+        {"jump-source","",BlockKind::Paragraph,{{"Context before "},{"Meeting",false,false,Reference{ReferenceKind::Block,"target-heading"}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    auto* outgoing=window.findChild<QListWidget*>("outgoingLinks"); QCOMPARE(outgoing->count(),1);
+    QVERIFY(outgoing->item(0)->text().contains("Context before")); QVERIFY(outgoing->item(0)->text().contains("Target"));
+    outgoing->setCurrentRow(0); outgoing->setFocus(); QTest::keyClick(outgoing,Qt::Key_Return);
+    QCOMPARE(window.page_editor()->snapshot().id,target.document.id); QCOMPARE(window.page_editor()->current_block_id(),QString("target-heading"));
+    auto* backlinks=window.findChild<QListWidget*>("backlinks"); QCOMPARE(backlinks->count(),1);
+    QVERIFY(backlinks->item(0)->text().contains("Context before")); QVERIFY(backlinks->item(0)->toolTip().contains("jump-source"));
+    backlinks->setCurrentRow(0); backlinks->setFocus(); QTest::keyClick(backlinks,Qt::Key_Return);
+    QCOMPARE(window.page_editor()->snapshot().id,source.document.id); QCOMPARE(window.page_editor()->current_block_id(),QString("jump-source"));
+    QTest::keyClick(window.page_editor(),Qt::Key_Left,Qt::AltModifier);
+    QCOMPARE(window.page_editor()->snapshot().id,target.document.id); QCOMPARE(window.page_editor()->current_block_id(),QString("target-heading"));
+}
+void DesktopTests::history_refuses_trash_and_failed_saves_without_losing_entries()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto source=w.create_page(db.id,"Source"), target=w.create_page(db.id,"Target");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id)); QVERIFY(window.open_page(target.document.id));
+    auto* editor=window.page_editor(); w.trash_page(source.document.id,true);
+    window.findChild<QAction*>("navigateBack")->trigger(); QCOMPARE(editor->snapshot().id,target.document.id);
+    QVERIFY(window.findChild<QAction*>("navigateBack")->isEnabled()); QVERIFY(window.statusBar()->currentMessage().contains("trash"));
+    w.trash_page(source.document.id,false);
+    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_navigation_save BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT,'injected save failure'); END;");
+    QTest::keyClicks(editor,"Pending"); QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier);
+    QCOMPARE(editor->snapshot().id,target.document.id); QVERIFY(window.findChild<QAction*>("navigateBack")->isEnabled());
+    QCOMPARE(editor->toPlainText(),QString("Pending"));
+    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_navigation_save;");
+    QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier); QCOMPARE(editor->snapshot().id,source.document.id);
+    QTest::keyClick(editor,Qt::Key_Right,Qt::AltModifier); QCOMPARE(editor->snapshot().id,target.document.id);
+    QCOMPARE(editor->toPlainText(),QString("Pending"));
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

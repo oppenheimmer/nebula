@@ -11,6 +11,11 @@ class QCompleter;
 
 namespace nebula {
 
+struct EditorPosition {
+    std::string block, anchor_block;
+    int offset = 0, anchor_offset = 0, scroll = 0;
+};
+
 // Page adapter with application-owned snapshots. QTextDocument supplies native
 // selection, layout and undo; it is not the persistent representation.
 class PageEditor : public QTextEdit {
@@ -39,6 +44,10 @@ public:
     void set_wiki_completer(QCompleter* completer);
     std::optional<QString> wiki_prefix() const;
     bool select_wiki_link();
+    EditorPosition capture_position() const;
+    bool restore_position(const EditorPosition& position);
+    std::optional<Reference> current_reference() const;
+    bool activate_current_reference();
 
 signals:
     void reference_activated(int kind, const QString& target_id);

@@ -53,6 +53,7 @@ private slots:
     void transfer_rejects_stale_revisions_and_trash();
     void page_move_preserves_typed_values_and_references();
     void page_move_property_conflict_rolls_back();
+    void outgoing_links_keep_flow_order_context_and_unresolved_names();
 };
 void StorageTests::dates_and_types()
 {
@@ -546,6 +547,29 @@ void StorageTests::page_move_property_conflict_rolls_back()
     auto changed=page; changed.title="Updated"; w.save_page(changed);
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.move_page(page,b.id));
     QCOMPARE(w.load_page(page.document.id).title,std::string("Updated"));
+}
+void StorageTests::outgoing_links_keep_flow_order_context_and_unresolved_names()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto target=w.create_page(db.id,"Target");
+    auto source=w.create_page(db.id,"Source",{},{{"first","",BlockKind::Paragraph,{
+        {"Before "},{"Future",false,false,Reference{ReferenceKind::Page,"","Future",db.id}},
+        {" then "},{"Jump",false,false,Reference{ReferenceKind::Page,target.document.id}}}},
+        {"second","",BlockKind::Paragraph,{{"Heading link",false,false,Reference{ReferenceKind::Block,target.document.blocks[0].id}}}}});
+    auto outgoing=w.outgoing_links(source.document.id); QCOMPARE(outgoing.size(),std::size_t(3));
+    QCOMPARE(outgoing[0].unresolved_name,std::string("Future")); QCOMPARE(outgoing[0].database_scope,db.id);
+    QCOMPARE(outgoing[1].label,std::string("Jump")); QCOMPARE(outgoing[1].source_context,std::string("Before Future then Jump"));
+    QCOMPARE(outgoing[2].source_block,std::string("second"));
+    const auto incoming=w.backlinks(ReferenceKind::Page,target.document.id); QCOMPARE(incoming.size(),std::size_t(2));
+    QCOMPARE(incoming[0].source_context,std::string("Before Future then Jump"));
+    sql(folder.filePath("nebula.sqlite3"),"DELETE FROM links"); QCOMPARE(w.outgoing_links(source.document.id).size(),std::size_t(1));
+    w.rebuild_links(); QCOMPARE(w.outgoing_links(source.document.id).size(),std::size_t(3));
+    w.trash_page(source.document.id,true); QVERIFY(w.outgoing_links(source.document.id).empty());
+    QVERIFY(w.backlinks(ReferenceKind::Page,target.document.id).empty()); w.trash_page(source.document.id,false);
+    source=w.load_page(source.document.id); const auto destination=w.create_page(db.id,"Destination");
+    w.transfer_blocks(source,destination,"first");
+    outgoing=w.outgoing_links(destination.document.id); QCOMPARE(outgoing.size(),std::size_t(2));
+    QCOMPARE(outgoing[1].source_page,destination.document.id); QCOMPARE(outgoing[1].target_id,target.document.id);
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

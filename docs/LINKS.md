@@ -42,7 +42,23 @@ Labels are currently stored as inserted text, so both an omitted label and an
 explicit label remain fixed through renames. Dynamic default labels and explicit
 unresolved create/select actions are tracked in M05.10 of the roadmap.
 
-Ctrl+click follows a reference. Resolution reports a trashed page or database and
+Ctrl+click or Ctrl+Enter at the editor cursor follows a reference. Incoming links
+show the referring page and source excerpt, including the exact target block ID
+where applicable. Outgoing links include their label, destination/state and source
+excerpt; unresolved links remain visible. Both lists support keyboard selection
+and Enter to activate. Incoming activation opens the referring block; outgoing
+activation opens the exact target or explains its unresolved/unavailable state.
+
+Navigate → Back/Forward (Alt+Left/Right) restores stable page/block positions,
+cursor/selection offsets, and vertical scroll. History covers same-page block
+jumps as well as page/database navigation, holds up to 200 prior positions, and
+lasts for the window's lifetime. A new destination clears forward history. Later
+text edits clamp saved offsets; if the recorded block is gone, navigation opens
+its original page at the first block and reports that fallback. Unavailable or
+trashed page destinations and failed saves leave history entries intact for retry.
+History records view positions, not copies of page contents.
+
+Resolution reports a trashed page or database and
 keeps unavailable targets explicit. Restoring the original target reconnects its
 ID; creating a page with the same name does not. Moving blocks between pages
 uses Workspace → Move block to page… to preserve identities. See

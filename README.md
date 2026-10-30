@@ -105,6 +105,8 @@ scrolls the document.
 | Move the active block and its children to another page | Ctrl+Shift+M, or Workspace → Move block to page… |
 | Undo / redo the latest block transfer | Ctrl+Alt+Z / Ctrl+Alt+Shift+Z, or the Workspace menu |
 | Follow a sample block reference | Ctrl+click the link |
+| Follow the reference at the editor cursor | Ctrl+Enter, or Navigate → Follow reference at cursor |
+| Return to the previous position / go forward | Alt+Left / Alt+Right |
 
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
 Wrapping text does not create a block. Splitting a parent gives the trailing block
@@ -136,7 +138,11 @@ data is rejected visibly without replacing the selection.
 The full contract is in [CLIPBOARD_FORMAT.md](docs/CLIPBOARD_FORMAT.md).
 
 Use Link… to select a page, heading, or block across databases. Ctrl+click follows
-it; the backlinks list opens the referring page/block. Targets retain their IDs
+it; incoming/outgoing link lists include source excerpts and support Enter to open
+the exact destination. Navigate → Back/Forward restores the prior page, block,
+selection, and scroll position during the window's lifetime. Unavailable history
+destinations retain their entries so you can restore the target and retry.
+Targets retain their IDs
 through renaming and trash/restore. The link picker disambiguates page names by
 database. The picker can insert an unresolved page name without creating it;
 creating another page with that title does not silently bind the link. Type

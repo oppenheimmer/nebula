@@ -445,7 +445,7 @@ Deliverables: the production block editor implementing the approach chosen in M0
   long-document scenarios from M01 against the production editor.
 - [x] M05.8 Add wiki-style link entry, completion and a target picker for pages,
   headings, and blocks, with duplicate-title disambiguation and custom labels.
-- [ ] M05.9 Add backlinks/outgoing-link navigation with source context and exact
+- [x] M05.9 Add backlinks/outgoing-link navigation with source context and exact
   block destinations; provide keyboard access and back/forward position history.
 - [ ] M05.10 Surface unresolved references and explicit create-or-select-target
   actions, including the destination database for a new page. Keep default and
@@ -468,7 +468,9 @@ Direct ID resolution, page moves with typed property preservation, and atomic
 cross-page subtree transfers have storage/full-window lifecycle and undo tests.
 Wiki entry/completion and searchable explicit target selection cover page,
 heading/block, duplicate-title, custom-label, escaping, Unicode, and undo cases.
-Default labels and navigation history remain open.
+Incoming/outgoing source-context navigation, keyboard following, and stable
+position/selection/scroll back/forward history pass storage/editor/window checks.
+Default labels and explicit unresolved target actions remain open in M05.10.
 
 ### M06 — Attachments and diary workflow
 
@@ -1124,6 +1126,37 @@ begin as part of this shutdown.
 - **Next:** execute M05.9 outgoing/source-context navigation, keyboard following,
   and back/forward position history, followed by M05.10 and the managed-attachment
   milestones. M05 remains In progress.
+
+### Link context and navigation history checkpoint — 2026-10-30
+
+- Pushed M05.8 commit `6f8c148` to `origin/main` with no commit trailers.
+- Completed M05.9. Incoming links include source excerpts and exact target block
+  IDs; outgoing links include source context and target state, including explicit
+  unresolved names. Resolved outgoing edges use the derived index; unresolved
+  entries come from the current page's canonical runs and never enter that index.
+  Query/rebuild/trash/transfer checks verify their order and ownership.
+- Ctrl+Enter follows the reference at the editor cursor. Incoming/outgoing lists
+  activate with Enter. Workspace reference routing replaces the sample handler so
+  source positions are captured before same-page navigation changes the cursor.
+- Added window-lifetime Back/Forward (Alt+Left/Right) with up to 200 prior stable
+  page/block positions, selection offsets and vertical scroll. Navigation across
+  database table selection retains the departing position. New destinations clear
+  forward history. Missing blocks fall back visibly to their original page;
+  trashed destinations and failed saves preserve entries and pending edits for
+  retry. Workspace moves do not add artificial history entries.
+- **Verification:** GCC and Clang passed all six CTest entries (21 core, 31
+  storage, 47 editor, 45 desktop cases plus launcher/smoke). Native Xwayland passed
+  all 47 editor and 45 desktop cases. Tests exercise actual shortcut and list
+  keyboard routing, same-page jumps, cross-database selection/scroll restoration,
+  forward-branch clearing, missing/clamped positions, and failed navigation saves.
+  The environment remains the recorded Debian 13/Qt 6.8.2 image. The first build
+  caught a mixed-type `auto` declaration in the new history method; splitting the
+  declarations fixed compilation. No core implementation changed, so the separate
+  core-only configuration was not rerun. Documentation/link/status/whitespace
+  checks passed. OS IME/reader and macOS acceptance remain unperformed.
+- **Next:** M05.10 explicit unresolved create/select actions and default/custom
+  labels through rename and undo/redo; then M06 managed attachments. M05 remains
+  In progress until that behavior and its exit criteria have evidence.
 
 ## Technical references discussed
 

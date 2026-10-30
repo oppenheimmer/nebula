@@ -13,7 +13,12 @@ struct DatabaseCloser {
     void operator()(sqlite3* database) const noexcept;
 };
 
-struct LinkEdge { std::string source_page, source_block, source_title, target_id; ReferenceKind kind; };
+struct LinkEdge {
+    std::string source_page, source_block, source_title, target_id;
+    ReferenceKind kind;
+    std::string source_context, label, unresolved_name, database_scope;
+    std::int64_t position = 0, run_index = 0;
+};
 struct DeletedBlockGroup { std::string id, page_id, page_title, label; };
 enum class ReferenceState { Available, Unresolved, PageTrashed, DatabaseTrashed, Unavailable };
 struct ReferenceTarget {
@@ -59,6 +64,7 @@ public:
     void save_view(View& view);
     std::vector<View> views(const std::string& database) const;
     std::vector<LinkEdge> backlinks(ReferenceKind kind, const std::string& id) const;
+    std::vector<LinkEdge> outgoing_links(const std::string& page) const;
     void rebuild_links();
     void backup_to(const std::filesystem::path& destination) const;
     static Workspace restore(const std::filesystem::path& backup, const std::filesystem::path& destination);
