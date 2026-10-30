@@ -27,6 +27,8 @@ Source is mounted read-only; build output uses build-container-<compiler>/.
 Tests and benchmarks run with networking disabled and an offscreen Qt backend.
 Run shares the X11 display socket and a single authorization file explicitly.
 Run asks for a workspace folder; --workspace HOST_FOLDER selects one directly.
+The normal workspace GUI has network access for text previews on explicit URL paste.
+Builds, tests, the chooser, demo and smoke runs, and data commands remain offline.
 --import-root exposes one existing host folder read-only at /imports for file import.
 The chooser sees your home read-only. Only the chosen folder is mounted writable.
 Run rebuilds the executable automatically. --demo opens the editor without a workspace.
@@ -123,7 +125,7 @@ case "$command_name" in
         exec "${run[@]}" --env "NEBULA_REPEATS=$repeats" "$image" \
             sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON \
                 && cmake --build /build --parallel 4 \
-                && ctest --test-dir /build --output-on-failure -R "editor|desktop" --repeat until-fail:"$NEBULA_REPEATS"'
+                && ctest --test-dir /build --output-on-failure -R "editor|desktop|pasted_link_preview|trash_safety" --repeat until-fail:"$NEBULA_REPEATS"'
         ;;
     benchmark)
         "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
@@ -194,6 +196,7 @@ case "$command_name" in
             --mount "$(mount_spec "$auth_file" /run/nebula-xauthority readonly)")
         if [[ "$command_name" == test-native ]]; then
             exec "${gui[@]}" "$image" sh -ec '/build/editor_tests && /build/desktop_tests && /build/review_desktop_tests \
+                && /build/pasted_link_preview_tests \
                 && { [ ! -x /build/trash_safety_tests ] || /build/trash_safety_tests; }'
         fi
         host_workspace=
@@ -243,6 +246,11 @@ case "$command_name" in
             [[ "$host_workspace" != '~/'* ]] || host_workspace="$HOME/${host_workspace:2}"
             mkdir -p -- "$host_workspace"
             host_workspace=$(CDPATH= cd -- "$host_workspace" && pwd -P)
+            if [[ "$skip_picker" == false ]]; then
+                for gui_index in "${!gui[@]}"; do
+                    if [[ "${gui[$gui_index]}" == --network=none ]]; then gui[$gui_index]=--network=bridge; fi
+                done
+            fi
             exec "${gui[@]}" --mount "$(mount_spec "$host_workspace" /data)" "$image" \
                 /build/nebula_prototype --workspace /data --workspace-display "$host_workspace" "${app_args[@]}"
         fi

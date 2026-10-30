@@ -1,4 +1,4 @@
-# Development checks only; the application itself never uses the network.
+# Development checks run offline. The application fetches text only on URL paste.
 name: checks
 on:
   push:

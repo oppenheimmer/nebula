@@ -8,6 +8,7 @@
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMimeData>
+#include <QUrl>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTextBlock>
@@ -876,11 +877,20 @@ void PageEditor::process_wiki_input()
 
 void PageEditor::insertFromMimeData(const QMimeData* source)
 {
-    if (source->hasFormat(ClipboardFormat) || source->hasHtml()) {
+    if (!source || isReadOnly()) return;
+    const auto pasted_text=source->hasText()?source->text():QString{};
+    const QUrl candidate=pasted_text.size()<=8192?QUrl(pasted_text,QUrl::StrictMode):QUrl{};
+    const bool web_paste=pasted_text.size()<=8192 && !pasted_text.isEmpty() && candidate.isValid()
+        && !candidate.host().isEmpty() && candidate.userInfo().isEmpty()
+        && (candidate.scheme()=="http" || candidate.scheme()=="https")
+        && std::none_of(pasted_text.begin(),pasted_text.end(),[](QChar c){return c.isSpace() || c.category()==QChar::Other_Control;});
+    if (source->hasFormat(ClipboardFormat) || (source->hasHtml() && !web_paste)) {
         Page fragment;
         try {
             fragment=source->hasFormat(ClipboardFormat)?decode_document(source->data(ClipboardFormat).toStdString()):html_fragment(source->html());
         } catch (const std::exception& e) { emit paste_rejected(QString::fromUtf8(e.what())); return; }
+        const bool plain_web_fragment=web_paste && fragment.blocks.size()==1
+            && std::none_of(fragment.blocks[0].runs.begin(),fragment.blocks[0].runs.end(),[](const auto& run){return run.reference || run.asset;});
         mutate([&] {
             const auto before=snapshot(); auto cursor=textCursor(); cursor.removeSelectedText();
             const auto destination=cursor.blockFormat().stringProperty(Id).toStdString();
@@ -921,6 +931,7 @@ void PageEditor::insertFromMimeData(const QMimeData* source)
                 }
             }
         });
+        if (plain_web_fragment) emit web_link_pasted(pasted_text,current_block_id());
         return;
     }
     if (!source->hasText())
@@ -939,6 +950,7 @@ void PageEditor::insertFromMimeData(const QMimeData* source)
         }
         setTextCursor(cursor);
     });
+    if (web_paste) emit web_link_pasted(pasted_text,current_block_id());
 }
 
 QMimeData* PageEditor::createMimeDataFromSelection() const

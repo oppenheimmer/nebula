@@ -212,6 +212,22 @@ explicit page creation in a chosen database. Page creation and source binding
 commit together; undoing the binding keeps the created page. Escaping,
 completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
 
+## Pasted web links
+
+Pasting a complete HTTP or HTTPS URL keeps the link and attempts a text-only
+preview once. The status bar offers **Cancel preview**. A successful preview is a
+separate editable paragraph; trash that block to keep just the link. Insertion
+has its own undo step. Save/reopen, clipboard, backup and lossless export preserve
+the text without fetching it again. Pictures and thumbnails are never imported.
+
+The normal workspace GUI has network access for this paste action. Ordinary notes
+work offline; builds, tests, the chooser, demo/smoke runs and data commands stay
+offline. Unsupported pages, timeouts, cancellation and network errors leave the
+URL in place. Requests send the pasted path/query to that origin, without cookies,
+credentials or Referer. Redirects must remain on the same scheme, host and port;
+pages requiring login or a cross-origin redirect may have no preview. See
+[PREVIEW_DESIGN.md](docs/PREVIEW_DESIGN.md) for limits and data handling.
+
 ## Backup and restore
 
 ```sh

@@ -62,8 +62,10 @@ bash "$launcher" run
 count_calls 2
 load_call 0
 [[ "${call[*]}" == *'cmake --build'* ]] || fail 'run must rebuild first'
+has_argument --network=none || fail 'build must stay offline'
 load_call 1
 has_argument --select-workspace || fail 'missing chooser'
+has_argument --network=none || fail 'chooser must stay offline'
 has_argument "NEBULA_USER_HOME=$HOME" || fail 'chooser must suggest host home'
 has_argument "type=bind,\"source=$HOME\",\"target=$HOME\",readonly" || fail 'chooser home must be read-only'
 
@@ -80,6 +82,8 @@ has_argument "type=bind,\"source=$escaped\",\"target=/data\"" || fail 'invalid c
 has_argument "$NEBULA_TEST_SELECTION" || fail 'lost host display path'
 has_argument /data || fail 'missing container workspace'
 has_argument --select-workspace && fail 'editor must run separately from chooser'
+has_argument --network=bridge || fail 'workspace GUI needs paste-preview network access'
+has_argument --network=none && fail 'workspace GUI must replace the offline network flag'
 has_argument "type=bind,\"source=$HOME\",\"target=$HOME\",readonly" && fail 'editor must not mount home'
 
 reset_calls
@@ -87,6 +91,7 @@ bash "$launcher" run --workspace "$fixture/explicit" --smoke-test
 count_calls 2
 load_call 1
 has_argument --smoke-test || fail 'lost prototype argument'
+has_argument --network=none || fail 'workspace smoke must stay offline'
 has_argument --select-workspace && fail 'explicit workspace must skip chooser'
 
 reset_calls
@@ -95,6 +100,22 @@ count_calls 2
 load_call 1
 has_argument --demo || fail 'demo must bypass workspace'
 has_argument --workspace && fail 'demo should not open storage'
+has_argument --network=none || fail 'demo must stay offline'
+
+reset_calls
+bash "$launcher" run --workspace "$fixture/preview-workspace"
+count_calls 2
+load_call 0
+has_argument --network=none || fail 'explicit workspace build must stay offline'
+load_call 1
+has_argument --network=bridge || fail 'explicit normal workspace needs paste-preview network access'
+has_argument --network=none && fail 'normal workspace must not retain network=none'
+
+reset_calls
+bash "$launcher" test-native
+count_calls 2
+load_call 1
+has_argument --network=none || fail 'native tests must stay offline'
 
 reset_calls
 import_folder="$fixture/Import 日本語, \"files\""

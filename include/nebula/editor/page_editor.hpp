@@ -77,6 +77,7 @@ signals:
     void reference_activated(int kind, const QString& target_id);
     void unresolved_reference_activated(const QString& name, const QString& database_scope);
     void paste_rejected(const QString& reason);
+    void web_link_pasted(const QString& url, const QString& source_block);
     void wiki_query_changed(const QString& query, bool active);
     void wiki_link_requested(const QString& syntax);
 

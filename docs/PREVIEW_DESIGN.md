@@ -1,8 +1,8 @@
 # Paste-only text preview adapter
 
 M07.8 permits a single text-preview attempt when the user pastes a complete HTTP
-or HTTPS URL. This document records the adapter contract; editor insertion and
-removal still need integration and end-to-end verification.
+or HTTPS URL. The desktop editor connects explicit URL pastes to the bounded
+fetcher and stores successful previews as ordinary text blocks.
 
 ## Fetch contract
 
@@ -41,18 +41,31 @@ characters and image object placeholders removed. Unsupported content, empty
 text, authentication, network/TLS failures, excess bytes, timeout and cancellation
 return an error and no preview.
 
-## Integration requirements
+## Editor integration
 
-The editor must start this adapter only from an explicit URL paste, preserve the
-URL immediately, and provide a cancel control while waiting. Insert successful
-text as an ordinary removable block so canonical runs, existing trash recovery,
-clipboard, storage and interchange keep the text without an HTML or image payload.
-Removing the preview must leave the URL, and saved notes must open offline.
+Pasting a complete URL inserts the URL immediately and starts one attempt.
+Normal paste, Paste plain text, and copied canonical plain URL text share this
+behavior. Ordinary text containing a URL and internal references do not fetch.
+External HTML accompanying a complete URL is ignored, including image markup.
+The status bar offers a keyboard-accessible Cancel preview control while waiting.
+Successful title/excerpt text becomes a separate paragraph after the source
+block's subtree, with the same parent. The title is bold; the excerpt follows a
+soft line break. No preview metadata, HTML, images or attachment files are stored.
 
-Before inserting an asynchronous result, verify the originating page/block and
-pasted URL still exist. Navigation, removal, undo, replacement and closing the
-window must not insert a stale result into another page or revive removed text.
-Verify these paths, save/reopen and undo/redo in the full application before
-marking M07.8 complete. The current Docker GUI launcher still disables networking;
-its runtime policy must be updated during integration, while build/test/data
-containers stay offline.
+Remove the preview with the normal block trash control while retaining the URL.
+Preview insertion is a separate undo step; clipboard, save/reopen, deleted-block
+recovery, backup and lossless interchange preserve its canonical text. Undo/redo
+and reopening never repeat the request. A save failure retains pending edits and
+reports the failure through the normal save state.
+
+The controller verifies the originating page/block and a cursor bookmark of the
+original URL before applying a result. Navigation, removal, undo, replacement,
+newer pastes, hiding and destruction cancel stale work. Insertion preserves the
+current selection and scroll position, waits for IME composition to end, and
+waits for modal operations to close. These paths have controller and full-window
+regression checks; synthetic composition checks do not establish OS IME acceptance.
+
+The Docker launcher gives only the normal workspace GUI bridge networking.
+Builds, tests, the chooser, demo/smoke runs, and data commands retain
+`--network=none`. Test HTTP/TLS fixtures run on container loopback; tests do not
+depend on an external website. Ordinary note operations remain available offline.

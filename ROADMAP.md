@@ -261,8 +261,8 @@ now exist, with a workspace chooser and persistent SQLite database-to-page workf
 Content persistence, autosave, typed properties, and saved table views are
 implemented, including the interactive wiki workflow and managed attachments.
 Local search, structured reference queries, Markdown conversion and lossless JSON
-interchange are implemented. Pasted-link previews and release validation remain
-unfinished.
+interchange and pasted-link previews are implemented. Reliability and release
+validation remain unfinished.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -280,7 +280,7 @@ including material data-handling limitations, rather than a running progress log
 | M04 | Database-to-page workflow | M03 | Complete |
 | M05 | Complete first-release block editing | M01, M04 | Complete |
 | M06 | Attachments and diary workflow | M03, M05 | Complete |
-| M07 | Search and portable interchange | M04, M06 | In progress |
+| M07 | Search and portable interchange | M04, M06 | Complete |
 | M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
 | M09 | Linux release | M08 | Not started |
 | M10 | FreeBSD and OpenBSD releases (amd64) | M09 | Not started |
@@ -535,7 +535,7 @@ Deliverables: searchable notes and documented export/import formats.
 - [x] M07.7 Add incoming/outgoing link filters to search and saved database views,
   including references to blocks on a selected page; verify structured link queries
   independently of full-text matches.
-- [ ] M07.8 When pasting a web link, try to extract a text-only preview that the
+- [x] M07.8 When pasting a web link, try to extract a text-only preview that the
   user can remove. Fetch text only as part of that paste action; do not import
   pictures or thumbnails. Keep the pasted link usable when extraction fails and
   verify removal, save/reopen, clipboard and undo/redo behavior.
@@ -957,6 +957,56 @@ problems remain in the risk register until reproduced.
   `structural_commands_rewrite_only_the_affected_range` (which asserts the post-undo
   block) failed before each fix and pass with GCC, Clang, ASan/UBSan and native
   Xwayland.
+
+### BUG-017 — Custom paste modified a read-only editor
+
+- **Milestone/state:** M07.8/M08.4; Fixed and verified.
+  Bounded editor correctness issue; this does not concern filesystem permissions.
+- **Environment/reproduction:** Debian 13 project container, Qt 6.8.2/GCC 14.2.0,
+  Linux offscreen. Set `PageEditor::setReadOnly(true)`, put a URL on the clipboard
+  and call the custom `paste()` command (also used by its context menu).
+- **Expected/actual:** leave the document and undo history unchanged. The URL was
+  inserted into the canonical snapshot despite the read-only flag. The focused
+  `read_only_editor_does_not_paste_or_fetch` regression failed before the fix;
+  output is retained at `/tmp/nebula-readonly-before.log`.
+- **Diagnosis/resolution:** the custom paste commands invoked `insertFromMimeData`
+  directly, bypassing QTextEdit's ordinary read-only command guard. Reject null
+  input and read-only insertion before parsing or mutating any clipboard data.
+  This covers normal, rich and plain-text paste and emits no preview request.
+- **Verification:** the regression also checks plain-text paste, unchanged undo
+  availability and zero preview requests. Final outcomes are recorded below.
+
+### BUG-018 — Preview event filter downcast during editor destruction
+
+- **Milestone/state:** M07.8/M08.4; Fixed and verified; undefined behavior in
+  window teardown introduced by the uncommitted preview integration.
+- **Environment/reproduction:** Debian 13 Docker, Qt 6.8.2, Debug ASan/UBSan,
+  offscreen. Close a workspace window with a preview controller attached, even
+  without starting a request. `test asan` failed four desktop-related entries.
+- **Expected/actual:** clean teardown; UBSan reported a `QPointer<PageEditor>`
+  downcast of an object whose dynamic type had already become `QWidget`.
+- **Diagnosis/resolution:** the event filter compared its watched QObject to a
+  typed QPointer on every event, including events emitted by base destructors.
+  The filter is installed only on the editor, so remove the comparison. Cancel
+  pending work when the editor is destroyed without accessing its derived type.
+- **Verification:** the new `editor_destruction_cancels_pending_fetch` case and
+  existing window teardown paths pass. Full GCC, Clang and ASan/UBSan suites
+  passed all 14 entries; native Xwayland also passed the preview and window suites.
+
+### BUG-019 — Intermittent native outgoing-link activation check
+
+- **Milestone/state:** M08.2; Investigating. A test failure; no product defect
+  or data loss is established.
+- **Environment/reproduction:** RHEL 9.8 Xwayland, Qt 6.8.2/Debian 13 Docker.
+  `test-native` ran alongside Clang/ASan/core checks. The existing
+  `unresolved_existing_choice_replaces_only_the_selected_reference` failed at
+  tests/desktop_tests.cpp:934: the chosen reference retained an empty target ID.
+- **Expected/actual:** selecting an existing target resolves only the second
+  reference. That run left it unresolved. The full native retry passed all 60
+  desktop behavior cases without a product change to the picker.
+- **Diagnosis/resolution:** not established; activation/focus timing is a
+  candidate as in BUG-014. M08.2 must check native activation preconditions and
+  repeat the workflow. A passing retry is not claimed as a fix.
 
 For each future defect, record:
 
@@ -2296,6 +2346,39 @@ begin as part of this shutdown.
   links and Markdown fences; checked for obsolete platform plans and ran
   `git diff --check`. This is a documentation retargeting; no BSD build, desktop
   test or supported OS-version claim is made. M10 remains Not started.
+
+### Pasted-link preview integration — 2026-10-30
+
+- Completed M07.8 and M07. Explicit whole-URL pastes start one bounded request;
+  normal, plain-text and canonical plain URL paste share the workflow. Internal
+  references and ordinary text containing a URL never fetch. External HTML next
+  to a whole URL is discarded, including images. The original URL is immediately
+  editable and remains on failure or cancellation.
+- The application-owned controller inserts successful title/excerpt text as an
+  ordinary sibling paragraph after the pasted block's subtree. It preserves
+  selection/scroll, defers through composition and modal operations, cancels
+  obsolete results, and provides a keyboard-accessible Cancel preview button.
+  Preview insertion is a separate undo step; trash removes just the preview.
+  Persistence, clipboard, recovery, backup and JSON retain canonical text; reopen
+  and undo/redo perform no network requests. Save failures retain pending edits.
+- Only the normal Docker workspace GUI now uses bridge networking. The chooser,
+  build/test, demo/smoke and data commands remain network-disabled. The fetcher
+  keeps its existing size/deadline/redirect/TLS restrictions. README and
+  [PREVIEW_DESIGN.md](docs/PREVIEW_DESIGN.md) describe the shipped behavior.
+- **Checks:** final GCC and Clang suites each passed all 14 CTest entries with
+  warnings-as-errors. ASan/UBSan initially found BUG-018; after its fix all 14
+  entries passed (leak detection remains disabled). Core-only passed 2/2. Native
+  Xwayland passed 58 editor, 60 desktop, 11 review-desktop, 18 pasted-preview and
+  eight trash-safety cases, excluding setup/cleanup. The earlier native failure
+  remains BUG-019. URL extraction fixtures use container loopback only.
+- Rebuilt the isolated development image for the pending M08 tooling work:
+  `sha256:d80b4106d71df36528c29f34b28803f6bf74f8f47f7938fce3d1c66180a66e5d`;
+  Qt 6.8.2, GCC 14.2.0, Clang 19.1.7, SQLite 3.46.1. No host dependencies were
+  installed. The existing real GitHub runner passed commit `30978de`:
+  [checks run](https://github.com/oppenheimmer/nebula/actions/runs/41022337351).
+  That run does not certify these later unpushed changes. OS IME/screen-reader
+  acceptance and both BSD amd64 environments remain unverified. M08 continues;
+  M09 and the retargeted M10 remain Not started.
 
 ## Technical references discussed
 

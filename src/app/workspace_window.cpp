@@ -1,5 +1,6 @@
 #include "nebula/interchange/interchange.hpp"
 #include "nebula/app/workspace_window.hpp"
+#include "nebula/app/pasted_link_preview.hpp"
 #include "nebula/app/trash_controls.hpp"
 #include "nebula/app/property_text.hpp"
 #include "nebula/attachments/files.hpp"
@@ -269,6 +270,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     });
     connect(autosave_,&QTimer::timeout,this,[this]{ flush(); });
     connect(page_editor(),&QTextEdit::textChanged,this,&WorkspaceWindow::mark_pending);
+    new PastedLinkPreview(page_editor(),statusBar(),this);
     connect(page_editor(),&QTextEdit::cursorPositionChanged,this,&WorkspaceWindow::update_attachment_actions);
     connect(page_editor(),&QTextEdit::cursorPositionChanged,this,&WorkspaceWindow::update_trash_actions);
     connect(title_,&QLineEdit::textEdited,this,[this](const QString& title){

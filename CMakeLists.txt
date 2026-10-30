@@ -84,12 +84,13 @@ if(NEBULA_BUILD_EDITOR)
     endif()
 
     add_library(nebula_desktop
+        src/app/pasted_link_preview.cpp include/nebula/app/pasted_link_preview.hpp
         src/app/trash_controls.cpp src/app/workspace_trash.cpp
         src/app/workspace_dialog.cpp src/app/prototype_window.cpp
         src/app/workspace_window.cpp src/app/termination.cpp include/nebula/app/workspace_window.hpp
         include/nebula/app/workspace_dialog.hpp include/nebula/app/prototype_window.hpp)
     set_target_properties(nebula_desktop PROPERTIES AUTOMOC ON)
-    target_link_libraries(nebula_desktop PUBLIC nebula_editor nebula_application nebula_interchange)
+    target_link_libraries(nebula_desktop PUBLIC nebula_editor nebula_application nebula_interchange nebula_previews)
     foreach(target nebula_storage nebula_interchange nebula_files nebula_format nebula_desktop nebula_application nebula_workspace)
         nebula_warnings(${target})
     endforeach()
@@ -98,6 +99,11 @@ if(NEBULA_BUILD_EDITOR)
 
     if(BUILD_TESTING)
         find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+        add_executable(pasted_link_preview_tests tests/pasted_link_preview_tests.cpp)
+        set_target_properties(pasted_link_preview_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(pasted_link_preview_tests PRIVATE nebula_desktop Qt6::Test SQLite::SQLite3)
+        add_test(NAME pasted_link_preview COMMAND pasted_link_preview_tests)
+        set_tests_properties(pasted_link_preview PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
         add_executable(preview_tests tests/preview_tests.cpp)
         set_target_properties(preview_tests PROPERTIES AUTOMOC ON)
         target_link_libraries(preview_tests PRIVATE nebula_previews Qt6::Test)
