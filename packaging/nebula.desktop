@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Nebula
+Comment=Local notes and diary
+Exec=nebula
+Icon=accessories-text-editor
+Terminal=false
+Categories=Office;Utility;

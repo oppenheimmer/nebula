@@ -1,4 +1,7 @@
-# Only the recipe is needed to create the development image. Source is mounted
+# Only the recipe and pinned package sources are needed to create the development image. Source is mounted
 # read-only at runtime, keeping Git metadata, SDK caches and builds out of context.
 *
 !Dockerfile.dev
+!packaging/
+packaging/*
+!packaging/debian.sources

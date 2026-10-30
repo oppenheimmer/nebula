@@ -36,7 +36,7 @@ and investigate any budget exceedance; do not quietly discard an outlier. The
 additional timing gates. Fixtures are temporary and use no user workspace.
 
 Concurrent maintenance is checked separately by `reliability_tests`: the full
-window types every 650 ms while a separate read-only process backs up and exports
+window types every 650 ms while a separate read-only process backs up and exports JSON/Markdown from
 a workspace containing 2,001 pages and 32 MiB of body text. It requires at least
 three actual autosaves, no visible save failure, and valid restored/imported
 copies. Its large temporary fixture uses the ignored build directory to avoid

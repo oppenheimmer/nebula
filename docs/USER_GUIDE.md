@@ -6,7 +6,8 @@ planned; native BSD packages and desktop behavior have not been verified.
 
 ## Open your first notebook
 
-From the project folder, with the existing Docker daemon running:
+If the package preview is already installed, launch `nebula`. For a source
+checkout, use the project folder with the existing Docker daemon running:
 
 ```sh
 ./scripts/dev.sh build-image

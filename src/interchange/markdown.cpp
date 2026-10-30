@@ -204,13 +204,14 @@ QString plain_label(const std::vector<Run>& runs)
 }
 } // namespace
 
-InterchangeReport export_markdown(const Workspace& workspace, const std::filesystem::path& destination)
+InterchangeReport export_markdown(const Workspace& source, const std::filesystem::path& destination)
 {
-    const auto& directory_ = workspace.directory();
+    const auto& directory_ = source.directory();
     reject_managed_destination(directory_, destination);
     files::WorkspaceLock lock(directory_, false);
-    Snapshot snapshot(WorkspaceInternals::connection(workspace));
     NewDirectory output(destination);
+    ExportSnapshot snapshot(source, destination);
+    const auto& workspace = snapshot.workspace();
     InterchangeReport report;
     warn(report, "Markdown omits database membership, properties, views, timestamps, revisions, trash, recovery "
                  "history and stable identities. Use lossless JSON for preservation.");
@@ -321,6 +322,7 @@ InterchangeReport export_markdown(const Workspace& workspace, const std::filesys
     files::write_new(destination / "CONVERSION.txt", warnings);
     if (fs::exists(destination / "attachments"))
         files::sync_directory(destination / "attachments");
+    snapshot.close();
     output.complete();
     return report;
 }

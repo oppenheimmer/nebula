@@ -80,3 +80,11 @@ search updates in one transaction. Failure preserves existing data and removes
 uncommitted copied files when possible; interrupted leftovers follow the managed
 attachment audit/cleanup rules. Export refuses existing destinations and removes
 partial output on a reported failure. No merge or overwrite import mode exists.
+
+Exports use a private database snapshot in the new output folder while holding a
+shared managed-file lock. The live SQLite reader lock is released between bounded
+copy steps and is not held during Markdown serialization or attachment copying.
+The temporary database is removed before success; interrupted exports may leave
+an incomplete output folder. Until completion, the private scratch database
+contains the whole workspace, including data omitted from Markdown. Remove an
+interrupted export folder and retry before sharing it.

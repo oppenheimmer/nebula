@@ -1,0 +1,15 @@
+ARG BASE_IMAGE=debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+FROM ${BASE_IMAGE}
+COPY debian.sources /etc/apt/sources.list.d/debian.sources
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libqt6widgets6 libqt6network6 qt6-qpa-plugins libsqlite3-0 libxcb-cursor0 \
+        ca-certificates fonts-dejavu-core libqt6test6 fonts-noto-cjk fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+COPY nebula.deb /tmp/nebula.deb
+RUN --network=none dpkg -i /tmp/nebula.deb
+COPY package-fixture /opt/package-fixture
+COPY check-upgrade.sh /opt/check-upgrade.sh
+RUN --network=none sh /opt/check-upgrade.sh \
+    && rm /tmp/nebula.deb /opt/package-fixture /opt/check-upgrade.sh
+ENV LANG=C.UTF-8 QT_QPA_PLATFORM=offscreen XDG_CACHE_HOME=/tmp/nebula-cache
+USER 65532:65532

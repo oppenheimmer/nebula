@@ -1,16 +1,17 @@
-# Release builds pin this to a digest (debian:trixie-slim@sha256:...) and a package
-# snapshot; see ROADMAP M09.1. Development keeps the moving tag by default.
-ARG BASE_IMAGE=debian:trixie-slim
+# Pin the official base manifest and signed package snapshot; refresh with tests.
+ARG BASE_IMAGE=debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
 FROM ${BASE_IMAGE}
+COPY packaging/debian.sources /etc/apt/sources.list.d/debian.sources
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential ca-certificates clang cmake ninja-build \
         qt6-base-dev libgl1-mesa-dev libsqlite3-dev libxcb-cursor0 fonts-dejavu-core \
+        fonts-noto-cjk fonts-noto-color-emoji clang-format libclang-rt-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-noto-color-emoji clang-format libclang-rt-dev \
+# CPack uses file(1) to discover ELF binaries for automatic Debian dependencies.
+RUN apt-get update && apt-get install -y --no-install-recommends file \
     && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=C.UTF-8 \

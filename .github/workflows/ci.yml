@@ -25,5 +25,7 @@ jobs:
         run: ./scripts/dev.sh test asan
       - name: Coverage-guided parser fuzzing
         run: ./scripts/dev.sh fuzz 5
+      - name: Debian package and offline runtime checks
+        run: ./scripts/package-check.sh
       - name: Repeat interaction suites (BUG-014, BUG-015)
         run: ./scripts/dev.sh stress 10

@@ -35,13 +35,6 @@ inline void warn(InterchangeReport& report, const std::string& message)
     if (std::find(report.warnings.begin(), report.warnings.end(), message) == report.warnings.end())
         report.warnings.push_back(message);
 }
-class Snapshot {
-    sqlite3* db_;
-
-public:
-    explicit Snapshot(sqlite3* db) : db_(db) { sql::execute(db_, "BEGIN"); }
-    ~Snapshot() { sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr); }
-};
 class NewDirectory {
     fs::path path_;
     bool complete_ = false;
@@ -64,6 +57,33 @@ public:
         files::sync_directory(path_);
         files::sync_directory(path_.parent_path());
         complete_ = true;
+    }
+};
+// Parsing/serializing an export must not hold the live database's reader lock.
+// Keep a private disk snapshot beside the output, removed before completion.
+class ExportSnapshot {
+    fs::path file_;
+    std::optional<Workspace> workspace_;
+
+public:
+    ExportSnapshot(const Workspace& source, const fs::path& destination)
+        : file_(destination / ".nebula-export-snapshot.sqlite3")
+    {
+        files::create_private_file(file_);
+        workspace_.emplace(WorkspaceInternals::snapshot(source, file_));
+    }
+    ~ExportSnapshot()
+    {
+        workspace_.reset();
+        std::error_code ignored;
+        fs::remove(file_, ignored);
+    }
+    const Workspace& workspace() const { return *workspace_; }
+    void close()
+    {
+        workspace_.reset();
+        if (!fs::remove(file_))
+            throw std::runtime_error("Cannot remove export snapshot");
     }
 };
 inline void reject_managed_destination(const fs::path& workspace, const fs::path& destination)

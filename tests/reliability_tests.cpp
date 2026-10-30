@@ -148,22 +148,24 @@ void ReliabilityTests::autosave_survives_headless_backup_and_export_pressure()
     QTRY_VERIFY_WITH_TIMEOUT(process.canReadLine() || process.state() == QProcess::NotRunning, 10000);
     QCOMPARE(process.readLine(), QByteArray("ready\n"));
     int edits = 0;
-    bool save_failed = false;
+    QString save_failure;
     QTimer typing, monitor;
     connect(&typing, &QTimer::timeout, &window, [&] {
         QTest::keyClick(editor, Qt::Key_X);
         ++edits;
     });
     connect(&monitor, &QTimer::timeout, &window, [&] {
-        save_failed = save_failed || window.findChild<QLabel*>("saveState")->text().startsWith("Save failed");
+        const auto state = window.findChild<QLabel*>("saveState")->text();
+        if (state.startsWith("Save failed"))
+            save_failure = state;
     });
     typing.start(650);
     monitor.start(10);
-    QTRY_COMPARE_WITH_TIMEOUT(process.state(), QProcess::NotRunning, 30000);
+    QTRY_COMPARE_WITH_TIMEOUT(process.state(), QProcess::NotRunning, 60000);
     typing.stop();
     monitor.stop();
     QVERIFY2(process.exitCode() == 0, process.readAllStandardError().constData());
-    QVERIFY(!save_failed);
+    QVERIFY2(save_failure.isEmpty(), qPrintable(save_failure));
     QVERIFY(edits >= 3);
     const auto saved_before_flush = workspace.load_page(page.document.id).revision - page.revision;
     QVERIFY(saved_before_flush >= 3);

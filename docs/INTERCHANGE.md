@@ -113,7 +113,12 @@ forms. Reference target absence is allowed and preserved. Text NUL characters ar
 preserved in supported string fields. The manifest is limited to 64 MiB; a larger
 export fails explicitly and removes its partial destination.
 
-Export holds a database read snapshot and a shared managed-file lock. Import
+Export copies a consistent database snapshot in bounded SQLite backup steps, then
+validates and serializes that private copy while retaining a shared managed-file
+lock. It does not hold a live read transaction through serialization/file writes.
+The temporary full workspace database is private, sits in the new export folder, and is removed
+before success. An interrupted export may leave that incomplete folder; remove it
+and retry rather than opening it as a workspace. Import
 creates a new workspace, validates and writes canonical records in a transaction,
 copies/checks files, then rebuilds indexes. File/directory flushes precede a
 successful result. A reported failure removes the newly created partial folder

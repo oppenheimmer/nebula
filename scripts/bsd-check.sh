@@ -13,6 +13,10 @@ uname -a
 c++ --version
 cmake --version
 sqlite3 -version
+case "$(uname -s)" in
+    FreeBSD) pkg info qt6-base ;;
+    OpenBSD) pkg_info | grep 'qt6-qtbase' ;;
+esac
 cmake -S . -B build-bsd-core -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DNEBULA_BUILD_EDITOR=OFF -DNEBULA_WERROR=ON
 cmake --build build-bsd-core --parallel 2
@@ -20,4 +24,4 @@ ctest --test-dir build-bsd-core --output-on-failure
 cmake -S . -B build-bsd -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/usr/local -DNEBULA_WERROR=ON
 cmake --build build-bsd --parallel 2
-ctest --test-dir build-bsd --output-on-failure
+ctest --test-dir build-bsd --verbose

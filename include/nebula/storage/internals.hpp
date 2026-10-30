@@ -24,5 +24,8 @@ struct WorkspaceInternals {
     static int schema_version(sqlite3* database);
     static int current_schema();
     static int interchange_contract();
+    // Chunked SQLite copy into an already-created private file. The returned
+    // query-only connection uses the source's immutable managed attachments.
+    static Workspace snapshot(const Workspace& source, const std::filesystem::path& file);
 };
 } // namespace nebula

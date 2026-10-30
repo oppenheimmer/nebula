@@ -29,11 +29,13 @@ int main(int argc, char** argv)
             do {
                 workspace.backup_to(output / "backup");
                 interchange::export_json(workspace, output / "json");
+                interchange::export_markdown(workspace, output / "markdown");
                 ++cycles;
                 if (std::chrono::steady_clock::now() - start >= std::chrono::milliseconds(4500))
                     break;
                 std::filesystem::remove_all(output / "backup");
                 std::filesystem::remove_all(output / "json");
+                std::filesystem::remove_all(output / "markdown");
             } while (true);
             std::cout << "cycles=" << cycles << '\n';
             return 0;

@@ -169,6 +169,21 @@ Workspace Workspace::read_only(const std::filesystem::path& directory)
     const auto id = sql::scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
     return Workspace(root, id, std::move(db));
 }
+Workspace WorkspaceInternals::snapshot(const Workspace& source, const std::filesystem::path& file)
+{
+    if (!sqlite3_get_autocommit(connection(source)))
+        throw StorageError(ErrorKind::Invalid, "Finish the current transaction before exporting");
+    sqlite3* raw = nullptr;
+    const int opened =
+        sqlite3_open_v2(file.u8string().c_str(), &raw, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW, nullptr);
+    std::unique_ptr<sqlite3, DatabaseCloser> database(raw);
+    if (opened != SQLITE_OK)
+        throw StorageError(sql::kind_of(opened), "Cannot create export snapshot");
+    copy_database(connection(source), raw);
+    schema::harden(raw);
+    sql::execute(raw, "PRAGMA foreign_keys=ON; PRAGMA query_only=ON");
+    return Workspace(source.directory_, source.id_, std::move(database));
+}
 void Workspace::backup_to(const std::filesystem::path& destination) const
 {
     const bool managed = WorkspaceInternals::schema_version(database_.get()) >= 7;

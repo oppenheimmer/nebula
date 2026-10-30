@@ -2,6 +2,7 @@
 #include "nebula/attachments/files.hpp"
 #include "nebula/format/codec.hpp"
 #include "nebula/interchange/interchange.hpp"
+#include "nebula/storage/internals.hpp"
 #include "nebula/storage/workspace.hpp"
 #include <QDir>
 #include <QFile>
@@ -21,7 +22,7 @@ std::filesystem::path path(const QString& p)
 {
     return std::filesystem::u8path(p.toUtf8().constData());
 }
-void sql(const QString& file, const char* command)
+void execute_sql(const QString& file, const char* command)
 {
     sqlite3* raw = nullptr;
     const int opened = sqlite3_open(file.toUtf8().constData(), &raw);
@@ -91,6 +92,7 @@ private slots:
     void summaries_and_link_targets_avoid_document_loading();
     void symlinked_components_are_refused_beneath_a_root();
     void large_backups_copy_in_steps();
+    void export_snapshot_is_private_read_only_and_independent_of_later_saves();
     void imported_revisions_stay_below_the_overflow_bound();
     void markdown_attachments_accept_common_syntax_and_report_missing_files();
 };
@@ -104,7 +106,7 @@ void StorageHardeningTests::untrusted_schema_objects_are_refused()
             auto w = Workspace::open(path(folder.path()));
             w.create_page(w.create_database("Notes").id, "Keep");
         }
-        sql(folder.filePath("nebula.sqlite3"), injected);
+        execute_sql(folder.filePath("nebula.sqlite3"), injected);
         const auto before = bytes(folder.filePath("nebula.sqlite3"));
         QVERIFY_THROWS_EXCEPTION(StorageError, Workspace::open(path(folder.path())));
         QVERIFY_THROWS_EXCEPTION(StorageError, Workspace::read_only(path(folder.path())));
@@ -221,7 +223,7 @@ void StorageHardeningTests::journal_bootstrap_and_dated_entries_are_atomic()
     QCOMPARE(w.properties(journal.id).size(), std::size_t(3));
     QCOMPARE(w.views(journal.id).size(), std::size_t(1));
     const auto notes = w.create_database("Notes");
-    sql(folder.filePath("nebula.sqlite3"), "DROP TABLE page_search");
+    execute_sql(folder.filePath("nebula.sqlite3"), "DROP TABLE page_search");
     QVERIFY_THROWS_EXCEPTION(std::runtime_error, w.create_dated_entry(notes.id, "2026-10-30"));
     QVERIFY(w.properties(notes.id).empty());
     QVERIFY(w.pages(notes.id).empty());
@@ -356,8 +358,8 @@ void StorageHardeningTests::integrity_checks_are_recorded_and_report_problems()
     const auto file = folder.filePath("nebula.sqlite3");
     QVERIFY(!text(file, "SELECT value FROM maintenance WHERE name='integrity_checked_at'").empty());
     QVERIFY(w.check_integrity().ok());
-    sql(file, "PRAGMA foreign_keys=OFF; INSERT INTO pages(id,database_id,title,revision) "
-              "VALUES('orphan','missing-db','Orphan',1)");
+    execute_sql(file, "PRAGMA foreign_keys=OFF; INSERT INTO pages(id,database_id,title,revision) "
+                      "VALUES('orphan','missing-db','Orphan',1)");
     const auto report = w.check_integrity();
     QVERIFY(!report.ok());
     QVERIFY(QString::fromStdString(report.problems[0]).contains("pages"));
@@ -376,10 +378,11 @@ void StorageHardeningTests::version_nine_migrates_derived_structures()
         w.save_page(page);
         fragment = w.deleted_blocks()[0].id;
     }
-    sql(folder.filePath("nebula.sqlite3"), "DROP TABLE deleted_block_members; DROP TABLE maintenance; DROP TABLE "
-                                           "page_search_rows; DROP TABLE page_search; DROP INDEX links_source;"
-                                           "CREATE VIRTUAL TABLE page_search USING fts5(page_id UNINDEXED,block_id "
-                                           "UNINDEXED,title,properties,body,excerpt UNINDEXED); PRAGMA user_version=9");
+    execute_sql(folder.filePath("nebula.sqlite3"),
+                "DROP TABLE deleted_block_members; DROP TABLE maintenance; DROP TABLE "
+                "page_search_rows; DROP TABLE page_search; DROP INDEX links_source;"
+                "CREATE VIRTUAL TABLE page_search USING fts5(page_id UNINDEXED,block_id "
+                "UNINDEXED,title,properties,body,excerpt UNINDEXED); PRAGMA user_version=9");
     auto w = Workspace::open(path(folder.path()));
     QCOMPARE(text(folder.filePath("nebula.sqlite3"), "PRAGMA user_version"), std::string("10"));
     QCOMPARE(text(folder.filePath("nebula.sqlite3"), "SELECT fragment_id FROM deleted_block_members"), fragment);
@@ -579,6 +582,35 @@ void StorageHardeningTests::markdown_attachments_accept_common_syntax_and_report
     put(folder.filePath("input/a.md"), "[escape](attachments/..%2Foutside)\n");
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,
                              interchange::import_markdown(w, path(folder.filePath("input")), db.id));
+}
+
+void StorageHardeningTests::export_snapshot_is_private_read_only_and_independent_of_later_saves()
+{
+    QTemporaryDir folder;
+    auto workspace = Workspace::open(path(folder.filePath("workspace")));
+    auto page = workspace.create_page(workspace.create_database("Notes").id, "Before");
+    const auto file = path(folder.filePath("private-snapshot.sqlite3"));
+    files::create_private_file(file);
+    auto snapshot = WorkspaceInternals::snapshot(workspace, file);
+    page.title = "After";
+    page.document.blocks.front().runs = {{"Later body"}};
+    workspace.save_page(page);
+    QCOMPARE(snapshot.load_page(page.document.id).title, std::string("Before"));
+    QCOMPARE(workspace.load_page(page.document.id).title, std::string("After"));
+    QVERIFY_THROWS_EXCEPTION(StorageError, snapshot.create_database("Forbidden"));
+    struct stat status{};
+    QCOMPARE(::stat(file.c_str(), &status), 0);
+    QCOMPARE(status.st_mode & 0777, 0600u);
+    interchange::export_json(workspace, path(folder.filePath("json")));
+    interchange::export_markdown(workspace, path(folder.filePath("markdown")));
+    QVERIFY(!QFile::exists(folder.filePath("json/.nebula-export-snapshot.sqlite3")));
+    QVERIFY(!QFile::exists(folder.filePath("markdown/.nebula-export-snapshot.sqlite3")));
+    QCOMPARE(workspace.load_page(page.document.id).title, std::string("After"));
+    workspace.transaction([&] {
+        QVERIFY_THROWS_EXCEPTION(StorageError,
+                                 interchange::export_json(workspace, path(folder.filePath("uncommitted"))));
+        QVERIFY(!QFile::exists(folder.filePath("uncommitted")));
+    });
 }
 
 QTEST_GUILESS_MAIN(StorageHardeningTests)

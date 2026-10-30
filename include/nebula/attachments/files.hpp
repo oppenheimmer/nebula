@@ -13,7 +13,7 @@ struct Digest {
 };
 // Reports copied bytes; return false to cancel. Called from the copying thread.
 using Progress = std::function<bool(std::int64_t copied, std::int64_t total)>;
-// POSIX adapter; BSD validation is pending. Managed files are immutable and regular.
+// POSIX adapter; platform verification is recorded in ROADMAP.md. Managed files are immutable and regular.
 Digest digest(const std::filesystem::path& path);
 Digest copy_new(const std::filesystem::path& source, const std::filesystem::path& destination,
                 const Progress& progress = {});

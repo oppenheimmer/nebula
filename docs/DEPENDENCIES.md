@@ -13,10 +13,12 @@ output is confined to a project build directory. Network access is disabled for
 build/test runs after the image has been created. Container support is a developer
 tool; the application itself is a local desktop executable.
 
-The base release is Debian 13 (`trixie-slim`). Package patch versions follow that
-release's repositories when rebuilding the image, so the recipe is repeatable but
-not an immutable package snapshot. Record the image ID and actual versions with
-verification results; release packaging reproducibility remains M09 work.
+The base is Debian 13 (`trixie-slim`), pinned by its official multiarch manifest
+digest in `Dockerfile.dev`. `packaging/debian.sources` pins signed Debian and
+security archives to 2026-10-30. Refresh both deliberately and retest; a frozen
+snapshot does not acquire security updates automatically. Record the image ID and
+actual versions with verification results. This is a pinned build recipe;
+byte-for-byte package reproducibility has not yet been demonstrated.
 
 ## Source baseline
 
@@ -150,3 +152,15 @@ Docker. Guest package versions are recorded by their build/test logs; the select
 FreeBSD 14.3/OpenBSD 7.8 versions are preflight environments rather than supported
 release baselines. Native desktop/IME/accessibility, cross-system transfer and
 package validation remain separate M10 requirements.
+
+## Debian package preview
+
+The development package targets Debian 13 amd64 and dynamically links the system
+Qt and SQLite libraries. It bundles no third-party libraries or Qt image plugins;
+Debian retains their package licenses and update mechanisms. CPack uses the
+existing Debian `dpkg-shlibdeps` tooling and `file` (BSD-2-Clause-alike; development-only)
+to derive ELF dependencies. Platform plugins, fonts, cursor support and TLS trust
+are explicit dependencies because dynamic plugin loading is not visible to ELF
+analysis. The clean runtime verification image adds Qt Test and fonts for checks,
+with no compiler or CMake; those test-only requirements are not application
+package dependencies. See [INSTALL](INSTALL.md) for preparation and limitations.

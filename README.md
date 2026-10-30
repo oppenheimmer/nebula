@@ -36,6 +36,15 @@ For a development shell, run `./scripts/dev.sh shell`. Source is read-only at
 the optional project-local SDK workflow are described in
 [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
+## Linux package preview
+
+`./scripts/package-check.sh` builds a Debian 13 amd64 development package and
+checks install, removal, editing, search, export, backup/restore and TLS in an
+isolated runtime container. It does not install host packages. The artifact and
+installation/data-recovery instructions are in [INSTALL.md](docs/INSTALL.md).
+This preview is not a published release; actual OS IME/reader acceptance remains
+open.
+
 ## Run
 
 ```sh
@@ -255,6 +264,10 @@ manifest detects corruption, not deliberate tampering: anyone who can edit a bac
 can also rewrite its manifest. Data commands refuse uncommitted source changes unless
 `NEBULA_ALLOW_DIRTY=1` is set. The format and durability rules are documented in
 [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
+
+Interrupted JSON/Markdown export folders can contain a temporary full workspace
+database, including data omitted from Markdown. Remove an incomplete folder and
+retry before sharing it; successful exports remove that private scratch database.
 
 ## Checks and measurements
 

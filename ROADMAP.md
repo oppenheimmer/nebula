@@ -283,7 +283,7 @@ including material data-handling limitations, rather than a running progress log
 | M06 | Attachments and diary workflow | M03, M05 | Complete |
 | M07 | Search and portable interchange | M04, M06 | Complete |
 | M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
-| M09 | Linux release | M08 | Not started |
+| M09 | Linux release | M08 | In progress |
 | M10 | FreeBSD and OpenBSD releases (amd64) | M09 | In progress |
 
 ### M00 — Project definition and working conventions
@@ -601,14 +601,14 @@ remains. Performance meets the agreed thresholds on recorded hardware/fixtures.
 Deliverables: an installable Linux package, release notes, and user/developer
 instructions matching the shipped behavior.
 
-- [ ] M09.1 Pin the development/release base image by digest (`BASE_IMAGE` in
+- [x] M09.1 Pin the development/release base image by digest (`BASE_IMAGE` in
   `Dockerfile.dev`) with a package snapshot; ship only the Qt image plugins Nebula
   needs and add Qt image-plugin security updates to the release checklist (from
   SUG-08/SUG-42). Select and document a packaging approach, minimum supported
   environment, dependency versions, and required license notices.
-- [ ] M09.2 Validate installation, launch, workspace creation, editing, search,
+- [x] M09.2 Validate installation, launch, workspace creation, editing, search,
   export, backup, and restore in a clean supported environment without network.
-- [ ] M09.3 Verify upgrade behavior and provide build, installation, data-location,
+- [x] M09.3 Verify upgrade behavior and provide build, installation, data-location,
   backup, and recovery instructions.
 - [ ] M09.4 Record release verification, known limitations, and the release version.
 
@@ -1029,6 +1029,32 @@ problems remain in the risk register until reproduced.
   suites pass the regression, including refusal of genuinely inconsistent search
   content. Native Xwayland passes it as well.
 
+### BUG-021 — Large export read transactions can delay GUI autosave
+
+- **Milestone/state:** M08.4/M08.13/M09.2; Fixed and verified on Linux. Pending
+  edits remain available; no lost saved notes were observed.
+- **Environment/reproduction:** pinned Debian 13 Docker, Qt 6.8.2, SQLite 3.46.1,
+  GCC Debug ASan/UBSan. Type in the full window while a second process repeatedly
+  backs up/exports 2,001 pages (about 66 MiB on disk). Both a loaded run and a
+  subsequent sanitizer run reproduced the failure.
+- **Expected/actual:** at least three autosaves without failure. The retained test
+  observed `Save failed — database is locked. Press Ctrl+S to retry.` The worker
+  itself completed; this differs from the earlier tmpfs/manifest-size refusals.
+- **Diagnosis/resolution:** JSON and Markdown exports retained a live SQLite read
+  transaction through validation, serialization and file writes. On this large
+  sanitizer fixture that exceeded the writer's three-second busy timeout. Export
+  now copies the database in bounded backup steps into a private disk snapshot
+  under the new output folder, then validates/serializes only that copy. A shared
+  managed-file lock retains immutable attachment consistency. The scratch database
+  is removed before success; uncommitted source transactions are refused.
+- **Verification:** extended the concurrency worker to cover backup, JSON and
+  Markdown; captured the exact save error. Added checks for snapshot privacy,
+  query-only access, independence from later saves, scratch removal and refusal
+  during an active source transaction. GCC, Clang and ASan/UBSan pass 15/15
+  groups; native Xwayland passes all interaction/reliability cases. The expanded
+  worker covers JSON and Markdown without any save-failure status. M08.13 is
+  complete again; both BSD systems will separately recheck this later source.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -1200,7 +1226,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
 | SUG-05 | Done | Restore… → Empty trash permanently… purges trash, recovery records and unreferenced files, clears undo and runs `VACUUM`. Storage and window tests. |
 | SUG-06 | Done | Opening hands out a checksum-verified, read-only, original-named copy that is removed with the window. Window test. |
 | SUG-07 | Done | Message boxes and data-bearing labels use plain text. Window test. |
-| SUG-08 | Done; packaging in M09.1 | Previews decode on a worker thread with a 128 MiB allocation limit; card paths are re-resolved at most once per second. Plugin set and update tracking moved to M09.1. |
+| SUG-08 | Done | Image decoding is bounded and off-thread. The Debian preview bundles no image plugins and uses system Qt packages; the release checklist requires image-plugin security updates. |
 | SUG-09 | Done | `SQLITE_OPEN_NOFOLLOW` and component-by-component `O_NOFOLLOW` opens for every copy and digest. Storage test. |
 | SUG-10 | Done | README and ATTACHMENTS.md describe the manifest as corruption detection. |
 | SUG-11 | Done | Storage refuses backup/export folders; the chooser also confirms non-empty unrelated folders. Storage and window tests. |
@@ -1214,27 +1240,27 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
 | SUG-19 | Done | Fragments whose parent moved away return as top-level blocks with a notice. Storage test. |
 | SUG-20 | Done | `create_journal` and `create_dated_entry` are single transactions. Storage and window tests. |
 | SUG-21 | Done | SIGTERM/SIGINT/SIGHUP reach the event loop through a self-pipe and flush pending edits. Window test. |
-| SUG-22 | Done; WAL not adopted; measurement in M08.8 | Read-only busy timeout and 256-page backup steps with a restart fallback. WAL rejected for read-only tool mounts. Large-backup test; contention not separately measured. |
+| SUG-22 | Done; WAL not adopted | Three-second busy timeout, 256-page backup steps and private disk snapshots for exports. Full-window concurrent backup/JSON/Markdown tests pass, including BUG-021 under ASan/UBSan. |
 | SUG-23 | Done | Locale-independent natural case-insensitive order, case-folded Contains, tag-set equality, decimal comma, tolerant tags. Storage and application tests. |
 | SUG-24 | Decided | `workspace_id` names a lineage; documented in WORKSPACE_FORMAT.md and INTERCHANGE.md. |
 | SUG-25 | Done | Typing fast path, per-page label and card-path caches, neighbour-based toolbar state, partial repaint, visible-only dividers. Editor tests and benchmark. |
 | SUG-26 | Done | Identity-diffed saves with reused statements, label-aware referrer reindexing, and row/link refresh only on change. Storage tests and benchmark. |
 | SUG-27 | Done | Structural edits rewrite only the affected block range. Editor test and benchmark. |
-| SUG-28 | Partial; remainder in M08.8 | Lightweight page summaries/link-target rows and a cached `LinkTargets` service; the Link… picker still creates tree items for every cached row. |
+| SUG-28 | Done | Cached link-target rows with incremental 100-page/block batches, full-cache search and pending-page overlays. Widget/full-window tests. |
 | SUG-29 | Done | `links(source_page)` index in migration and rebuild. Query-plan test. |
 | SUG-30 | Done; contentless rejected | Title/properties and each block body are stored once; result context comes from canonical blocks. Contentless deletes need SQLite 3.43. |
 | SUG-31 | Done | Prepare/copy/commit import with worker-thread progress and cancel; backups hash once and restore twice. Storage tests. |
 | SUG-32 | Done | Full checks after migrations, weekly or on request, recorded in `maintenance`. Storage and window tests. |
-| SUG-33 | Done; thresholds proposed | `benchmark workspace` with before/after results in the work log. |
-| SUG-34 | Partial; remainder in M08.8 | Navigation history, property text and link targets moved to Qt-free services (`app_tests`); view editing and interchange coordination remain in the window. |
+| SUG-33 | Done | Three-run M08.3 measurements meet the recorded M01/integrated reference-machine budgets; methodology in PERFORMANCE.md. |
+| SUG-34 | Done | Qt-free navigation, property text, link-target, view-edit and import/export services with focused application tests; dialogs remain desktop adapters. |
 | SUG-35 | Done | Interchange is free functions over `WorkspaceInternals`; `sql.hpp` is a documented internal header. |
-| SUG-36 | Partial; remainder in M08.8 | One supported-version range, a migration step table and a shared `validate_view`; duplicated Qt UTF-8 helpers remain. |
+| SUG-36 | Done | Shared format versions, view validation and length-aware Qt UTF-8 helpers; Unicode/NUL/invalid-encoding regressions. |
 | SUG-37 | Done; English messages | `StorageError` categories drive conflict handling; translation stays with SUG-43. |
-| SUG-38 | Decided; reformatting in M08.8 | `.clang-format` applies to new files; existing files are reformatted later in formatting-only commits. The current image has no clang-format. |
+| SUG-38 | Done | The development image supplies clang-format; the C++ tree was normalized in formatting-only commit d6aac43 and CI checks the style. |
 | SUG-39 | Done | `valid_identity` enforced by core validation, link filters, JSON and clipboard decoding. Storage test. |
-| SUG-40 | Done; CI and libFuzzer runs in M08.8 | `test asan`, warnings-as-errors, `stress`, five fuzz targets with a smoke driver, optional libFuzzer build, and a CI workflow that has not run yet. |
+| SUG-40 | Done | Full GCC/Clang/ASan/UBSan, deterministic/coverage-guided fuzzing and stress modes pass locally and on the recorded real GitHub runner. |
 | SUG-41 | Done | Configure-time FTS5 check and startup probe. |
-| SUG-42 | Done; pinning in M09.1 | Dirty-tree guard for data commands and a `BASE_IMAGE` build argument; digest and snapshot pinning moved to M09.1. |
+| SUG-42 | Done | Dirty-tree guard, immutable official Debian manifest digest and signed Debian/security package snapshot, with deliberate update/retest instructions. |
 | SUG-43 | Decided | Delete view, rename/delete property and Empty trash are first-release features (implemented). File/image drag-and-drop and UI translation are deferred until after the first release. |
 
 ### Security and privacy
@@ -2539,6 +2565,113 @@ begin as part of this shutdown.
   Qt port's [module/package definition](https://github.com/openbsd/ports/blob/master/x11/qt6/qtbase/Makefile)
   supplies Widgets, Network and Test. Selected OS versions are investigation
   environments, not supported minimums or package-release claims. Results follow.
+
+### Native validation and Linux package preparation — 2026-10-30
+
+- Real Linux CI passed `ab7e1c48a0e600676086d0b66cb32ff2544b1f40`, including
+  the new formatter and five coverage-guided parser steps, all three compiler/
+  sanitizer suites, core-only and ten interaction repetitions:
+  [run 41030214143](https://github.com/oppenheimmer/nebula/actions/runs/41030214143).
+  The formatting-only revision also passed its own Linux run.
+- Native preflight independently passed core-only 2/2 and full 15/15 groups on
+  **both** BSD systems at `ab7e1c4`:
+  [run 41030352762](https://github.com/oppenheimmer/nebula/actions/runs/41030352762).
+  FreeBSD: 14.3-RELEASE GENERIC amd64, Clang 19.1.7, CMake 3.31.12, SQLite 3.53.4,
+  Qt package 6.11.2_1, offscreen. OpenBSD: 7.8 GENERIC.MP#28 amd64, Clang 19.1.7,
+  CMake 3.31.8, SQLite 3.50.7, offscreen; that initial log did not print its Qt
+  package version. Added package inventory and verbose test metadata for the next
+  native run. Neither result establishes desktop/IME/reader or native packages.
+- Began M09 packaging preparation ahead of M08 acceptance as independent build/
+  installation infrastructure; a published Linux release remains dependent on
+  M08.2. Selected a Debian 13 amd64 `.deb` development preview (`0.1.0~dev1`),
+  native executable/menu entry, system Qt/SQLite dependencies and separate MIT
+  notice. No third-party libraries or image plugins are bundled. CPack derives
+  ELF dependencies; platform plugins, fonts, cursor support and TLS trust are
+  explicit. Added a dependency/image-plugin update review to the release checklist.
+- Pinned the official Debian manifest and signed Debian/security snapshot to
+  2026-10-30. Final development image is
+  `sha256:6d842b08646e8578f18463f5650e12f20fd70c486cf6c878baa5fa06247f9a85`.
+  GCC/Clang remain 14.2.0/19.1.7; Qt 6.8.2 and SQLite 3.46.1. The first CPack run
+  identified missing `file(1)`; added this development-only tool inside the image.
+- A new package fixture/checker verifies a user-owned dated page, stable block
+  target/backlink, Unicode and managed bytes after deleting their original. The
+  clean runtime has no compiler/CMake. Package install, reinstall, removal and
+  reinstall preserve that workspace; offline launch/new workspace, full-window
+  editing/search, Markdown/JSON, backup/restore and all nine preview/TLS cases
+  passed. The runtime TLS backend was OpenSSL 3.5.7. Build/image preparation can
+  fetch dependencies; fixture checks use no network. Actual checks and final
+  revision will be recorded after resolving BUG-021 and rerunning this package.
+- The first pinned-image GCC and Clang suites passed 15/15. ASan/UBSan exposed
+  BUG-021, so M08.13 was reopened and completion/release claims remain withheld.
+  Snapshot changes and their regressions are being validated. Package/version,
+  build, installation/data-location and recovery details are in
+  [INSTALL.md](docs/INSTALL.md). No host dependency or package was installed.
+
+### Export-contention fix verification — 2026-10-30
+
+- Fixed BUG-021 and completed M08.13 again. The live database is locked only
+  during bounded snapshot-copy steps; long JSON/Markdown validation and file work
+  use a private query-only disk copy. Temporary files use private modes and are
+  removed before success. Export rejects an active source write transaction.
+  Integrity, foreign-key, canonical-reference and attachment checks remain intact.
+- Final GCC and Clang suites passed all 15 CTest groups, including 23 storage-
+  hardening cases. ASan/UBSan passed all 15 as well; the expanded reliability group
+  took 110.46 seconds. Its CTest timeout is now 180 seconds and the maintenance
+  worker wait 60 seconds, based on measured sanitizer overhead and added Markdown
+  coverage; production save/network timeouts are unchanged. Leak detection is off.
+- Core-only passed 2/2. Native Xwayland passed 58 editor, 60 desktop, 13 review-
+  desktop, 18 preview-controller, nine reliability and eight trash-safety cases,
+  excluding setup/cleanup. A complete concurrent backup/JSON/Markdown cycle over
+  the 69,492,736-byte database produced ten typing events and nine autosaves with
+  no save failure; restored/imported documents and managed bytes stayed valid.
+- The earlier false read-only FTS integrity regression (BUG-020) and existing
+  migration/failure/interchange cases continue to pass. Adding the internal storage
+  header exposed a test-only `sql` namespace/helper collision; renamed that helper
+  before the final compiler runs. No warning was disabled.
+- Remaining M08 work is M08.2: actual OS IME/reader acceptance and investigation of
+  the intermittent native activation check, not replaced by these automated
+  composition/focus checks. Final package validation and another native BSD source
+  check follow; no released Linux/BSD package is claimed yet.
+
+### Debian development package verified — 2026-10-30
+
+- Completed M09.1–M09.3 as preparation; M09.4 and a published Linux release
+  remain open pending M08.2 acceptance and resolution of release issues. The
+  package version is explicitly `0.1.0~dev1`, not a completed first release.
+- `./scripts/package-check.sh` generated the amd64 `.deb`, installed it with
+  `dpkg` in a fresh pinned Debian 13 runtime image with no compiler/CMake, and
+  exercised it offline. It verified program/menu/notice files, exact executable
+  bytes, new/opened workspaces, 60 full-window editing/search cases, nine HTTP/TLS
+  preview cases, Markdown/JSON, backup/restore and retained managed attachment
+  bytes/IDs/date values. TLS used OpenSSL 3.5.7 with normal trust/hostname checks.
+- A separate network-disabled image step created an unprivileged user's workspace,
+  reinstalled the package, purged it, and reinstalled it again. All three checks
+  preserved that workspace, references and attachment bytes. The existing schema
+  migration suite separately validates versions 1–9. No earlier public package
+  exists, so this is package replacement/removal plus format-migration evidence.
+- Package artifact: `build-container-gcc/packages/nebula-0.1.0~dev1-x86_64.deb`;
+  SHA-256 `66ed6503304d9600d484ade028b7ed80dae5da45ae12ef256b694a65c85f1a5e`.
+  It stays out of Git. Installed binaries dynamically use Debian's Qt/SQLite;
+  there are no copied third-party libraries/image plugins. `file(1)`'s installed
+  copyright records BSD-2-Clause-alike; it is a build-only packaging dependency.
+- Actual dependency metadata includes glibc ≥2.38, libstdc++ ≥14 and Qt Core ≥6.8.2;
+  the selected verified target is Debian 13 amd64, not every system satisfying
+  those individual constraints. Native Xwayland launch of the installed preview
+  also succeeded. No runtime data folder was mounted from the user and no host
+  package/dependency was installed.
+- README, first-use, dependency, install/recovery and interchange documents now
+  distinguish preview installation from release support. Interrupted export folders
+  can retain a private full-workspace scratch database, including data omitted by
+  Markdown; this is documented, and successful exports remove it. Package builds
+  use explicit Release/non-sanitized/non-fuzz flags. Byte-for-byte package
+  reproducibility is not yet claimed.
+- The final pinned-image compiler/sanitizer/native results and BUG-021 regression
+  evidence are recorded immediately above. Shell syntax, formatter, scope/status,
+  local Markdown links/fences, 78 unique task IDs and `git diff --check` passed.
+  The host has Python GI/pyatspi and an accessibility bus, but IBus reports no
+  address/engine. Merely discovering those facilities does not complete actual
+  OS IME/Orca acceptance; M08.2 stays open. Both native BSD guests will recheck
+  the new source and print their Qt package/test metadata.
 
 ## Technical references discussed
 

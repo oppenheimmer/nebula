@@ -79,7 +79,7 @@ remain supported and are migrated in the new workspace. The original backup is
 unchanged. The restored live workspace removes the snapshot manifest because
 subsequent edits change its database.
 
-File durability and locking use a narrow POSIX adapter (BSD validation pending)
+File durability and locking use a narrow POSIX adapter (native BSD preflight recorded in the roadmap; desktop/release validation pending)
 for regular files, flushes, same-directory hard links and shared/exclusive locks.
 Linux verification is recorded in the roadmap. FreeBSD amd64 and OpenBSD amd64
 behavior each require M10 verification. The current import/audit operations are

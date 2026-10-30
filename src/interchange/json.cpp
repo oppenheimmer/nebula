@@ -315,21 +315,23 @@ std::set<std::string> file_list(const fs::path& root)
     return result;
 }
 } // namespace
-void export_json(const Workspace& workspace, const std::filesystem::path& destination)
+void export_json(const Workspace& source, const std::filesystem::path& destination)
 {
-    sqlite3* database = WorkspaceInternals::connection(workspace);
-    const auto& directory = workspace.directory();
-    if (WorkspaceInternals::schema_version(database) != WorkspaceInternals::current_schema())
+    const auto& directory = source.directory();
+    if (WorkspaceInternals::schema_version(WorkspaceInternals::connection(source)) !=
+        WorkspaceInternals::current_schema())
         throw std::runtime_error("Open and upgrade the workspace before JSON export");
     reject_managed_destination(directory, destination);
     files::WorkspaceLock lock(directory, false);
-    Snapshot snapshot(database);
+    NewDirectory output(destination);
+    ExportSnapshot snapshot(source, destination);
+    const auto& workspace = snapshot.workspace();
+    sqlite3* database = WorkspaceInternals::connection(workspace);
     validate_records(workspace, database);
     const auto data = records(database);
     for (const auto& issue : WorkspaceInternals::audit_unlocked(workspace))
         if (issue.prevents_backup)
             throw std::runtime_error("Incomplete managed files: " + issue.message);
-    NewDirectory output(destination);
     files::make_private_directory(destination / "attachments");
     QJsonArray files;
     for (const auto& name : file_list(directory)) {
@@ -354,6 +356,7 @@ void export_json(const Workspace& workspace, const std::filesystem::path& destin
             directories.push_back(entry.path());
     for (auto i = directories.rbegin(); i != directories.rend(); ++i)
         files::sync_directory(*i);
+    snapshot.close();
     output.complete();
 }
 Workspace import_json(const std::filesystem::path& source, const std::filesystem::path& destination)

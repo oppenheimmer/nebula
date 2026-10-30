@@ -232,7 +232,8 @@ keeps changing, the copy finishes in one step after three restarts. Each attachm
 is hashed once while it is copied; registered hashes/availability are checked against
 those digests, and a versioned database/file manifest is written. Restore verifies
 the manifest once and checks every copied file against it. The rollback journal is
-kept: WAL would avoid reader/writer blocking but needs writable `-wal`/`-shm` files
+kept: JSON/Markdown exports use private chunked database snapshots so their
+serialization does not hold live reader locks. WAL would avoid reader/writer blocking but needs writable `-wal`/`-shm` files
 beside a database that the backup tools mount read-only. Existing/nested
 destinations, symlinks, special files and missing/changed managed bytes are rejected;
 failed output is removed. Restore verifies the complete manifest before creating a
