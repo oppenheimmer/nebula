@@ -4,8 +4,9 @@
 
 Nebula is an always-local, single-user desktop note-taking and diary application.
 Database entries open as pages containing flowing, movable blocks. Linux is the
-initial release target; macOS follows. Zim Desktop Wiki is an additional behavioral
-reference for document links and backlinks. Read `ROADMAP.md` before planning or
+initial release target; FreeBSD and OpenBSD on amd64 follow. Zim Desktop Wiki is
+an additional behavioral reference for document links and backlinks. Read
+`ROADMAP.md` before planning or
 changing the project, and keep work aligned with the current user request.
 
 The roadmap describes intended work; it is not blanket authorization to implement
@@ -28,6 +29,8 @@ environment. Use the existing Docker CLI with `Dockerfile.dev` and
 invoke a host package manager for them. An explicitly selected project-local SDK
 is a fallback, not a global PATH/library configuration. Do not install Podman as a
 prerequisite. Keep SDKs, container build output, and tool caches out of Git.
+Native BSD validation requires separate isolated amd64 machines, VMs or runners
+with environment-scoped dependencies; Linux containers do not validate either BSD.
 
 ## Architecture and dependencies
 
@@ -54,7 +57,8 @@ prerequisite. Keep SDKs, container build output, and tool caches out of Git.
   and import/export identity remapping. Indexing must not create pages or silently
   redirect references by name.
 - Maintain conservative dependency and compiler baselines. Record the reason for
-  new dependencies, their licenses, and their Linux/macOS implications.
+  new dependencies, their licenses, and their Linux, FreeBSD amd64 and OpenBSD
+  amd64 implications.
 - Nebula's own source uses MIT, as selected by the user. Keep third-party licensing
   separate and record platform decisions in the roadmap before distribution.
 
@@ -118,8 +122,8 @@ prerequisite. Keep SDKs, container build output, and tool caches out of Git.
   block's drag target and retain keyboard equivalents.
 - Use representative fixtures and recorded environments for performance claims.
   Establish thresholds before treating a benchmark as a pass/fail release gate.
-- Record Linux and macOS verification separately. A Linux build does not establish
-  that macOS builds or behaves correctly.
+- Record Linux, FreeBSD amd64 and OpenBSD amd64 verification separately. A Linux
+  build does not establish BSD behavior; checking one BSD does not validate the other.
 - Once relevant checks pass, repeat or broaden them only when new changes,
   failures, or unresolved concerns justify it.
 

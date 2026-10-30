@@ -124,4 +124,5 @@ remain unchanged. Process-kill boundary verification is part of M08.
 Linux semantic round-trip fixtures cover all canonical tables, rich/typed values,
 large revisions beyond JavaScript's exact integer range, trash/recovery, duplicate
 titles, reference states, images/inline assets and retained/legacy bytes. Actual
-macOS transfer remains a separate M10 verification requirement.
+transfer between Linux, FreeBSD amd64 and OpenBSD amd64 remains a separate
+M10 verification requirement for each system.

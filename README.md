@@ -2,7 +2,8 @@
 
 An always-local, single-user note-taking and diary application. Database entries
 open as flowing block documents, with Notion-inspired organization and
-Zim-inspired cross-references. Linux comes first; macOS is planned.
+Zim-inspired cross-references. Linux comes first; FreeBSD and OpenBSD on amd64
+are planned.
 
 Workspace pages and properties are stored in a local SQLite database. The separate
 `--demo` mode edits an in-memory sample and discards it on close. Implementation

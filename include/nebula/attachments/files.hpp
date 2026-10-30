@@ -10,7 +10,7 @@ namespace nebula::files {
 struct Digest { std::int64_t size = 0; std::string sha256; };
 // Reports copied bytes; return false to cancel. Called from the copying thread.
 using Progress = std::function<bool(std::int64_t copied, std::int64_t total)>;
-// Linux/macOS adapter. Managed files are immutable, regular, and not symlinks.
+// POSIX adapter; BSD validation is pending. Managed files are immutable and regular.
 Digest digest(const std::filesystem::path& path);
 Digest copy_new(const std::filesystem::path& source, const std::filesystem::path& destination,
                 const Progress& progress = {});

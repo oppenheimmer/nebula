@@ -102,7 +102,8 @@ Recorded environments:
 | Same image; GCC core-only configuration | Standalone core build/tests passed with GUI discovery disabled. |
 | Docker GUI through host Xwayland | Native interaction suite, automatic GUI close, and screenshot capture passed; the screenshot was visually inspected. |
 | Initial RHEL 9.8 investigation; isolated Qt 6.8.3 SDK | Earlier suites built/ran with GCC 11.5 and Clang 21.1.8; superseded by the Docker workflow after the user's isolation requirement. |
-| macOS | Not run; no macOS runner was available. |
+| FreeBSD amd64 | Not run; native build and desktop validation required in M10. |
+| OpenBSD amd64 | Not run; native build and desktop validation required in M10. |
 
 The image tag is `nebula-dev:debian13`; the verified image ID is
 `sha256:d96a2a1a0a4e223d4df47f2088b052961673eb5cc2f3a0e74fe4a0a0893a6f6e`.

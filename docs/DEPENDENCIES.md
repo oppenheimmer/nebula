@@ -69,11 +69,11 @@ internally, exposes standard C++ values, and has no SQLite or Widgets dependency
 The editor does not link the storage module.
 
 `nebula_files` provides managed-file copy/flush/locking and backup manifests. It
-uses the existing Qt Core SHA-256/JSON facilities and a narrow Linux/macOS file
-adapter; no separate hashing or image library was added. The desktop previews
-images using Qt Gui's existing image readers. Filesystem operations require
+uses the existing Qt Core SHA-256/JSON facilities and a narrow POSIX file
+adapter (BSD validation pending); no separate hashing or image library was added.
+The desktop previews images using Qt Gui's existing image readers. Filesystem operations require
 regular files, durable directory/file flushes, same-directory hard links and Unix
-shared/exclusive locks. Linux checks do not establish macOS filesystem behavior;
+shared/exclusive locks. Linux checks do not establish BSD/amd64 filesystem behavior;
 M10 must validate that adapter and the image-reader/plugin distribution.
 
 ## Paste-preview adapter
@@ -94,10 +94,11 @@ OpenSSL 3 uses [Apache License 2.0](https://openssl-library.org/source/license/)
 Packaging must include the selected Qt/TLS plugin and applicable third-party
 notices; this adapter does not settle release-distribution licensing choices.
 
-Qt Network supports Linux and macOS; its
-[TLS backends](https://doc.qt.io/qt-6.8/ssl.html) differ by build/platform. M10
-must verify the shipped backend, certificate trust and plugin deployment on an
-actual macOS runner. Linux checks do not establish macOS HTTPS support.
+M10 must verify Qt Network availability, the shipped
+[TLS backend](https://doc.qt.io/qt-6.8/ssl.html), certificate trust and plugin
+deployment separately on FreeBSD amd64 and OpenBSD amd64. Linux checks do not
+establish BSD HTTPS support; dependency availability and supported versions
+remain platform validation requirements.
 
 ## Licensing and references
 
@@ -110,7 +111,8 @@ options; selected module and third-party notices must accompany a distributed
 package as appropriate. This development image is not a release packaging design.
 Record the exact linked libraries and notices during M09/M10.
 SQLite is [public domain](https://sqlite.org/copyright.html); it has no Qt or GUI
-dependency and is available on both Linux and macOS. The bootstrap uses the
+dependency. M10 must validate its version and required features on each BSD.
+The bootstrap uses the
 [`sqlite_schema` name available since SQLite 3.33](https://sqlite.org/forum/info/d90adfbb0a6eea88);
 FTS5 must be enabled in SQLite for schema 8 search. The development image provides
 it; no new external dependency or minimum version increase is introduced.
@@ -120,8 +122,8 @@ adapter; the document core still builds without Qt/SQLite. See
 
 The separate interchange target uses existing Qt Core, SQLite and managed-file
 adapters. Its Markdown subset has an application-owned parser; no Markdown runtime
-or HTML resource loader is added. Linux/macOS portability follows those existing
-dependencies, with actual macOS verification still required.
+or HTML resource loader is added. BSD/amd64 portability requires verification of
+those existing dependencies on both target systems; no BSD build is claimed yet.
 
 - [Qt licensing](https://doc.qt.io/qt-6/licensing.html)
 - [Qt Widgets](https://doc.qt.io/qt-6/qtwidgets-index.html)
@@ -130,5 +132,8 @@ dependencies, with actual macOS verification still required.
 - [Docker build documentation](https://docs.docker.com/build/)
 - [Docker run reference](https://docs.docker.com/reference/cli/docker/container/run/)
 
-Minimum supported end-user Linux distributions and macOS versions remain open
-platform decisions. Compiling this prototype on Linux does not validate macOS.
+Minimum supported end-user Linux distributions and FreeBSD/OpenBSD versions
+remain open platform decisions. Both BSD targets are amd64 only. Compiling on
+Linux does not validate either BSD, and checking one BSD does not validate the other.
+The Linux Docker workflow cannot supply native BSD validation: use separate
+isolated amd64 machines, VMs or runners with environment-scoped dependencies.

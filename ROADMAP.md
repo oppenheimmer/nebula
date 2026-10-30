@@ -12,8 +12,9 @@ naturally, organize entries through typed properties, cross-reference documents,
 and keep their data usable for the long term.
 
 The application is **always local and single-user**. Linux is the first release
-target; macOS is a planned subsequent target. The architecture must be modular,
-with a documented storage format and conservative C/C++ dependencies.
+target; FreeBSD and OpenBSD on amd64 are planned subsequent targets. The
+architecture must be modular, with a documented storage format and conservative
+C/C++ dependencies.
 
 This describes the behavior we intend to build, not either application's internal
 architecture or a promise of full Notion or Zim format compatibility.
@@ -37,7 +38,7 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Build | CMake; keep compiler and platform requirements explicit. |
 | Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
 | Modularity | UI-independent document core, application operations, storage interfaces, and separate desktop adapters. |
-| Portability | Linux first; compile/smoke and packaging verification on macOS are required in M10. |
+| Portability | Linux first; independent compile/smoke, desktop and packaging verification on FreeBSD amd64 and OpenBSD amd64 are required in M10. |
 | Data ownership | Documented schema, migration paths, backup/restore, and portable exports. |
 
 The following remain implementation decisions rather than settled facts:
@@ -46,8 +47,9 @@ The following remain implementation decisions rather than settled facts:
   rich-text adapter, including whether those checks require architectural changes.
 - Release dependency pinning and third-party distribution notices. The current
   module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
-- Minimum Linux distribution/compiler baseline and macOS deployment target.
-- Linux packaging format and the eventual macOS distribution method.
+- Minimum Linux distribution/compiler baseline and FreeBSD/OpenBSD version
+  baselines (amd64).
+- Linux packaging format and the FreeBSD and OpenBSD distribution methods.
 - Benchmark thresholds; supported search behavior is defined in
   [SEARCH.md](docs/SEARCH.md).
 - Cross-platform verification of the defined lossless interchange and Markdown
@@ -61,7 +63,7 @@ The following remain implementation decisions rather than settled facts:
 | --- | --- | --- |
 | C++ with Qt Widgets | Rich-text facilities, desktop controls, and model/view tables. | Preferred; custom block interactions still need a prototype. |
 | C++ with Qt Quick/QML | Flexible layouts and animated interfaces. | Adds QML and another interface model; a fallback if the editor investigation warrants it. |
-| C with GTK 4, or C++ with gtkmm | Strong Linux foundation; suitable if C or GNOME integration becomes the priority. | macOS integration and packaging need separate investigation. |
+| C with GTK 4, or C++ with gtkmm | Strong Linux foundation; suitable if C or GNOME integration becomes the priority. | BSD/amd64 integration and packaging need separate investigation. |
 | C++ with wxWidgets | Established cross-platform native desktop controls. | Expected to require more custom work for this editor; keep as an alternative. |
 | Markdown files with metadata | Easy external editing and inspection. | Block identity, rich formatting, database queries, and atomic changes require additional machinery. Use for interchange. |
 | JSON files per page | Inspectable, flexible page representation. | Transactions, indexing, and recovery become additional systems. Use versioned JSON for lossless interchange and selected payloads. |
@@ -239,7 +241,8 @@ recovery/restore verification.
   in search and saved database views.
 - A documented, installable Linux release that works offline.
 
-The macOS release follows the Linux release and begins with build and smoke checks.
+FreeBSD and OpenBSD releases target amd64 after the Linux release, beginning with
+independent native build and smoke checks on each system.
 Calendar and other database presentations are possible later extensions. Advanced
 relations, formulas, and broader Notion feature parity are not first-release
 commitments. Dragging files or images into the editor and translating the user
@@ -280,13 +283,13 @@ including material data-handling limitations, rather than a running progress log
 | M07 | Search and portable interchange | M04, M06 | In progress |
 | M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
 | M09 | Linux release | M08 | Not started |
-| M10 | macOS release | M09 | Not started |
+| M10 | FreeBSD and OpenBSD releases (amd64) | M09 | Not started |
 
 ### M00 — Project definition and working conventions
 
 Deliverables: this roadmap and repository management instructions in `AGENTS.md`.
 
-- [x] M00.1 Record the project goal, local-only scope, and Linux/macOS direction.
+- [x] M00.1 Record the project goal, local-only scope, and Linux and BSD/amd64 direction.
 - [x] M00.2 Capture the preferred stack, alternatives, and unresolved decisions.
 - [x] M00.3 Define milestones, deliverables, exit criteria, and tracking conventions.
 - [x] M00.4 Establish project management and Git authorship conventions.
@@ -611,28 +614,41 @@ Exit criteria: a reproducible package installs and runs the agreed offline workf
 on the documented Linux target. Release documentation and the roadmap reflect the
 actual delivered features and remaining issues.
 
-### M10 — macOS release
+### M10 — FreeBSD and OpenBSD releases (amd64)
 
-Deliverables: a macOS application bundle using the same core and workspace format,
-with platform integration and distribution instructions.
+Deliverables: native FreeBSD and OpenBSD packages for amd64, using the same core
+and workspace format, with separate platform verification and installation
+instructions. Other BSD systems and architectures are outside this milestone.
 
-- [ ] M10.1 Compile and smoke-test the core, storage, and desktop targets on
-  a real macOS runner or machine, using a project/runner-scoped SDK. Run applicable
-  tests and record OS/architecture, compiler, Qt, and actual outcomes.
-- [ ] M10.2 Resolve issues found by M10.1 and choose the supported OS
-  and architecture baseline.
-- [ ] M10.3 Adapt menus, Command-key shortcuts, file dialogs, application paths,
-  and bundle resources without moving document rules into platform code.
-- [ ] M10.4 Verify text/input-method behavior, accessibility, attachments, and the
-  complete database/page workflow on macOS.
-- [ ] M10.5 Verify backup/export transfer between Linux and macOS while preserving
-  data; this is manual portability, not synchronization.
-- [ ] M10.6 Package the application, document signing/distribution requirements for
-  the selected channel, and record release checks and limitations.
+- [ ] M10.1 Compile and smoke-test the core, storage, and desktop targets on a
+  real FreeBSD amd64 machine, VM or runner. Keep dependencies in that isolated
+  development environment; run applicable tests and record OS version, compiler,
+  Qt, SQLite, display environment and actual outcomes.
+- [ ] M10.2 Repeat the build and applicable checks independently on OpenBSD amd64
+  in an isolated machine, VM or runner, recording the same environment details.
+- [ ] M10.3 Resolve issues found by M10.1/M10.2; choose and document minimum OS,
+  compiler and dependency versions separately for FreeBSD and OpenBSD. Confirm
+  Qt Widgets/Network, TLS trust and plugin availability without assuming that
+  Linux builds or one BSD establish support for the other.
+- [ ] M10.4 Adapt filesystem durability/locking, paths, dialogs, desktop launch,
+  menus and keyboard shortcuts behind narrow platform adapters. Verify managed
+  attachment copying, save failures, backup/restore and offline operation on both
+  systems; keep document rules independent of platform code.
+- [ ] M10.5 Verify text/input-method behavior, accessibility and the complete
+  database/page workflow on each BSD desktop. Record actual IME, screen-reader,
+  display and Qt results separately, including unavailable checks.
+- [ ] M10.6 Verify backup/export transfer among Linux, FreeBSD amd64 and OpenBSD
+  amd64 while preserving notes, IDs, references and attachment bytes; this is
+  manual portability, not synchronization.
+- [ ] M10.7 Select native packaging and installation methods for each BSD,
+  document dependencies and license notices, and verify clean install, upgrade,
+  launch and removal without deleting workspaces. Record release versions,
+  distribution procedures, checks and known limitations separately.
 
-Exit criteria: the macOS package completes the agreed offline workflow and passes
-cross-platform data-transfer checks. Its supported environments and distribution
-procedure are documented.
+Exit criteria: both BSD amd64 packages complete the agreed offline workflow and
+cross-platform data-transfer checks on their recorded supported environments.
+Each system has its own build, desktop, data-reliability and package evidence;
+a Linux build or a successful check on one BSD cannot complete the other.
 
 Progress from the Suggestions implementation (2026-10-30), without completing an M08
 task: integrated benchmarks over representative fixtures now exist for M08.3
@@ -652,7 +668,7 @@ These are anticipated risks, not encountered bugs.
 | R03 | Attachment files and database references may diverge after interruption or backup. | Define import ordering, reconciliation, retention, and a consistent backup manifest. | Open |
 | R04 | Search tokenization may be unsuitable for some writing systems. | Define supported behavior and test representative language fixtures in M07. | Open |
 | R05 | Large documents or databases may expose rendering/query bottlenecks. | Establish workloads and thresholds in M01; measure again in M08. | Open |
-| R06 | Linux assumptions may make the macOS port expensive. | Keep platform adapters narrow and begin the macOS milestone with compile/smoke checks. | Open |
+| R06 | Linux assumptions may make FreeBSD/OpenBSD ports expensive. | Keep platform adapters narrow; start with independent native amd64 compile/smoke checks and validate filesystem, Qt/TLS and desktop behavior on each BSD. | Open |
 | R07 | Dependency licensing or platform requirements may constrain distribution. | Resolve the license/module baseline in M01 and validate packaging requirements before release. | Open |
 | R08 | Autosave or migration failures may lose data or falsely report that it was saved. | Define durability semantics, expose failures, and test recovery and migrations. | Open |
 | R09 | References may be redirected by duplicate/reused titles, or backlinks may become stale after edits/imports. | Use permanent target IDs, explicit unresolved states, a rebuildable derived link index, and lifecycle/round-trip checks. | Open |
@@ -1156,7 +1172,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
 
   Decide whether loopback and private-network hosts are fetched without confirmation:
   a pasted link can reach a router or local admin page. Record the Qt Network/TLS
-  backend licence and macOS implications in DEPENDENCIES.md. Test the success,
+  backend licence and BSD/amd64 implications in DEPENDENCIES.md. Test the success,
   failure, timeout, oversize and cancel paths against a loopback server inside the
   network-less test container.
 - **SUG-02 — `dev.sh` mounts the destination's parent read-write** (Medium,
@@ -1179,7 +1195,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
   version, allowing FTS5 shadow tables, and fail on any extras. Enable
   `SQLITE_DBCONFIG_DEFENSIVE` and `PRAGMA trusted_schema=OFF`. Where the SQLite
   baseline allows, also disable triggers and views on Nebula connections. This
-  matters for the Linux↔macOS transfers in M10.5.
+  matters for the Linux↔FreeBSD/OpenBSD amd64 transfers in M10.6.
 - **SUG-04 — Use private file modes for diary data** (Medium, Confirmed, M08).
   Workspace, backup and export folders get default directory modes
   (`src/storage/workspace.cpp:58`), and SQLite creates `nebula.sqlite3` with its
@@ -1476,7 +1492,7 @@ checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
     Markdown import, HTML paste and the backup manifest;
   - `-Werror` for project targets;
   - a CI workflow that runs `test gcc`, `test clang` and `test core`, later joined by
-    the macOS runner.
+    independent FreeBSD amd64 and OpenBSD amd64 runners.
 
   Use the CI workflow to stress-test BUG-014.
 - **SUG-41 — Check required SQLite features up front** (Low, M09.1). CMake checks
@@ -1534,7 +1550,7 @@ Initial failures were corrected rather than omitted: an outline-test fixture use
 the wrong block ID, the mock launcher could not execute on `/tmp`'s container
 mount, native test focus needed activation waits (G16/G17), and the outline height
 and unrelated-database edge case became BUG-005/BUG-006. BUG-004's exact original
-session remains unconfirmed. Real OS IME, screen-reader, and macOS checks remain
+session remains unconfirmed. Real OS IME, screen-reader, and BSD/amd64 checks remain
 unperformed; no production note persistence or autosave is claimed.
 
 Future entries should record the steps changed, checks actually performed and
@@ -1568,7 +1584,7 @@ Do not record tests as passed when they were unavailable or not run.
   still needs dividers, rich clipboard, wiki entry, full link lifecycle/navigation,
   input/accessibility checks, and the remaining editor polish. M06 attachment
   ownership/import/manifest recovery, M07 search/interchange, M08 reliability,
-  and Linux/macOS packaging remain unfinished. Do not infer completion from this
+  and Linux and BSD/amd64 packaging remain unfinished. Do not infer completion from this
   checkpoint or restore the old in-memory-only README warning for workspace mode.
 
 ### Grip-dot mouse reordering checkpoint — 2026-10-30
@@ -1590,7 +1606,7 @@ Do not record tests as passed when they were unavailable or not run.
 ### Dependency and validation schedule correction — 2026-10-30
 
 At the user's direction, actual OS IME/screen-reader acceptance belongs to M08.2
-and macOS compile/smoke checks begin M10. Tasks were moved into their destination
+and BSD/amd64 compile/smoke checks begin M10. Tasks were moved into their destination
 lists and renumbered in execution order, with no transfer notices left behind.
 M01/M02 satisfy their automated/Linux scope; the later checks remain unperformed.
 The M03 list also follows implementation order from schema/workspace setup through
@@ -1618,7 +1634,7 @@ record operations, migrations, autosave, references, recovery, and verification.
 - Next: finish M05 block types, rich clipboard and typing undo grouping, followed
   by the wiki/reference navigation workflow. M06 managed attachments, M07 search/
   interchange, M08 reliability/accessibility, and platform releases remain open.
-  Real OS IME, screen-reader, and macOS checks have not been performed.
+  Real OS IME, screen-reader, and BSD/amd64 checks have not been performed.
 
 ### Divider, clipboard, and undo checkpoint — 2026-10-30
 
@@ -1676,7 +1692,7 @@ begin as part of this shutdown.
   directory but has no managed-file manifest/retention verification yet. Cut/paste
   creates copied identities; default labels, cross-page block transfer, wiki
   completion, outgoing links/history, and explicit unresolved create/select actions
-  remain incomplete. Real OS IME/screen-reader and macOS checks are unperformed;
+  remain incomplete. Real OS IME/screen-reader and BSD/amd64 checks are unperformed;
   installed IBus/Orca do not establish acceptance.
 - **Resume point:** read `AGENTS.md` and this roadmap, inspect `git status` and the
   latest commits, then continue M05.6/M05.8–M05.10 with focused tests. Start with
@@ -1722,7 +1738,7 @@ begin as part of this shutdown.
   `sha256:d96a2a1a0a4e223d4df47f2088b052961673eb5cc2f3a0e74fe4a0a0893a6f6e`,
   Qt 6.8.2, SQLite 3.46.1, GCC 14.2.0, and Clang 19.1.7 on the RHEL 9.8 x86_64
   host. No host dependencies were installed. Documentation/task/link/whitespace
-  checks passed. Real OS IME, screen-reader, and macOS checks remain unperformed;
+  checks passed. Real OS IME, screen-reader, and BSD/amd64 checks remain unperformed;
   no new performance claim is made by this change.
 - **Next:** M05.8 wiki entry/completion and picker polish, M05.9 outgoing links/
   source context and back/forward position history, and M05.10 default/custom
@@ -1755,7 +1771,7 @@ begin as part of this shutdown.
   environment is unchanged from the preceding checkpoint. A newly unused helper
   produced a compiler warning during the initial build; it was removed and final
   GCC/Clang builds are clean. Whitespace, ordered-task, Markdown-link and fence
-  checks passed. Actual OS IME, reader, and macOS acceptance remain unperformed.
+  checks passed. Actual OS IME, reader, and BSD/amd64 acceptance remain unperformed.
 - **Next:** execute M05.9 outgoing/source-context navigation, keyboard following,
   and back/forward position history, followed by M05.10 and the managed-attachment
   milestones. M05 remains In progress.
@@ -1786,7 +1802,7 @@ begin as part of this shutdown.
   caught a mixed-type `auto` declaration in the new history method; splitting the
   declarations fixed compilation. No core implementation changed, so the separate
   core-only configuration was not rerun. Documentation/link/status/whitespace
-  checks passed. OS IME/reader and macOS acceptance remain unperformed.
+  checks passed. OS IME/reader and BSD/amd64 acceptance remain unperformed.
 - **Next:** M05.10 explicit unresolved create/select actions and default/custom
   labels through rename and undo/redo; then M06 managed attachments. M05 remains
   In progress until that behavior and its exit criteria have evidence.
@@ -1828,7 +1844,7 @@ begin as part of this shutdown.
   were also active, remains within the M01 investigation budgets; it is not a
   statistical or release performance claim. Ordered tasks, statuses, local links,
   balanced fences and `git diff --check` passed. Actual OS IME/screen-reader checks
-  remain M08 work, and macOS checks remain M10; none is claimed here.
+  remain M08 work, and BSD/amd64 checks remain M10; none is claimed here.
 - **Next:** execute M06.1–M06.3 managed attachment import/ownership, interruption
   and cleanup rules, and database-plus-file manifest backup/restore. M06 remains
   In progress; M07–M10 remain Not started. Current schema/payload contracts are in
@@ -1845,7 +1861,7 @@ begin as part of this shutdown.
   files where possible. Source modification/removal does not change managed bytes.
   Symlinks/special files are rejected, including before image-reader access.
 - Added a separate `nebula_files` adapter using existing Qt Core hash/JSON and
-  Linux/macOS file APIs. Image cards preview managed bytes through existing Qt Gui
+  POSIX file APIs (BSD/amd64 validation pending). Image cards preview managed bytes through existing Qt Gui
   readers with bounded decode/cache sizes. File IDs survive clipboard, movement,
   deletion/undo and reopen. Local open/copy and availability/audit controls are
   keyboard-accessible. The Docker launcher adds only an explicitly selected
@@ -1853,7 +1869,7 @@ begin as part of this shutdown.
 - Schema 7 adds the attachment registry; block payload 3 carries block/inline
   managed IDs while reading payloads 1–2. Versions 1–6 migrate with preserved notes,
   legacy label-only cards and recovery fragments. No new external library was
-  added. macOS compilation/filesystem behavior remains M10 work.
+  added. BSD/amd64 compilation/filesystem behavior remains M10 work.
 - Shared backup locks and exclusive import/cleanup locks protect immutable files.
   Backups copy a consistent SQLite snapshot and all retained attachment bytes,
   validate registered metadata/hashes, and durably write manifest version 1.
@@ -1880,7 +1896,7 @@ begin as part of this shutdown.
   syntax, ordered tasks, local links, fences and `git diff --check` passed.
   Interrupted-import handling uses orphan fixtures and transactional failures;
   process-kill tests at every file/rename/commit boundary remain M08 work. External
-  desktop-handler opening, actual OS IME/reader and macOS checks remain unperformed.
+  desktop-handler opening, actual OS IME/reader and BSD/amd64 checks remain unperformed.
   Imports/audits are synchronous; large-file responsiveness is not claimed.
 - **Next:** M07.1–M07.2 indexed search/tokenization and navigation, M07.3–M07.6
   Markdown/lossless interchange and validation, and M07.7 reference filters in
@@ -1913,7 +1929,7 @@ begin as part of this shutdown.
   cases, including the search shortcut, Enter selection, exact block, Back history,
   cancel, scoped results and repair with pending edits. The initial shortcut test
   needed to wait for modal-to-window activation before sending Back; both
-  offscreen and native checks then passed. Actual OS IME/reader and macOS checks
+  offscreen and native checks then passed. Actual OS IME/reader and BSD/amd64 checks
   remain unperformed. Build environment is unchanged from M06. All 69 unique
   task IDs, local documentation links/fences and `git diff --check` passed.
 - **Next:** M07.3 Markdown subset, M07.4–M07.6 lossless portable interchange and
@@ -1956,7 +1972,7 @@ begin as part of this shutdown.
   prose documentation links/fences, Bash syntax and `git diff --check` passed.
 - **Next:** implement lossless JSON and complete M07.4–M07.6 validation/round trips,
   then M07.7 reference filters. M07 remains In progress; M08–M10 remain Not started.
-  The Linux environment is unchanged; OS IME/reader and macOS remain unverified.
+  The Linux environment is unchanged; OS IME/reader and BSD/amd64 remain unverified.
 
 ### Lossless interchange checkpoint — 2026-10-30
 
@@ -1994,9 +2010,10 @@ begin as part of this shutdown.
   function returns. Real Docker JSON export/import through Unicode/comma/quote
   paths preserved every canonical row and file byte in the M07 disposable fixture.
   Clang identified a C++20 structured-binding capture extension; the code now uses
-  ordinary C++17 references. OS IME/reader, crash-kill boundaries and actual macOS
-  transfer remain separately required. GitHub access is available for a real
-  macOS runner when its milestone is reached; no macOS verification is claimed.
+  ordinary C++17 references. OS IME/reader, crash-kill boundaries and actual BSD/amd64
+  transfer remain separately required. GitHub repository access is available;
+  native BSD runner availability must be established in M10. No
+  BSD/amd64 verification is claimed.
   All 69 task IDs, prose links/fences, Bash syntax and `git diff --check` passed.
 - **Next:** M07.7 structured incoming/outgoing reference filters in search and
   saved views. M07 remains In progress; M08–M10 remain Not started.
@@ -2050,7 +2067,7 @@ begin as part of this shutdown.
   images/thumbnails. AGENTS.md records that narrow exception. No preview network
   code/dependency was introduced in this checkpoint. M08–M10 remain Not started.
   Resume with M07.8, then reliability/accessibility/performance and release work;
-  actual OS IME, screen-reader and macOS verification remain unperformed.
+  actual OS IME, screen-reader and BSD/amd64 verification remain unperformed.
 
 ### Architecture, security and quality review — 2026-10-30
 
@@ -2112,7 +2129,7 @@ begin as part of this shutdown.
   GCC build cache needed a clean rebuild after switching back to HEAD APIs;
   that clean standalone build passed. No host dependencies were installed.
 - All 71 milestone task IDs are unique. Local documentation links, Markdown
-  fences and `git diff --check` passed. Actual OS IME, screen-reader and macOS
+  fences and `git diff --check` passed. Actual OS IME, screen-reader and BSD/amd64
   checks remain unperformed. M07/M08 remain In progress; next is M07.8, followed
   by the remaining reliability, accessibility, performance and release work.
 
@@ -2135,7 +2152,7 @@ begin as part of this shutdown.
   pages; redirects cannot change host, scheme or port. No image/subresource
   retrieval, background refresh or other networking is introduced. Qt Network
   adds no host installation or SDK baseline increase. Dependency, license and
-  Linux/macOS TLS deployment implications are in
+  Linux and BSD/amd64 TLS deployment implications are in
   [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 - **Verification:** isolated HEAD-plus-adapter GCC/Clang builds passed all nine
   CTest entries. The final nine preview cases also passed focused GCC/Clang and
@@ -2159,7 +2176,7 @@ begin as part of this shutdown.
   capability, and verify full-window removal, save/reopen, clipboard and undo/redo.
   The application does not yet offer pasted-link previews. M07.8 stays unchecked,
   and M07/M08 remain In progress. Shared-window integration awaits the concurrent
-  agent as requested; OS IME, screen-reader and macOS checks remain open.
+  agent as requested; OS IME, screen-reader and BSD/amd64 checks remain open.
 
 ### Suggestions implementation checkpoint — 2026-10-30
 
@@ -2228,7 +2245,7 @@ begin as part of this shutdown.
   ms table switch and 128 MiB peak RSS.
 - **Not verified:** the CI workflow has not run on a GitHub runner yet; libFuzzer
   and clang-format are absent from the current image, so only the deterministic
-  fuzz driver ran; real OS IME, screen-reader, GUI/CLI lock contention and macOS
+  fuzz driver ran; real OS IME, screen-reader, GUI/CLI lock contention and BSD/amd64
   checks remain unperformed.
 - **Pending work:** the remaining follow-ups for SUG-22, SUG-28, SUG-34, SUG-36,
   SUG-38 and SUG-40 are scheduled as M08.8. M07.8 editor integration of link
@@ -2260,6 +2277,25 @@ begin as part of this shutdown.
   acceptance remain M08 work. The host has IBus and Orca 40.3 executables, but
   IBus currently reports no connected bus/engine; their availability alone does
   not establish input-method or screen-reader verification.
+
+### BSD amd64 platform retargeting — 2026-10-30
+
+- At the user's direction, M10 now targets **FreeBSD amd64** and **OpenBSD amd64**
+  after the Linux release. Replaced the previous follow-on platform throughout
+  the roadmap, including deferred-platform references in historical checkpoints;
+  their recorded Linux check outcomes are unchanged. Updated README, project
+  instructions and dependency, attachment, interchange and feasibility documents
+  to match the new targets.
+- M10.1/M10.2 require independent native builds; M10.3–M10.7 cover separate
+  supported baselines, platform adapters, desktop/IME/accessibility, data transfer
+  and native packages. No application-bundle, platform signing or Command-key
+  work remains scheduled. Dependency availability, TLS deployment and filesystem
+  behavior must be verified on each BSD. Linux containers remain the Linux
+  development workflow; BSD requires isolated amd64 environments.
+- **Verification:** reviewed scope, statuses, task ordering, local documentation
+  links and Markdown fences; checked for obsolete platform plans and ran
+  `git diff --check`. This is a documentation retargeting; no BSD build, desktop
+  test or supported OS-version claim is made. M10 remains Not started.
 
 ## Technical references discussed
 
