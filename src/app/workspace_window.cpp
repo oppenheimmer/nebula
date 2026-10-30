@@ -1,5 +1,8 @@
+#include "nebula/interchange/interchange.hpp"
 #include "nebula/app/workspace_window.hpp"
 #include "nebula/app/trash_controls.hpp"
+#include "nebula/app/property_text.hpp"
+#include "nebula/attachments/files.hpp"
 #include "nebula/editor/page_editor.hpp"
 #include "nebula/core/wiki.hpp"
 #include <QAction>
@@ -40,44 +43,44 @@
 #include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QEventLoop>
+#include <QProgressDialog>
+#include <QStandardPaths>
+#include <QUuid>
 #include <algorithm>
+#include <atomic>
+#include <thread>
+#include <unistd.h>
 
 namespace nebula {
 namespace {
 QString q(const std::string& text) { return QString::fromUtf8(text.data(),qsizetype(text.size())); }
 std::string s(const QString& text) { return text.toUtf8().toStdString(); }
-QString display(const PropertyValue& value) {
-    return std::visit([](const auto& v) -> QString {
-        using T=std::decay_t<decltype(v)>;
-        if constexpr (std::is_same_v<T,std::monostate>) return {};
-        else if constexpr (std::is_same_v<T,std::string>) return q(v);
-        else if constexpr (std::is_same_v<T,Date>) return q(v.iso);
-        else if constexpr (std::is_same_v<T,double>) return QString::number(v,'g',16);
-        else if constexpr (std::is_same_v<T,bool>) return v ? "true" : "false";
-        else { QStringList tags; for (const auto& tag:v) tags<<q(tag); return tags.join(", "); }
-    },value);
+QString display(const PropertyValue& value) { return q(format_property(value)); }
+PropertyValue parse_value(PropertyKind kind, const QString& text) { return parse_property(kind,s(text)); }
+// Messages often contain names from notes or imported files; never interpret them as HTML.
+void notify(QWidget* parent, QMessageBox::Icon icon, const QString& title, const QString& text) {
+    QMessageBox box(icon,title,text,QMessageBox::Ok,parent); box.setTextFormat(Qt::PlainText); box.exec();
 }
-PropertyValue parse_value(PropertyKind kind, const QString& text) {
-    if (text.trimmed().isEmpty()) return {};
-    PropertyValue value;
-    switch (kind) {
-    case PropertyKind::Text: value=s(text); break;
-    case PropertyKind::Number: { bool ok=false; const double n=text.toDouble(&ok); if (!ok) throw std::invalid_argument("Enter a number"); value=n; break; }
-    case PropertyKind::Date: value=Date{s(text.trimmed())}; break;
-    case PropertyKind::Checkbox:
-        if (text.trimmed()=="true" || text.trimmed()=="1") value=true;
-        else if (text.trimmed()=="false" || text.trimmed()=="0") value=false;
-        else throw std::invalid_argument("Enter true or false for a checkbox");
-        break;
-    case PropertyKind::Tags: {
-        std::vector<std::string> tags;
-        for (const auto& tag:text.split(',')) tags.push_back(s(tag.trimmed()));
-        value=std::move(tags); break;
-    }
-    }
-    validate_value(kind,value); return value;
+void error(QWidget* parent, const std::exception& e) { notify(parent,QMessageBox::Warning,"Nebula",q(e.what())); }
+bool confirm(QWidget* parent, const char* name, const QString& title, const QString& text) {
+    QMessageBox box(QMessageBox::Question,title,text,QMessageBox::Yes|QMessageBox::Cancel,parent);
+    box.setObjectName(name); box.setTextFormat(Qt::PlainText); box.setDefaultButton(QMessageBox::Cancel);
+    return box.exec()==QMessageBox::Yes;
 }
-void error(QWidget* parent, const std::exception& e) { QMessageBox::warning(parent,"Nebula",q(e.what())); }
+// A cell editor is a focused child of the table's viewport.
+bool table_editing(const QTableWidget* table) {
+    const auto* focus=QApplication::focusWidget();
+    return focus && focus!=table && focus!=table->viewport() && table->isAncestorOf(focus);
+}
+// A safe local name for an opened copy: no separators, controls or leading dot.
+QString copy_name(const std::string& name) {
+    QString result;
+    for (const auto c:q(name)) result+=(c=='/' || c=='\\' || c.category()==QChar::Other_Control || c.category()==QChar::Other_Format)?QChar('_'):c;
+    while (result.startsWith('.')) result.remove(0,1);
+    result=result.left(120).trimmed();
+    return result.isEmpty()?QString("attachment"):result;
+}
 std::vector<LinkFilter> selected_link_filters(QTableWidget* table)
 {
     std::vector<LinkFilter> result;
@@ -95,9 +98,9 @@ QWidget* link_filter_controls(QWidget* parent,const Workspace& workspace,const s
     table->setMaximumHeight(180); layout->addWidget(table);
     auto* add=new QPushButton("Add reference filter",panel); add->setObjectName("addLinkFilter"); layout->addWidget(add);
     std::vector<std::pair<QString,QString>> choices;
-    for(const auto& db:workspace.databases(true)) for(const auto& page:workspace.pages(db.id,true))
-        choices.push_back({q(db.name)+" / "+q(page.title)+" ["+q(page.document.id.substr(0,8))+"]"+(db.trashed || page.trashed?" (trashed)":""),
-            q(page.document.id)});
+    for(const auto& page:workspace.page_summaries(true))
+        choices.push_back({q(page.database_name)+" / "+q(page.title)+" ["+q(page.id.substr(0,8))+"]"+(page.database_trashed || page.trashed?" (trashed)":""),
+            q(page.id)});
     auto append=[table,add,choices](const LinkFilter& filter) {
         const auto row=table->rowCount(); table->insertRow(row);
         auto* relation=new QComboBox(table); relation->setAccessibleName("Reference relation");
@@ -125,7 +128,7 @@ QWidget* link_filter_controls(QWidget* parent,const Workspace& workspace,const s
 WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_path, QWidget* parent)
     : PrototypeWindow(Page{"no-page",{{"placeholder","",BlockKind::Paragraph,{}}}},
           display_path.isEmpty()?q(workspace.directory().u8string()):display_path,false,parent),
-      workspace_(workspace),session_(workspace)
+      workspace_(workspace),session_(workspace),link_targets_(workspace)
 {
     setWindowTitle("Nebula"); resize(1300,850);
     findChild<QLabel*>("prototypeNotice")->hide();
@@ -136,6 +139,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     title_=new QLineEdit(page_panel); title_->setObjectName("pageTitle"); title_->setPlaceholderText("Page title");
     title_->setAccessibleName("Page title"); title_->setStyleSheet("font-size: 20px; padding: 6px;");
     save_state_=new QLabel("Select an entry or create a page.",page_panel); save_state_->setObjectName("saveState");
+    save_state_->setTextFormat(Qt::PlainText); save_state_->setWordWrap(true);
     auto* page_header=new QWidget(page_panel); auto* page_header_layout=new QHBoxLayout(page_header); page_header_layout->setContentsMargins(0,0,0,0);
     auto* page_trash=new QToolButton(page_header); page_trash->setObjectName("trashPageButton");
     page_header_layout->addWidget(title_,1); page_header_layout->addWidget(page_trash);
@@ -175,6 +179,9 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     operation("Move block to page…","moveBlockToPage",[this]{ move_block(); })->setShortcut(QKeySequence("Ctrl+Shift+M"));
     operation("Undo block transfer","undoBlockTransfer",[this]{ undo_block_transfer(false); })->setShortcut(QKeySequence("Ctrl+Alt+Z"));
     operation("Redo block transfer","redoBlockTransfer",[this]{ undo_block_transfer(true); })->setShortcut(QKeySequence("Ctrl+Alt+Shift+Z"));
+    file->addSeparator();
+    operation("Keep my version as a new page","saveConflictCopy",[this]{ save_conflict_copy(); })->setEnabled(false);
+    operation("Check workspace integrity…","checkIntegrity",[this]{ check_integrity(); });
     auto* navigation_menu=menuBar()->addMenu("&Navigate");
     auto* back=navigation_menu->addAction("Back"); back->setObjectName("navigateBack"); back->setShortcut(QKeySequence("Alt+Left"));
     auto* forward=navigation_menu->addAction("Forward"); forward->setObjectName("navigateForward"); forward->setShortcut(QKeySequence("Alt+Right"));
@@ -190,10 +197,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     };
     attachment_action("Import image…","importImage",[this]{ import_attachment(true); });
     attachment_action("Import file…","importFile",[this]{ import_attachment(false); });
-    attachment_action("Open current attachment","openAttachment",[this]{
-        const auto path=workspace_.attachment_path(page_editor()->current_attachment_id());
-        if (!QDesktopServices::openUrl(QUrl::fromLocalFile(q(path.u8string())))) throw std::runtime_error("No desktop application could open this file; use Save a copy…");
-    });
+    attachment_action("Open current attachment","openAttachment",[this]{ open_attachment(); });
     attachment_action("Save a copy…","exportAttachment",[this]{ export_attachment(); });
     attachment_action("Check managed files…","auditAttachments",[this]{ show_attachment_audit(); });
     auto* search_menu=menuBar()->addMenu("&Search");
@@ -210,7 +214,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     connect(search,&QAction::triggered,this,[this]{ try { show_search(); } catch(const std::exception& e){error(this,e);} });
     auto* rebuild=search_menu->addAction("Rebuild search and reference indexes"); rebuild->setObjectName("rebuildSearch");
     connect(rebuild,&QAction::triggered,this,[this]{
-        try { workspace_.rebuild_links(); workspace_.rebuild_search(); if (flush()) statusBar()->showMessage("Search and reference indexes rebuilt from saved notes.",6000); }
+        try { workspace_.rebuild_links(); workspace_.rebuild_search(); link_targets_.invalidate(); if (flush()) statusBar()->showMessage("Search and reference indexes rebuilt from saved notes.",6000); }
         catch(const std::exception& e) {error(this,e);}
     });
     addToolBarBreak();
@@ -222,11 +226,11 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     add("New database","newDatabase",[this]{
         if (!flush()) return;
         bool ok=false; const auto name=QInputDialog::getText(this,"New database","Name",QLineEdit::Normal,"Notes",&ok);
-        if (ok && !name.trimmed().isEmpty()) { auto db=workspace_.create_database(s(name.trimmed())); refresh_databases(); databases_->setCurrentIndex(databases_->findData(q(db.id))); }
+        if (ok && !name.trimmed().isEmpty()) { auto db=workspace_.create_database(s(name.trimmed())); link_targets_.invalidate(); refresh_databases(); databases_->setCurrentIndex(databases_->findData(q(db.id))); }
     });
     add("Rename database","renameDatabase",[this]{
         bool ok=false; const auto name=QInputDialog::getText(this,"Rename database","Name",QLineEdit::Normal,databases_->currentText(),&ok);
-        if (ok && !name.trimmed().isEmpty()) { workspace_.rename_database(database_id_,s(name.trimmed())); refresh_databases(); }
+        if (ok && !name.trimmed().isEmpty()) { workspace_.rename_database(database_id_,s(name.trimmed())); link_targets_.invalidate(); refresh_databases(); }
     });
     add("New page","newPage",[this]{
         bool ok=false; const auto title=QInputDialog::getText(this,"New page","Title",QLineEdit::Normal,"Untitled",&ok);
@@ -236,17 +240,16 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         if (!flush() || database_id_.empty()) return;
         bool ok=false; const auto date=QInputDialog::getText(this,"Journal entry","Entry date (YYYY-MM-DD)",QLineEdit::Normal,QDate::currentDate().toString(Qt::ISODate),&ok);
         if (!ok) return;
-        if (!valid_date(s(date))) throw std::invalid_argument("Enter a valid YYYY-MM-DD date");
-        auto found=std::find_if(definitions_.begin(),definitions_.end(),[](const auto& d){ return d.name=="Entry date" && d.kind==PropertyKind::Date; });
-        std::string date_id;
-        if (found==definitions_.end()) date_id=workspace_.add_property(database_id_,"Entry date",PropertyKind::Date).id;
-        else date_id=found->id;
-        auto page=workspace_.create_page(database_id_,s(date),{{date_id,Date{s(date)}}});
-        refresh_table(); open_page(page.document.id);
+        // The Entry date property (if missing) and the page commit together.
+        auto page=workspace_.create_dated_entry(database_id_,s(date.trimmed()));
+        link_targets_.invalidate(); refresh_table(); open_page(page.document.id);
     });
     add("Add property","addProperty",[this]{ add_property(); });
+    add("Rename property","renameProperty",[this]{ rename_property(); });
+    add("Delete property","deleteProperty",[this]{ delete_property(); });
     add("New view","newView",[this]{ edit_view(true); });
     add("Edit view","editView",[this]{ edit_view(false); });
+    add("Delete view","deleteView",[this]{ delete_view(); });
     add("Link…","insertLink",[this]{ insert_link(); });
     auto* block_trash_action=operation("Move block to Trash…","trashBlock",[this]{ trash_current_block(); });
     auto* page_trash_action=operation("Move page to Trash…","trashPage",[this]{ trash_current_page(); });
@@ -258,6 +261,12 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     configure_trash_button(block_trash,block_trash_action,TrashScope::Block); block_bar->addWidget(block_trash);
     add("Restore…","restoreTrash",[this]{ show_trash(); });
     autosave_=new QTimer(this); autosave_->setSingleShot(true); autosave_->setInterval(500);
+    // Table refreshes triggered by saves run outside item signals and wait for open cell editors.
+    table_refresh_=new QTimer(this); table_refresh_->setSingleShot(true); table_refresh_->setInterval(0);
+    connect(table_refresh_,&QTimer::timeout,this,[this]{
+        if (table_editing(table_)) { table_refresh_->start(300); return; }
+        refresh_table();
+    });
     connect(autosave_,&QTimer::timeout,this,[this]{ flush(); });
     connect(page_editor(),&QTextEdit::textChanged,this,&WorkspaceWindow::mark_pending);
     connect(page_editor(),&QTextEdit::cursorPositionChanged,this,&WorkspaceWindow::update_attachment_actions);
@@ -272,6 +281,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     });
     connect(table_,&QTableWidget::itemChanged,this,[this](QTableWidgetItem* item){
         if (loading_) return;
+        in_item_change_=true; struct Reset { bool& flag; ~Reset() { flag=false; } } reset{in_item_change_};
         try {
             const auto id=s(table_->item(item->row(),0)->data(Qt::UserRole).toString());
             const int column=item->column();
@@ -284,7 +294,7 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
                 if (def!=definitions_.end()) session_.set_property(property_id,parse_value(def->kind,text));
             }
             flush();
-        } catch (const std::exception& e) { error(this,e); refresh_table(); }
+        } catch (const std::exception& e) { error(this,e); schedule_table_refresh(); }
     });
     disconnect(page_editor(),&PageEditor::reference_activated,this,nullptr);
     connect(page_editor(),&PageEditor::reference_activated,this,[this](int kind,const QString& id){ follow_reference(ReferenceKind(kind),s(id)); });
@@ -318,14 +328,8 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
             page_editor()->unresolved_reference_activated(item->data(Qt::UserRole+3).toString(),item->data(Qt::UserRole+4).toString());
         } else follow_reference(ReferenceKind(item->data(Qt::UserRole).toInt()),s(id));
     });
-    if (workspace_.databases(true).empty()) {
-        const auto db=workspace_.create_database("Journal");
-        View all; all.database_id=db.id; all.name="All entries";
-        all.visible_properties.push_back(workspace_.add_property(db.id,"Entry date",PropertyKind::Date).id);
-        all.visible_properties.push_back(workspace_.add_property(db.id,"Mood",PropertyKind::Text).id);
-        all.visible_properties.push_back(workspace_.add_property(db.id,"Tags",PropertyKind::Tags).id);
-        workspace_.save_view(all);
-    }
+    // The default Journal, its properties and view are created in one transaction.
+    if (workspace_.databases(true).empty()) workspace_.create_journal();
     refresh_databases();
 }
 void WorkspaceWindow::mark_pending()
@@ -340,16 +344,50 @@ bool WorkspaceWindow::flush()
     autosave_->stop();
     if (!pending_ && !session_.dirty()) return true;
     try {
-        if (pending_) { session_.replace_document(page_editor()->snapshot()); session_.set_title(s(title_->text())); pending_=false; }
-        if (!session_.save()) throw std::runtime_error(session_.error());
-        save_state_->setText("Saved locally"); refresh_table(); update_links(); return true;
+        if (pending_) {
+            session_.replace_document(page_editor()->snapshot()); session_.set_title(s(title_->text()));
+            session_.note_absorbed(page_editor()->take_absorbed_blocks()); pending_=false;
+        }
+        if (!session_.save()) throw StorageError(session_.error_kind(),session_.error());
+        findChild<QAction*>("saveConflictCopy")->setEnabled(false);
+        save_state_->setText("Saved locally"); refresh_after_save(); return true;
     } catch (const std::exception& e) {
-        save_state_->setText("Save failed — "+q(e.what())+". Press Ctrl+S to retry."); return false;
+        const bool conflict=error_kind(e)==ErrorKind::Conflict;
+        findChild<QAction*>("saveConflictCopy")->setEnabled(conflict);
+        save_state_->setText(conflict
+            ?"Save conflict — this page changed elsewhere. Use Workspace → Keep my version as a new page to keep these edits."
+            :"Save failed — "+q(e.what())+". Press Ctrl+S to retry.");
+        return false;
     }
+}
+namespace {
+std::string row_signature(const PageRecord& page) {
+    std::string result=page.document.id+"\x1f"+page.title;
+    for (const auto& entry:page.properties) result+="\x1f"+entry.first+"="+format_property(entry.second);
+    return result;
+}
+std::string link_signature(const PageRecord& page) {
+    std::string result=page.title;
+    for (const auto& block:page.document.blocks) for (const auto& run:block.runs) if (run.reference)
+        result+="\x1f"+std::to_string(int(run.reference->kind))+run.reference->target_id+"|"+run.reference->unresolved_name+"|"+run.text;
+    return result;
+}
+} // namespace
+void WorkspaceWindow::schedule_table_refresh() { table_refresh_->start(0); }
+// Typing in the page body changes neither its table row nor its link lists; refresh
+// only what the saved record could have changed.
+void WorkspaceWindow::refresh_after_save()
+{
+    if (!session_.has_page()) return;
+    if (row_signature(session_.record())!=rendered_row_) {
+        if (in_item_change_ || table_editing(table_)) schedule_table_refresh(); else refresh_table();
+    }
+    const auto links=link_signature(session_.record());
+    if (links!=link_signature_) update_links();
 }
 void WorkspaceWindow::refresh_databases()
 {
-    const auto previous=database_id_; loading_=true; databases_->clear();
+    const auto previous=database_id_; loading_=true; databases_->clear(); link_targets_.invalidate();
     for (const auto& db:workspace_.databases()) databases_->addItem(q(db.name),q(db.id));
     const int row=databases_->findData(q(previous)); if (row>=0) databases_->setCurrentIndex(row);
     loading_=false; switch_database();
@@ -396,6 +434,7 @@ void WorkspaceWindow::refresh_table()
         }
         if (rows[r].document.id==selected) table_->selectRow(int(r));
     }
+    rendered_row_=session_.has_page()?row_signature(session_.record()):std::string{};
     loading_=old_loading;
 }
 bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
@@ -419,8 +458,10 @@ bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
         completing_=false;
         title_->setText(q(session_.record().title)); title_->setEnabled(true); page_editor()->set_page(session_.record().document,q(session_.record().title)); page_editor()->setEnabled(true);
         for (auto* bar:findChildren<QToolBar*>()) bar->setEnabled(true);
-        loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
-        update_transfer_actions();
+        loading_=false; pending_=false; save_state_->setText("Saved locally");
+        findChild<QAction*>("saveConflictCopy")->setEnabled(false);
+        if (in_item_change_) schedule_table_refresh(); else refresh_table();
+        update_links(); update_transfer_actions();
         if (!block.empty()) page_editor()->go_to_block(q(block));
         remember_navigation(previous); detached_position_.reset();
         page_editor()->setFocus(); return true;
@@ -429,11 +470,12 @@ bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
 void WorkspaceWindow::create_page(const QString& title)
 {
     if (!flush() || database_id_.empty()) return;
-    const auto page=workspace_.create_page(database_id_,s(title)); refresh_table(); open_page(page.document.id);
+    const auto page=workspace_.create_page(database_id_,s(title)); link_targets_.invalidate(); refresh_table(); open_page(page.document.id);
 }
 void WorkspaceWindow::update_links()
 {
-    backlinks_->clear(); outgoing_->clear(); if (!session_.has_page()) return;
+    backlinks_->clear(); outgoing_->clear(); link_signature_.clear(); if (!session_.has_page()) return;
+    link_signature_=link_signature(session_.record());
     for (const auto& edge:workspace_.backlinks(ReferenceKind::Page,session_.record().document.id)) {
         auto* item=new QListWidgetItem(q(edge.source_title)+" — "+q(edge.source_context).left(100)
             +" → "+(edge.kind==ReferenceKind::Page?QString("page"):"block ["+q(edge.target_id)+"]"),backlinks_);
@@ -445,7 +487,7 @@ void WorkspaceWindow::update_links()
         if (edge.target_id.empty()) destination="Unresolved: "+q(edge.unresolved_name);
         else {
             const auto target=workspace_.resolve_reference({edge.kind,edge.target_id});
-            if (!target.page_id.empty()) destination=q(workspace_.load_page(target.page_id).title);
+            if (!target.page_id.empty()) destination=q(workspace_.page_title(target.page_id).value_or(std::string{}));
             if (edge.kind==ReferenceKind::Block) destination+=" / block ["+q(edge.target_id)+"]";
             if (target.state==ReferenceState::PageTrashed || target.state==ReferenceState::DatabaseTrashed) destination+=" (in trash)";
             else if (target.state!=ReferenceState::Available) destination="Unavailable ["+q(edge.target_id)+"]";
@@ -464,30 +506,24 @@ std::optional<WorkspaceWindow::NavigationPosition> WorkspaceWindow::current_posi
 }
 void WorkspaceWindow::update_navigation_actions()
 {
-    findChild<QAction*>("navigateBack")->setEnabled(!back_history_.empty());
-    findChild<QAction*>("navigateForward")->setEnabled(!forward_history_.empty());
+    findChild<QAction*>("navigateBack")->setEnabled(history_.can_go(false));
+    findChild<QAction*>("navigateForward")->setEnabled(history_.can_go(true));
 }
 void WorkspaceWindow::remember_navigation(const std::optional<NavigationPosition>& previous)
 {
     if (history_navigation_ || !previous || !session_.has_page()) return;
-    const auto now=page_editor()->capture_position(); const auto& old=previous->editor;
-    if (previous->page==session_.record().document.id && old.block==now.block && old.offset==now.offset
-        && old.anchor_block==now.anchor_block && old.anchor_offset==now.anchor_offset && old.scroll==now.scroll) return;
-    back_history_.push_back(*previous); if (back_history_.size()>200) back_history_.erase(back_history_.begin());
-    forward_history_.clear(); update_navigation_actions();
+    if (history_.record(*previous,{session_.record().document.id,page_editor()->capture_position()})) update_navigation_actions();
 }
 void WorkspaceWindow::navigate_history(bool forward)
 {
-    auto& from=forward?forward_history_:back_history_;
-    auto& to=forward?back_history_:forward_history_;
-    if (from.empty()) return;
-    const auto target=from.back(); const auto previous=current_position();
+    const auto target=history_.peek(forward); if (!target) return;
+    const auto previous=current_position();
     history_navigation_=true;
-    const bool opened=open_page(target.page);
+    const bool opened=open_page(target->page);
     history_navigation_=false;
     if (!opened) { statusBar()->showMessage("Cannot open history destination: "+save_state_->text(),8000); return; }
-    const bool restored=page_editor()->restore_position(target.editor);
-    from.pop_back(); if (previous) to.push_back(*previous);
+    const bool restored=page_editor()->restore_position(target->editor);
+    history_.commit(forward,previous);
     update_navigation_actions(); page_editor()->setFocus();
     if (!restored) statusBar()->showMessage("The previous block is unavailable; opened its original page.",8000);
 }
@@ -521,7 +557,7 @@ void WorkspaceWindow::edit_view(bool create)
     auto* more=new QPushButton("Add filter",&dialog); more->setObjectName("addViewFilter"); layout->addWidget(more); connect(more,&QPushButton::clicked,&dialog,[&]{ add_filter({}); });
     auto* remove=new QPushButton("Remove selected filter",&dialog); layout->addWidget(remove); connect(remove,&QPushButton::clicked,&dialog,[&]{ if (filters->currentRow()>=0) filters->removeRow(filters->currentRow()); });
     auto* references=link_filter_controls(&dialog,workspace_,current_view_.link_filters); layout->addWidget(references);
-    auto* message=new QLabel(&dialog); layout->addWidget(message);
+    auto* message=new QLabel(&dialog); message->setTextFormat(Qt::PlainText); layout->addWidget(message);
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{
         try {
@@ -547,13 +583,15 @@ void WorkspaceWindow::edit_view(bool create)
 void WorkspaceWindow::show_trash()
 {
     if (!flush()) return;
+    const auto reopen=session_.has_page()?session_.record().document.id:std::string{};
     QDialog dialog(this); dialog.setWindowTitle("Restore from trash"); auto* layout=new QVBoxLayout(&dialog); auto* list=new QListWidget(&dialog); list->setObjectName("trashItems"); layout->addWidget(list);
-    for (const auto& db:workspace_.databases(true)) {
+    for (const auto& db:workspace_.databases(true))
         if (db.trashed) { auto* item=new QListWidgetItem("Database: "+q(db.name),list); item->setData(Qt::UserRole,q(db.id)); item->setData(Qt::UserRole+1,true); }
-        for (const auto& page:workspace_.pages(db.id,true)) if (page.trashed) { auto* item=new QListWidgetItem(q(db.name)+" / "+q(page.title),list); item->setData(Qt::UserRole,q(page.document.id)); }
-    }
+    for (const auto& page:workspace_.page_summaries(true))
+        if (page.trashed) { auto* item=new QListWidgetItem(q(page.database_name)+" / "+q(page.title),list); item->setData(Qt::UserRole,q(page.id)); }
     for (const auto& group:workspace_.deleted_blocks()) {
         auto* item=new QListWidgetItem("Blocks in "+q(group.page_title)+": "+q(group.label).left(60),list);
+        item->setToolTip("Restoring brings these blocks back to their page");
         item->setData(Qt::UserRole,q(group.id)); item->setData(Qt::UserRole+2,"blocks");
     }
     auto* restore=new QPushButton("Restore selected",&dialog); restore->setObjectName("restoreSelected"); layout->addWidget(restore);
@@ -561,29 +599,35 @@ void WorkspaceWindow::show_trash()
         if (auto* item=list->currentItem()) {
             try {
                 const auto id=s(item->data(Qt::UserRole).toString());
-                if (item->data(Qt::UserRole+2).toString()=="blocks") workspace_.restore_deleted_blocks(id);
+                bool reparented=false;
+                if (item->data(Qt::UserRole+2).toString()=="blocks") {
+                    workspace_.restore_deleted_blocks(id,&reparented);
+                    if (reparented) notify(&dialog,QMessageBox::Information,"Blocks restored","The original parent block is no longer on this page, so the blocks were restored as top-level blocks.");
+                }
                 else if (item->data(Qt::UserRole+1).toBool()) workspace_.trash_database(id,false);
                 else workspace_.trash_page(id,false);
-                delete item;
+                link_targets_.invalidate(); delete item;
             } catch (const std::exception& e) { error(&dialog,e); }
         }
     });
+    auto* purge=new QPushButton("Empty trash permanently…",&dialog); purge->setObjectName("emptyTrash"); layout->addWidget(purge);
+    connect(purge,&QPushButton::clicked,&dialog,[&]{
+        try { empty_trash(&dialog); dialog.accept(); } catch (const std::exception& e) { error(&dialog,e); }
+    });
     auto* close=new QDialogButtonBox(QDialogButtonBox::Close,&dialog); layout->addWidget(close); connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::accept); dialog.exec(); refresh_databases();
+    // Return to the page that was open, reloaded with any restored blocks.
+    if (!reopen.empty() && workspace_.resolve_reference({ReferenceKind::Page,reopen}).state==ReferenceState::Available) open_page(reopen);
 }
 std::vector<WorkspaceWindow::LinkCandidate> WorkspaceWindow::link_candidates() const
 {
-    std::vector<LinkCandidate> result;
-    for (const auto& db:workspace_.databases()) for (auto page:workspace_.pages(db.id)) {
-        if (session_.has_page() && page.document.id==session_.record().document.id) {
-            page.document=page_editor()->snapshot(); page.title=s(title_->text());
-        }
-        result.push_back({ReferenceKind::Page,page.document.id,page.title,page.document.id,page.title,db.name,false});
-        for (const auto& block:page.document.blocks) {
-            std::string text; for (const auto& run:block.runs) text+=run.text;
-            if (text.empty()) text=block.asset_label.empty()?"Empty block":block.asset_label;
-            result.push_back({ReferenceKind::Block,block.id,text,page.document.id,page.title,db.name,block.kind==BlockKind::Heading});
-        }
-    }
+    // Cached lightweight rows; the open page contributes its unsaved blocks.
+    std::vector<LinkCandidate> result; std::vector<LinkTargetRow> rows;
+    if (session_.has_page()) {
+        auto current=session_.record(); current.document=page_editor()->snapshot();
+        rows=link_targets_.rows(&current,s(title_->text()),s(databases_->currentText()));
+    } else rows=link_targets_.rows();
+    result.reserve(rows.size());
+    for (const auto& row:rows) result.push_back({row.kind,row.id,row.label,row.page_id,row.page_title,row.database_name,row.heading});
     return result;
 }
 void WorkspaceWindow::complete_wiki(const QString& prefix, bool active)
@@ -709,7 +753,8 @@ void WorkspaceWindow::resolve_unresolved(const QString& name, const QString& sco
     const auto location=editor->selected_reference_location(); if (!location) return;
     const auto old_label=editor->textCursor().selectedText();
     QDialog dialog(this); dialog.setObjectName("resolveUnresolved"); dialog.setWindowTitle("Resolve unresolved reference");
-    auto* layout=new QVBoxLayout(&dialog); layout->addWidget(new QLabel("Intended page: "+name+"\nChoose an existing target or explicitly create a page.",&dialog));
+    auto* layout=new QVBoxLayout(&dialog); auto* intended=new QLabel("Intended page: "+name+"\nChoose an existing target or explicitly create a page.",&dialog);
+    intended->setTextFormat(Qt::PlainText); layout->addWidget(intended);
     auto* title=new QLineEdit(name,&dialog); title->setObjectName("targetPageTitle"); title->setAccessibleName("New page title"); layout->addWidget(title);
     auto* database=new QComboBox(&dialog); database->setObjectName("targetDatabase"); database->setAccessibleName("Destination database for new page");
     for (const auto& db:workspace_.databases()) database->addItem(q(db.name)+" ["+q(db.id)+"]",q(db.id));
@@ -733,7 +778,7 @@ void WorkspaceWindow::resolve_unresolved(const QString& name, const QString& sco
     auto source=session_.record(); source.document=editor->snapshot(); source.title=s(title_->text());
     const auto target=workspace_.create_reference_target(source,*location,s(database->currentData().toString()),s(title->text().trimmed()));
     const Reference resolved{ReferenceKind::Page,target.document.id,"","",reference->custom_label};
-    session_.adopt_saved(std::move(source)); loading_=true;
+    session_.adopt_saved(std::move(source)); loading_=true; link_targets_.invalidate();
     editor->replace_selected_reference(resolved,reference->custom_label?old_label:q(target.title));
     loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
     statusBar()->showMessage("Page created and reference saved locally. Undo restores the unresolved reference and keeps the created page.",8000);
@@ -817,11 +862,11 @@ void WorkspaceWindow::markdown_interchange(bool importing)
     const auto accepted=dialog.exec()==QDialog::Accepted; activateWindow(); page_editor()->setFocus();
     if (!accepted || dialog.selectedFiles().isEmpty()) return;
     const auto folder=std::filesystem::u8path(s(dialog.selectedFiles()[0]));
-    const auto report=importing?workspace_.import_markdown(folder,database_id_):workspace_.export_markdown(folder);
-    if (importing) {refresh_table(); if (!report.pages.empty()) open_page(report.pages.front());}
+    const auto report=importing?interchange::import_markdown(workspace_,folder,database_id_):interchange::export_markdown(workspace_,folder);
+    if (importing) {link_targets_.invalidate(); refresh_table(); if (!report.pages.empty()) open_page(report.pages.front());}
     QString message=QString::number(report.pages.size())+(importing?" pages imported.":" pages exported.");
     for (const auto& warning:report.warnings) message+="\n\n"+q(warning);
-    QMessageBox::information(this,importing?"Markdown import report":"Markdown export report",message);
+    notify(this,QMessageBox::Information,importing?"Markdown import report":"Markdown export report",message);
     activateWindow(); page_editor()->setFocus();
 }
 void WorkspaceWindow::json_interchange(bool importing)
@@ -841,13 +886,13 @@ void WorkspaceWindow::json_interchange(bool importing)
     if (!accepted || dialog.selectedFiles().isEmpty()) return;
     const auto destination=std::filesystem::u8path(s(dialog.selectedFiles()[0]));
     if (importing) {
-        auto workspace=std::make_shared<Workspace>(Workspace::import_json(std::filesystem::u8path(s(source)),destination));
+        auto workspace=std::make_shared<Workspace>(interchange::import_json(std::filesystem::u8path(s(source)),destination));
         auto* window=new WorkspaceWindow(*workspace); window->setAttribute(Qt::WA_DeleteOnClose);
         // Keep the imported workspace alive through destruction of its window.
         connect(window,&QObject::destroyed,qApp,[workspace]{(void)workspace;}); window->show();
     } else {
-        workspace_.export_json(destination);
-        QMessageBox::information(this,"Lossless JSON export","Exported notes, properties, views, trash, recovery history and retained attachment files to:\n"+q(destination.u8string()));
+        interchange::export_json(workspace_,destination);
+        notify(this,QMessageBox::Information,"Lossless JSON export","Exported notes, properties, views, trash, recovery history and retained attachment files to:\n"+q(destination.u8string()));
         activateWindow(); page_editor()->setFocus();
     }
 }
@@ -868,10 +913,28 @@ void WorkspaceWindow::import_attachment(bool image)
         throw std::invalid_argument("Choose a regular file; symlinks and special files cannot be imported");
     if (image) { QImageReader reader(source_path); reader.setDecideFormatFromContent(true); if (!reader.canRead()) throw std::invalid_argument("This file is not a supported image"); }
     auto page=session_.record(); page.document=page_editor()->snapshot();
-    const auto imported=workspace_.import_attachment(page,after,selected_path,image);
+    // Copy and hash on a worker thread with progress/cancel; the database write
+    // happens afterwards, so no transaction is held while large files copy.
+    auto staged=workspace_.prepare_attachment(selected_path,image);
+    QProgressDialog progress("Copying "+q(selected_path.filename().u8string())+" into the workspace…","Cancel",0,1000,this);
+    progress.setObjectName("attachmentProgress"); progress.setWindowModality(Qt::WindowModal); progress.setMinimumDuration(400); progress.setAutoClose(false);
+    std::atomic<bool> cancel{false}; std::atomic<std::int64_t> copied{0},total{1}; std::exception_ptr failure;
+    QEventLoop loop;
+    std::thread worker([&]{
+        try { staged.copy([&](std::int64_t done,std::int64_t size){ copied=done; total=std::max<std::int64_t>(size,1); return !cancel.load(); }); }
+        catch (...) { failure=std::current_exception(); }
+        QMetaObject::invokeMethod(&loop,&QEventLoop::quit,Qt::QueuedConnection);
+    });
+    QTimer tick; connect(&tick,&QTimer::timeout,&progress,[&]{
+        progress.setValue(int(std::min<std::int64_t>(1000,copied*1000/total))); if (progress.wasCanceled()) cancel=true;
+    });
+    tick.start(50); loop.exec(); worker.join(); tick.stop(); progress.reset();
+    activateWindow(); page_editor()->setFocus();
+    if (failure) std::rethrow_exception(failure);
+    const auto imported=workspace_.commit_attachment(page,after,staged);
     session_.adopt_saved(std::move(page)); loading_=true;
     page_editor()->apply_document(session_.record().document,q(imported.following));
-    loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links(); update_attachment_actions();
+    loading_=false; pending_=false; save_state_->setText("Saved locally"); link_targets_.invalidate(); refresh_table(); update_links(); update_attachment_actions();
     statusBar()->showMessage("Imported and saved a managed copy of "+q(imported.file.name),8000);
 }
 void WorkspaceWindow::export_attachment()
@@ -911,7 +974,7 @@ void WorkspaceWindow::show_attachment_audit()
     QDialog dialog(this); dialog.setObjectName("attachmentAudit"); dialog.setWindowTitle("Managed files"); auto* layout=new QVBoxLayout(&dialog);
     layout->addWidget(new QLabel("Registered imports remain retained for notes, undo and recovery. Cleanup removes only unregistered leftovers; backups keep independent copies.",&dialog));
     auto* list=new QListWidget(&dialog); list->setObjectName("attachmentIssues"); layout->addWidget(list);
-    auto* state=new QLabel(&dialog); state->setWordWrap(true); layout->addWidget(state);
+    auto* state=new QLabel(&dialog); state->setWordWrap(true); state->setTextFormat(Qt::PlainText); layout->addWidget(state);
     auto* refresh=new QPushButton("Check files",&dialog); layout->addWidget(refresh);
     auto* remove=new QPushButton("Delete selected unregistered file permanently",&dialog); remove->setObjectName("removeUnusedAttachment"); remove->setEnabled(false); layout->addWidget(remove);
     auto reload=[&]{
@@ -958,7 +1021,7 @@ void WorkspaceWindow::move_page()
     activateWindow(); page_editor()->setFocus();
     if (!accepted) return;
     auto page=session_.record(); workspace_.move_page(page,s(choices->currentData().toString()));
-    reload_page(block);
+    link_targets_.invalidate(); reload_page(block);
     statusBar()->showMessage("Page moved and saved locally.",6000);
 }
 void WorkspaceWindow::move_block()
@@ -969,9 +1032,9 @@ void WorkspaceWindow::move_block()
     auto* layout=new QVBoxLayout(&dialog);
     layout->addWidget(new QLabel("Move the active block and its children to the end of another page. Links keep their original targets.",&dialog));
     auto* choices=new QComboBox(&dialog); choices->setObjectName("moveDestinationPage"); choices->setAccessibleName("Destination page");
-    for (const auto& db:workspace_.databases()) for (const auto& page:workspace_.pages(db.id))
-        if (page.document.id!=session_.record().document.id)
-            choices->addItem(q(db.name)+" / "+q(page.title)+" ["+q(page.document.id.substr(0,8))+"]",q(page.document.id));
+    for (const auto& page:workspace_.page_summaries())
+        if (page.id!=session_.record().document.id)
+            choices->addItem(q(page.database_name)+" / "+q(page.title)+" ["+q(page.id.substr(0,8))+"]",q(page.id));
     layout->addWidget(choices);
     layout->addWidget(new QLabel("This saves both pages and clears this page's editing undo. Workspace → Undo block transfer reverses the latest transfer while both pages are unchanged.",&dialog));
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons);
@@ -983,13 +1046,13 @@ void WorkspaceWindow::move_block()
     const auto destination=workspace_.load_page(s(choices->currentData().toString()));
     auto transfer=workspace_.transfer_blocks(session_.record(),destination,block);
     last_transfer_=std::move(transfer); transferred_block_=block;
-    reload_page(); update_transfer_actions();
+    link_targets_.invalidate(); reload_page(); update_transfer_actions();
     statusBar()->showMessage("Block and children moved; both pages saved locally.",6000);
 }
 void WorkspaceWindow::undo_block_transfer(bool applied)
 {
     if (!last_transfer_ || !flush()) return;
-    workspace_.set_transfer_applied(*last_transfer_,applied);
+    workspace_.set_transfer_applied(*last_transfer_,applied); link_targets_.invalidate();
     if (session_.has_page() && (session_.record().document.id==last_transfer_->source_before.id
         || session_.record().document.id==last_transfer_->destination_before.id))
         reload_page(applied?std::string{}:transferred_block_);
@@ -999,7 +1062,119 @@ void WorkspaceWindow::undo_block_transfer(bool applied)
 void WorkspaceWindow::closeEvent(QCloseEvent* event)
 {
     if (flush()) { event->accept(); return; }
-    const auto answer=QMessageBox::warning(this,"Unsaved changes","Saving failed. Keep this window open to retry, or discard its pending changes?",QMessageBox::Discard|QMessageBox::Cancel,QMessageBox::Cancel);
-    if (answer==QMessageBox::Discard) event->accept(); else event->ignore();
+    QMessageBox box(QMessageBox::Warning,"Unsaved changes",session_.conflicted()
+        ?"This page changed elsewhere, so your edits could not be saved. Keep them as a new page, keep this window open, or discard them?"
+        :"Saving failed. Keep this window open to retry, or discard its pending changes?",QMessageBox::Discard|QMessageBox::Cancel,this);
+    box.setObjectName("unsavedChanges"); box.setTextFormat(Qt::PlainText); box.setDefaultButton(QMessageBox::Cancel);
+    QPushButton* keep=session_.conflicted()?box.addButton("Keep as new page",QMessageBox::AcceptRole):nullptr;
+    if (keep) keep->setObjectName("keepConflictCopy");
+    box.exec();
+    if (keep && box.clickedButton()==keep) {
+        try { save_conflict_copy(); event->accept(); } catch (const std::exception& e) { error(this,e); event->ignore(); }
+        return;
+    }
+    if (box.clickedButton()==box.button(QMessageBox::Discard)) { session_.discard(); pending_=false; event->accept(); } else event->ignore();
+}
+WorkspaceWindow::~WorkspaceWindow()
+{
+    if (!open_copies_.empty()) { std::error_code ignored; std::filesystem::remove_all(open_copies_,ignored); }
+}
+void WorkspaceWindow::save_conflict_copy()
+{
+    if (!session_.has_page()) return;
+    autosave_->stop();
+    auto pending=session_.record();
+    if (pending_) { pending.document=page_editor()->snapshot(); pending.title=s(title_->text()); }
+    // Fresh identities keep the copy independent; links between its blocks follow.
+    const auto copy=with_fresh_ids(pending.document,"conflict-copy",[]{ return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(); });
+    std::map<std::string,PropertyValue> values;
+    const auto definitions=workspace_.properties(pending.database_id);
+    for (const auto& entry:pending.properties)
+        if (std::any_of(definitions.begin(),definitions.end(),[&](const auto& d){return d.id==entry.first;})) values.insert(entry);
+    const auto created=workspace_.create_page(pending.database_id,pending.title+" (conflicting copy)",values,copy.blocks);
+    session_.discard(); pending_=false; link_targets_.invalidate();
+    const auto original=pending.document.id;
+    history_navigation_=true; session_.close(); history_navigation_=false;
+    open_page(created.document.id);
+    findChild<QAction*>("saveConflictCopy")->setEnabled(false);
+    statusBar()->showMessage("Your edits were saved as a new page; the other version of \""+q(pending.title)+"\" was kept.",10000);
+    Q_UNUSED(original);
+}
+void WorkspaceWindow::empty_trash(QWidget* parent)
+{
+    if (!flush()) throw std::runtime_error("Save or discard pending edits before emptying the trash");
+    std::size_t pages=0,databases=0;
+    for (const auto& page:workspace_.page_summaries(true)) if (page.trashed || page.database_trashed) ++pages;
+    for (const auto& db:workspace_.databases(true)) if (db.trashed) ++databases;
+    const auto fragments=workspace_.deleted_blocks().size();
+    if (!confirm(parent,"confirmEmptyTrash","Empty trash permanently",
+        QString("Permanently delete %1 trashed pages, %2 trashed databases and %3 deleted-block recovery records, together with imported files nothing else uses?\n\n"
+                "This cannot be undone. Existing backups and exports keep their own copies.").arg(pages).arg(databases).arg(fragments))) return;
+    // Editor and block-transfer undo could otherwise restore purged identities or files.
+    const auto open=session_.has_page()?session_.record().document.id:std::string{};
+    last_transfer_.reset(); update_transfer_actions();
+    history_navigation_=true; session_.close(); history_navigation_=false;
+    const auto report=workspace_.empty_trash();
+    link_targets_.invalidate(); refresh_databases();
+    if (!open.empty()) open_page(open);
+    statusBar()->showMessage(QString("Permanently deleted %1 pages, %2 databases, %3 recovery records and %4 files%5.")
+        .arg(report.pages).arg(report.databases).arg(report.fragments).arg(report.files).arg(report.compacted?"; the database file was compacted":""),10000);
+}
+void WorkspaceWindow::delete_view()
+{
+    if (!flush() || current_view_.id.empty()) return;
+    if (!confirm(this,"confirmDeleteView","Delete view","Delete the saved view \""+q(current_view_.name)+"\"? Pages are not affected.")) return;
+    workspace_.delete_view(current_view_.id); switch_database();
+}
+void WorkspaceWindow::rename_property()
+{
+    if (!flush() || definitions_.empty()) return;
+    QStringList names; for (const auto& d:definitions_) names<<q(d.name);
+    bool ok=false; const auto chosen=QInputDialog::getItem(this,"Rename property","Property",names,0,false,&ok); if (!ok) return;
+    const auto& definition=definitions_[std::size_t(names.indexOf(chosen))];
+    const auto name=QInputDialog::getText(this,"Rename property","New name",QLineEdit::Normal,chosen,&ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+    workspace_.rename_property(definition.id,s(name.trimmed())); refresh_table();
+}
+void WorkspaceWindow::delete_property()
+{
+    if (!flush() || definitions_.empty()) return;
+    QStringList names; for (const auto& d:definitions_) names<<q(d.name);
+    bool ok=false; const auto chosen=QInputDialog::getItem(this,"Delete property","Property",names,0,false,&ok); if (!ok) return;
+    const auto definition=definitions_[std::size_t(names.indexOf(chosen))];
+    if (!confirm(this,"confirmDeleteProperty","Delete property","Delete \""+chosen+"\" and its value on every page of this database? Views stop using it. This cannot be undone.")) return;
+    const auto open=session_.has_page()?session_.record().document.id:std::string{};
+    history_navigation_=true; session_.close(); history_navigation_=false;
+    workspace_.delete_property(definition.id); switch_database();
+    if (!open.empty()) open_page(open);
+}
+void WorkspaceWindow::check_integrity()
+{
+    if (!flush()) return;
+    const auto report=workspace_.check_integrity(); QString text;
+    if (report.ok()) text="The workspace database passed its integrity and relationship checks.";
+    else { text="Problems were found. Back up the folder and keep this report:\n"; for (const auto& problem:report.problems) text+="\n• "+q(problem); }
+    notify(this,report.ok()?QMessageBox::Information:QMessageBox::Warning,"Workspace integrity",text);
+}
+void WorkspaceWindow::open_attachment()
+{
+    const auto id=page_editor()->current_attachment_id(); const auto info=workspace_.attachment(id);
+    if (!info) throw std::runtime_error("Attachment metadata is unavailable");
+    const auto source=workspace_.attachment_path(id);
+    // External programs get a read-only copy named like the original, never the
+    // managed file itself: an in-place save would break its recorded checksum.
+    if (open_copies_.empty()) {
+        open_copies_=std::filesystem::u8path(s(QStandardPaths::writableLocation(QStandardPaths::TempLocation)))
+            /("nebula-open-"+std::to_string(::getpid())+"-"+QUuid::createUuid().toString(QUuid::Id128).toStdString());
+        files::make_private_directory(open_copies_);
+    }
+    const auto folder=open_copies_/(id+"-"+QUuid::createUuid().toString(QUuid::Id128).left(8).toStdString());
+    files::make_private_directory(folder);
+    const auto copy=folder/std::filesystem::u8path(s(copy_name(info->name)));
+    const auto digest=files::copy_new(source,copy);
+    if (digest.size!=info->size || digest.sha256!=info->sha256) { std::error_code ignored; std::filesystem::remove(copy,ignored);
+        throw std::runtime_error("Managed attachment bytes differ from their import checksum"); }
+    files::make_read_only(copy);
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(q(copy.u8string())))) throw std::runtime_error("No desktop application could open this file; use Save a copy…");
 }
 } // namespace nebula

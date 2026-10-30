@@ -1,11 +1,12 @@
 #pragma once
-#include "../storage/sql.hpp"
+#include "nebula/storage/internals.hpp"
+#include "nebula/storage/sql.hpp"
 #include "nebula/attachments/files.hpp"
 #include <QFile>
 #include <QString>
 #include <algorithm>
 
-namespace nebula::interchange {
+namespace nebula::interchange::detail {
 namespace fs=std::filesystem;
 inline QString q(const std::string& value) {
     auto result=QString::fromUtf8(value.data(),qsizetype(value.size()));
@@ -36,7 +37,7 @@ class NewDirectory {
     bool complete_=false;
 public:
     explicit NewDirectory(const fs::path& path):path_(path) {
-        if (!path.is_absolute() || fs::is_symlink(path) || !fs::create_directory(path))
+        if (!path.is_absolute() || fs::is_symlink(path) || fs::exists(path) || !files::make_private_directory(path))
             throw std::runtime_error("Choose a new absolute destination folder");
     }
     ~NewDirectory(){if (!complete_) {std::error_code error; fs::remove_all(path_,error);}}
@@ -46,4 +47,4 @@ inline void reject_managed_destination(const fs::path& workspace,const fs::path&
     const auto relative=fs::weakly_canonical(destination).lexically_relative(workspace/"attachments");
     if (relative.empty() || *relative.begin()!="..") throw std::invalid_argument("Choose a destination outside managed attachments");
 }
-} // namespace nebula::interchange
+} // namespace nebula::interchange::detail

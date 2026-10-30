@@ -456,7 +456,9 @@ void DesktopTests::failed_autosave_keeps_edits_visible()
     WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(p.document.id));
     p.title="External change"; w.save_page(p);
     QTest::keyClicks(window.page_editor(),"Do not lose this"); QVERIFY(!window.flush());
-    QVERIFY(window.findChild<QLabel*>("saveState")->text().startsWith("Save failed"));
+    // An external revision is a conflict with its own recovery action (SUG-13).
+    QVERIFY(window.findChild<QLabel*>("saveState")->text().startsWith("Save conflict"));
+    QVERIFY(window.findChild<QAction*>("saveConflictCopy")->isEnabled());
     QCOMPARE(window.page_editor()->toPlainText(),QString("Do not lose this"));
     QCOMPARE(w.load_page(p.document.id).title,std::string("External change"));
     QVERIFY(w.load_page(p.document.id).document.blocks[0].runs.empty());
@@ -721,7 +723,7 @@ void DesktopTests::failed_save_blocks_workspace_moves()
     QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"); w.create_database("Archive");
     const auto source=w.create_page(a.id,"Source"); w.create_page(a.id,"Destination");
     WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
-    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_save BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT,'injected save failure'); END;");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search;"); // Triggers are disabled; a missing derived table fails saves.
     QTest::keyClicks(window.page_editor(),"Pending");
     window.findChild<QAction*>("moveBlockToPage")->trigger(); window.findChild<QAction*>("movePage")->trigger();
     QVERIFY(window.findChild<QLabel*>("saveState")->text().startsWith("Save failed"));
@@ -729,7 +731,7 @@ void DesktopTests::failed_save_blocks_workspace_moves()
     QCOMPARE(window.page_editor()->snapshot().blocks[0].runs[0].text,std::string("Pending"));
     QCOMPARE(w.load_page(source.document.id).revision,source.revision);
     QCOMPARE(w.load_page(source.document.id).database_id,a.id);
-    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_save;"); QVERIFY(window.flush());
+    w.rebuild_search(); QVERIFY(window.flush());
 }
 void DesktopTests::typed_wiki_links_persist_page_heading_block_and_unresolved_targets()
 {
@@ -859,11 +861,11 @@ void DesktopTests::history_refuses_trash_and_failed_saves_without_losing_entries
     window.findChild<QAction*>("navigateBack")->trigger(); QCOMPARE(editor->snapshot().id,target.document.id);
     QVERIFY(window.findChild<QAction*>("navigateBack")->isEnabled()); QVERIFY(window.statusBar()->currentMessage().contains("trash"));
     w.trash_page(source.document.id,false);
-    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_navigation_save BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT,'injected save failure'); END;");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search;");
     QTest::keyClicks(editor,"Pending"); QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier);
     QCOMPARE(editor->snapshot().id,target.document.id); QVERIFY(window.findChild<QAction*>("navigateBack")->isEnabled());
     QCOMPARE(editor->toPlainText(),QString("Pending"));
-    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_navigation_save;");
+    w.rebuild_search();
     QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier); QCOMPARE(editor->snapshot().id,source.document.id);
     QTest::keyClick(editor,Qt::Key_Right,Qt::AltModifier); QCOMPARE(editor->snapshot().id,target.document.id);
     QCOMPARE(editor->toPlainText(),QString("Pending"));
@@ -938,7 +940,7 @@ void DesktopTests::unresolved_creation_failure_keeps_reference_and_no_orphan_pag
     QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Projects");
     const auto source=w.create_page(a.id,"Source",{},{{"source","",BlockKind::Paragraph,{{"Future",false,false,Reference{ReferenceKind::Page,"","Future",a.id,false}}}}});
     WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
-    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_create_link BEFORE INSERT ON links BEGIN SELECT RAISE(ABORT,'injected link failure'); END;");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search;"); // Triggers are disabled; a missing derived table fails the commit.
     QTimer choose; bool saw_error=false;
     connect(&choose,&QTimer::timeout,&window,[&]{
         if (auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) { saw_error=true; box->accept(); return; }

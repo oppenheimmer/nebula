@@ -22,7 +22,8 @@ std::vector<PageRecord> Workspace::query_view(const View& view) const
 {
     const auto command="SELECT p.id FROM pages p JOIN databases d ON d.id=p.database_id WHERE p.database_id=? AND NOT p.trashed AND NOT d.trashed"+storage_detail::link_predicate(view.link_filters);
     sql::Statement query(database_.get(),command.c_str()); query.bind(1,view.database_id); storage_detail::bind_link_filters(query,2,view.link_filters);
-    std::vector<PageRecord> pages; while (query.row()) pages.push_back(load_page(query.text(0)));
-    auto properties=view; properties.link_filters.clear(); return apply_view(std::move(pages),properties);
+    // Table rows need titles and properties only; block trees are not decoded.
+    std::vector<PageRecord> pages; while (query.row()) pages.push_back(storage_detail::load_summary(database_.get(),query.text(0)));
+    auto properties=view; properties.link_filters.clear(); return apply_view(std::move(pages),properties,storage_detail::text_rules());
 }
 } // namespace nebula

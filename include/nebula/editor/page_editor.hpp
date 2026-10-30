@@ -1,19 +1,27 @@
 #pragma once
 
 #include "nebula/core/document.hpp"
+#include "nebula/core/position.hpp"
 
 #include <QTextEdit>
 #include <QElapsedTimer>
 #include <functional>
+#include <map>
+#include <unordered_set>
 
 class QTimer;
 class QCompleter;
 
 namespace nebula {
 
-struct EditorPosition {
-    std::string block, anchor_block;
-    int offset = 0, anchor_offset = 0, scroll = 0;
+class CardRenderer;
+
+// Toolbar state derived from the active block and its neighbours, without
+// converting the whole document.
+struct BlockState {
+    std::string id;
+    int index = 0, count = 0, depth = 0;
+    bool up = false, down = false, indent = false, outdent = false;
 };
 
 // Page adapter with application-owned snapshots. QTextDocument supplies native
@@ -51,6 +59,12 @@ public:
     void toggle_italic();
     void cut();
     void paste();
+    // Inserts only text/plain clipboard content (Ctrl+Shift+V).
+    void paste_plain_text();
+    BlockState block_state() const;
+    // Blocks merged into a neighbour by Backspace/Delete since the last call.
+    // Their text survives, so storage does not archive them as deletions.
+    std::unordered_set<std::string> take_absorbed_blocks();
     void set_wiki_completer(QCompleter* completer);
     std::optional<QString> wiki_prefix() const;
     bool select_wiki_link();
@@ -77,6 +91,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void focusOutEvent(QFocusEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
 
 private:
     std::string page_id_;
@@ -95,7 +110,17 @@ private:
     QString fallback_title_;
     std::function<std::optional<std::string>(const Reference&)> label_resolver_;
     std::function<std::optional<std::string>(const std::string&)> attachment_resolver_;
+    std::map<std::pair<int,std::string>,std::optional<std::string>> external_labels_;
+    std::unordered_set<std::string> default_targets_;
+    std::unordered_set<std::string> absorbed_;
+    QRectF painted_active_;
+    CardRenderer* cards_ = nullptr;
     void refresh_reference_labels(const Page* before = nullptr, const QString& before_title = {});
+    bool fast_typing_allowed(const QKeyEvent* event) const;
+    void update_active_region();
+    // Rewrites only the blocks that differ between the document and target,
+    // keeping the caret's block, offset and anchor where they still exist.
+    void apply_structure(const Page& target, const QString& focus_id = {});
     int wiki_start() const;
     void process_wiki_input();
     QRectF block_rect(const QTextBlock& block) const;

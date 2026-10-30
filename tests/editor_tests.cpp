@@ -60,6 +60,12 @@ void at(PageEditor& editor, int position)
 class EditorTests : public QObject {
     Q_OBJECT
 private slots:
+    void structural_commands_keep_caret_offset_and_selection();
+    void structural_commands_rewrite_only_the_affected_range();
+    void plain_text_paste_drops_rich_formats();
+    void merged_blocks_are_reported_as_absorbed();
+    void block_state_matches_core_operations();
+    void ordinary_typing_reuses_cached_external_labels();
     void load_preserves_model();
     void wrapping_does_not_create_blocks();
     void enter_splits_with_new_identity();
@@ -747,6 +753,82 @@ void EditorTests::long_page_edit_remains_valid()
     editor.go_to_block("block-500"); QTest::keyClick(&editor, Qt::Key_Return);
     validate(editor.snapshot()); QCOMPARE(editor.document()->blockCount(), 1001);
     editor.undo(); QCOMPARE(ids(editor.snapshot()), ids(long_page(1000)));
+}
+
+void EditorTests::structural_commands_keep_caret_offset_and_selection()
+{
+    PageEditor editor; ready(editor);
+    at(editor, 6 + 3); // Inside "bravo".
+    QTest::keyClick(&editor, Qt::Key_Tab);
+    QCOMPARE(editor.current_block_id(), QString("b")); QCOMPARE(editor.textCursor().positionInBlock(), 3);
+    QTest::keyClicks(&editor, "X");
+    QCOMPARE(text(editor.snapshot().blocks[1]), QString("braXvo"));
+    QTextCursor selection = editor.textCursor(); selection.setPosition(editor.textCursor().block().position() + 1);
+    selection.setPosition(editor.textCursor().block().position() + 4, QTextCursor::KeepAnchor); editor.setTextCursor(selection);
+    QTest::keyClick(&editor, Qt::Key_Tab, Qt::ShiftModifier);
+    QCOMPARE(editor.textCursor().selectedText(), QString("raX"));
+    QTest::keyClick(&editor, Qt::Key_Up, Qt::AltModifier);
+    QCOMPARE(ids(editor.snapshot()), QStringList({"b", "a", "c"}));
+    QCOMPARE(editor.textCursor().selectedText(), QString("raX"));
+}
+void EditorTests::structural_commands_rewrite_only_the_affected_range()
+{
+    PageEditor editor; ready(editor, long_page(2000)); editor.go_to_block("block-1000");
+    const auto length = editor.document()->characterCount(); int changed = 0;
+    connect(editor.document(), &QTextDocument::contentsChange, &editor, [&](int, int removed, int added) { changed += removed + added; });
+    QTest::keyClick(&editor, Qt::Key_Down, Qt::AltModifier);
+    QVERIFY2(changed > 0 && changed < length / 50, qPrintable(QString::number(changed)));
+    QCOMPARE(QString::fromStdString(editor.snapshot().blocks[1001].id), QString("block-1000"));
+    editor.undo(); QCOMPARE(ids(editor.snapshot()), ids(long_page(2000)));
+    QCOMPARE(editor.current_block_id(), QString("block-1000")); // Undo returns to the moved block.
+}
+void EditorTests::plain_text_paste_drops_rich_formats()
+{
+    PageEditor editor; ready(editor); at(editor, 5);
+    auto* mime = new QMimeData; mime->setHtml("<b>bold</b><h1>head</h1>"); mime->setText("bold");
+    QApplication::clipboard()->setMimeData(mime);
+    QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+    const auto page = editor.snapshot();
+    QCOMPARE(page.blocks.size(), std::size_t(3)); QCOMPARE(text(page.blocks[0]), QString("alphabold"));
+    for (const auto& run : page.blocks[0].runs) QVERIFY(!run.bold);
+    editor.undo(); QCOMPARE(text(editor.snapshot().blocks[0]), QString("alpha"));
+}
+void EditorTests::merged_blocks_are_reported_as_absorbed()
+{
+    PageEditor editor; ready(editor); editor.go_to_block("b");
+    QTest::keyClick(&editor, Qt::Key_Backspace);
+    QCOMPARE(editor.take_absorbed_blocks(), (std::unordered_set<std::string>{"b"}));
+    QVERIFY(editor.take_absorbed_blocks().empty());
+    at(editor, 10); QTest::keyClick(&editor, Qt::Key_Delete);
+    editor.undo(); QVERIFY(editor.take_absorbed_blocks().empty());
+    Page list{"list", {{"x", "", BlockKind::Bullet, {{"one"}}}, {"y", "", BlockKind::Bullet, {{"two"}}}}};
+    ready(editor, list); editor.go_to_block("y"); QTest::keyClick(&editor, Qt::Key_Backspace);
+    const auto absorbed = editor.take_absorbed_blocks();
+    const auto live = ids(editor.snapshot());
+    for (const auto& id : absorbed) QVERIFY(!live.contains(QString::fromStdString(id)));
+}
+void EditorTests::block_state_matches_core_operations()
+{
+    PageEditor editor; ready(editor, sample_page());
+    for (const auto& block : sample_page().blocks) {
+        editor.go_to_block(QString::fromStdString(block.id)); const auto state = editor.block_state(); auto page = editor.snapshot();
+        auto copy = page; const bool up = move_subtree(copy, block.id, -1); copy = page; const bool down = move_subtree(copy, block.id, 1);
+        copy = page; const bool in = indent(copy, block.id); copy = page; const bool out = outdent(copy, block.id);
+        QCOMPARE(state.up, up); QCOMPARE(state.down, down); QCOMPARE(state.indent, in); QCOMPARE(state.outdent, out);
+        QCOMPARE(state.depth, depth(page, block.id)); QCOMPARE(state.id, block.id);
+    }
+}
+void EditorTests::ordinary_typing_reuses_cached_external_labels()
+{
+    PageEditor editor; int calls = 0;
+    editor.set_reference_label_resolver([&](const Reference&) -> std::optional<std::string> { ++calls; return std::string("Elsewhere"); });
+    ready(editor, Page{"p", {{"a", "", BlockKind::Paragraph, {{"old", false, false, Reference{ReferenceKind::Page, "other", {}, {}, false}}}},
+                             {"b", "", BlockKind::Paragraph, {{"plain"}}}}});
+    QCOMPARE(text(editor.snapshot().blocks[0]), QString("Elsewhere"));
+    const auto initial = calls; editor.go_to_block("b");
+    QTest::keyClicks(&editor, "typing several characters");
+    QCOMPARE(calls, initial); QCOMPARE(text(editor.snapshot().blocks[1]), QString("typing several charactersplain"));
+    editor.undo(); QCOMPARE(text(editor.snapshot().blocks[1]), QString("plain"));
 }
 
 QTEST_MAIN(EditorTests)

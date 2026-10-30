@@ -23,6 +23,9 @@
 #include <QAbstractItemView>
 #include <QCache>
 #include <QImageReader>
+#include <QPointer>
+#include <QSet>
+#include <QThreadPool>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -51,12 +54,18 @@ constexpr auto ClipboardFormat = "application/x-nebula-blocks+json";
 
 QString new_id() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 
+} // namespace
+
+// Draws image/file cards. Paths are re-resolved at most once per second and
+// previews decode on a worker thread, so painting never parses image files.
 class CardRenderer final : public QObject, public QTextObjectInterface {
     Q_OBJECT
     Q_INTERFACES(QTextObjectInterface)
 public:
-    explicit CardRenderer(QObject* parent,std::function<std::optional<std::string>(const std::string&)> resolve)
-        : QObject(parent),resolve_(std::move(resolve)),images_(32*1024) {}
+    explicit CardRenderer(QObject* parent,std::function<std::optional<std::string>(const std::string&)> resolve,QWidget* viewport)
+        : QObject(parent),resolve_(std::move(resolve)),viewport_(viewport),images_(32*1024),
+          bridge_(new QObject,[](QObject* bridge){ bridge->deleteLater(); }) {}
+    void reset() { paths_.clear(); failed_.clear(); images_.clear(); }
     QSizeF intrinsicSize(QTextDocument*, int, const QTextFormat& format) override
     {
         return {340, format.boolProperty(CardImage) ? (format.stringProperty(AttachmentId).isEmpty()?100.0:220.0) : 48.0};
@@ -71,22 +80,14 @@ public:
         painter->drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6);
         const auto identity=format.stringProperty(AttachmentId).toStdString();
         if (!identity.empty()) {
-            const auto path=resolve_(identity); QString label=format.stringProperty(AssetLabel);
-            QImage* preview=nullptr;
+            const auto path=resolved(identity); QString label=format.stringProperty(AssetLabel);
+            QImage* preview=nullptr; const auto key=QString::fromStdString(identity);
             if (path && image) {
-                const auto key=QString::fromStdString(identity); preview=images_.object(key);
-                if (!preview) {
-                    QImageReader reader(QString::fromStdString(*path)); reader.setDecideFormatFromContent(true);
-                    const auto size=reader.size();
-                    if (size.isValid() && qint64(size.width())*size.height()<=40000000) {
-                        reader.setScaledSize(size.scaled(QSize(640,480),Qt::KeepAspectRatio));
-                        auto decoded=reader.read();
-                        if (!decoded.isNull()) { images_.insert(key,new QImage(decoded),std::max(1,int(decoded.sizeInBytes()/1024))); preview=images_.object(key); }
-                    }
-                }
+                preview=images_.object(key);
+                if (!preview && !failed_.contains(key)) decode(key,*path);
             }
             if (!path) label="Unavailable: "+label;
-            else if (image && !preview) label="Preview unavailable: "+label;
+            else if (image && !preview && failed_.contains(key)) label="Preview unavailable: "+label;
             if (preview) {
                 const auto area=rect.adjusted(8,8,-8,-38); const auto size=QSizeF(preview->size()).scaled(area.size(),Qt::KeepAspectRatio);
                 painter->drawImage(QRectF(area.center()-QPointF(size.width()/2,size.height()/2),size),*preview);
@@ -109,9 +110,43 @@ public:
         painter->restore();
     }
 private:
+    struct Resolution { std::optional<std::string> path; QElapsedTimer checked; };
+    std::optional<std::string> resolved(const std::string& id)
+    {
+        auto& entry=paths_[id];
+        if (!entry.checked.isValid() || entry.checked.elapsed()>1000) { entry.path=resolve_?resolve_(id):std::nullopt; entry.checked.start(); }
+        return entry.path;
+    }
+    void decode(const QString& key,const std::string& path)
+    {
+        if (decoding_.contains(key)) return;
+        decoding_.insert(key);
+        QPointer<CardRenderer> self(this); auto bridge=bridge_; const auto file=QString::fromStdString(path);
+        QThreadPool::globalInstance()->start([self,bridge,key,file] {
+            QImageReader reader(file); reader.setDecideFormatFromContent(true); reader.setAllocationLimit(128);
+            QImage decoded; const auto size=reader.size();
+            if (size.isValid() && qint64(size.width())*size.height()<=40000000) {
+                reader.setScaledSize(size.scaled(QSize(640,480),Qt::KeepAspectRatio)); decoded=reader.read();
+            }
+            QMetaObject::invokeMethod(bridge.get(),[self,key,decoded] { if (self) self->finish(key,decoded); },Qt::QueuedConnection);
+        });
+    }
+    void finish(const QString& key,const QImage& decoded)
+    {
+        decoding_.remove(key);
+        if (decoded.isNull()) failed_.insert(key);
+        else images_.insert(key,new QImage(decoded),std::max(1,int(decoded.sizeInBytes()/1024)));
+        if (viewport_) viewport_->update();
+    }
     std::function<std::optional<std::string>(const std::string&)> resolve_;
+    QPointer<QWidget> viewport_;
     QCache<QString,QImage> images_;
+    std::unordered_map<std::string,Resolution> paths_;
+    QSet<QString> decoding_, failed_;
+    std::shared_ptr<QObject> bridge_;
 };
+
+namespace {
 
 QTextCharFormat run_format(const Run& run)
 {
@@ -249,9 +284,12 @@ PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
         else if (drag_position_.y()>viewport()->height()-24) amount=20;
         if (amount) { verticalScrollBar()->setValue(verticalScrollBar()->value()+amount); update_drop(); }
     });
-    document()->documentLayout()->registerHandler(CardObject, new CardRenderer(this,[this](const std::string& id){return attachment_resolver_?attachment_resolver_(id):std::nullopt;}));
-    connect(this, &QTextEdit::cursorPositionChanged, viewport(), QOverload<>::of(&QWidget::update));
-    connect(this, &QTextEdit::textChanged, viewport(), QOverload<>::of(&QWidget::update));
+    cards_=new CardRenderer(this,[this](const std::string& id){return attachment_resolver_?attachment_resolver_(id):std::nullopt;},viewport());
+    document()->documentLayout()->registerHandler(CardObject, cards_);
+    // Repaint only the previous and current active block instead of the viewport.
+    connect(this, &QTextEdit::cursorPositionChanged, this, &PageEditor::update_active_region);
+    connect(this, &QTextEdit::textChanged, this, &PageEditor::update_active_region);
+    connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] { painted_active_={}; viewport()->update(); });
     set_page({"untitled", {{"first-block", "", BlockKind::Paragraph, {}}}});
 }
 
@@ -278,10 +316,13 @@ void PageEditor::paintEvent(QPaintEvent* event)
     painter.setRenderHint(QPainter::Antialiasing);
     auto rule=palette().color(QPalette::Text); rule.setAlpha(90);
     painter.setPen(QPen(rule,1));
-    for (auto block=document()->begin();block.isValid();block=block.next()) {
-        if (block.blockFormat().intProperty(Kind)!=int(BlockKind::Divider)) continue;
+    // Only blocks intersecting the viewport are examined, not the whole document.
+    auto first=cursorForPosition(QPoint(0,0)).block();
+    if (first.previous().isValid()) first=first.previous();
+    for (auto block=first;block.isValid();block=block.next()) {
         const auto bounds=block_rect(block);
-        if (bounds.bottom()<0 || bounds.top()>viewport()->height()) continue;
+        if (bounds.top()>viewport()->height()) break;
+        if (block.blockFormat().intProperty(Kind)!=int(BlockKind::Divider) || bounds.bottom()<0) continue;
         painter.drawLine(QPointF(32,bounds.center().y()),QPointF(viewport()->width()-32,bounds.center().y()));
     }
     const auto rect = active_block_rect();
@@ -313,6 +354,7 @@ void PageEditor::set_page(const Page& page, const QString& title)
     validate(page);
     page_id_ = page.id;
     fallback_title_=title;
+    external_labels_.clear(); absorbed_.clear(); if (cards_) cards_->reset();
     document()->setUndoRedoEnabled(false);
     auto metadata=document()->begin().blockFormat(); metadata.setProperty(PageTitle,title);
     QTextCursor(document()->begin()).setBlockFormat(metadata);
@@ -472,12 +514,12 @@ void PageEditor::set_reference_label_resolver(std::function<std::optional<std::s
 }
 void PageEditor::set_attachment_resolver(std::function<std::optional<std::string>(const std::string&)> resolver)
 {
-    attachment_resolver_=std::move(resolver); viewport()->update();
+    attachment_resolver_=std::move(resolver); if (cards_) cards_->reset(); viewport()->update();
 }
 void PageEditor::apply_document(const Page& page,const QString& focus)
 {
     if (page.id!=page_id_) throw std::invalid_argument("Use set_page when navigating to a different page");
-    write_page(page,focus);
+    absorbed_.clear(); write_page(page,focus);
 }
 std::string PageEditor::current_attachment_id() const
 {
@@ -489,6 +531,9 @@ std::string PageEditor::current_attachment_id() const
 void PageEditor::refresh_reference_labels(const Page* before, const QString& before_title)
 {
     const auto spans=reference_spans(document());
+    default_targets_.clear();
+    for (const auto& span:spans)
+        if (!span.reference.custom_label && span.reference.kind==ReferenceKind::Block) default_targets_.insert(span.reference.target_id);
     if (std::none_of(spans.begin(),spans.end(),[](const auto& span){return !span.reference.custom_label;})) return;
     const auto current=snapshot();
     using Group=std::pair<Reference,std::string>;
@@ -502,7 +547,9 @@ void PageEditor::refresh_reference_labels(const Page* before, const QString& bef
             adjacent=true;
         }
     }
-    std::map<std::pair<int,std::string>,std::optional<std::string>> external_labels;
+    // Other pages' titles cannot change while this page is open in this window,
+    // so their labels are cached until the next set_page.
+    auto& external_labels=external_labels_;
     auto label=[&](const Reference& ref,const Page& page,const QString& title) -> std::optional<std::string> {
         if (ref.target_id.empty()) return ref.unresolved_name;
         if (ref.kind==ReferenceKind::Page && ref.target_id==page.id) return title.isEmpty()?std::string("Untitled page"):title.toStdString();
@@ -719,6 +766,9 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
     if (modifiers==Qt::ControlModifier && (key==Qt::Key_Return || key==Qt::Key_Enter)) {
         typing_position_=-1; activate_current_reference(); return;
     }
+    if (modifiers==(Qt::ControlModifier|Qt::ShiftModifier) && key==Qt::Key_V) {
+        typing_position_=-1; paste_plain_text(); return;
+    }
     if (event->key() == Qt::Key_Tab && modifiers == Qt::NoModifier) {
         indent_current();
         return;
@@ -732,6 +782,24 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
     const bool join=typing && !textCursor().hasSelection() && typing_clock_.isValid()
         && typing_clock_.elapsed()<1000 && typing_position_==textCursor().position()
         && typing_revision_==document()->revision();
+    if (typing && fast_typing_allowed(event)) {
+        // Plain characters inside ordinary text cannot change block structure,
+        // identities or labels, so skip the whole-document snapshot/normalize.
+        QTextCursor group=textCursor();
+        if (join) group.joinPreviousEditBlock(); else group.beginEditBlock();
+        QTextEdit::keyPressEvent(event);
+        group.endEditBlock();
+        typing_position_=textCursor().position(); typing_revision_=document()->revision(); typing_clock_.restart();
+        process_wiki_input(); return;
+    }
+    std::string absorbed;
+    if (!textCursor().hasSelection() && !(modifiers & ~Qt::ShiftModifier)) {
+        const auto cursor=textCursor();
+        if (key==Qt::Key_Backspace && cursor.positionInBlock()==0 && cursor.block().previous().isValid())
+            absorbed=cursor.blockFormat().stringProperty(Id).toStdString();
+        else if (key==Qt::Key_Delete && cursor.positionInBlock()==cursor.block().length()-1 && cursor.block().next().isValid())
+            absorbed=cursor.block().next().blockFormat().stringProperty(Id).toStdString();
+    }
     mutate([&] {
         if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
             auto cursor = textCursor();
@@ -744,6 +812,12 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
             QTextEdit::keyPressEvent(event);
         }
     },join);
+    if (!absorbed.empty()) {
+        bool live=false;
+        for (auto block=document()->begin();block.isValid() && !live;block=block.next())
+            live=block.blockFormat().stringProperty(Id).toStdString()==absorbed;
+        if (!live) absorbed_.insert(absorbed);
+    }
     if (typing) { typing_position_=textCursor().position(); typing_revision_=document()->revision(); typing_clock_.restart(); }
     if (typing || event->key()==Qt::Key_Backspace || event->key()==Qt::Key_Delete) process_wiki_input();
 }
@@ -894,6 +968,12 @@ QMimeData* PageEditor::createMimeDataFromSelection() const
 
 void PageEditor::cut() { mutate([&] { QTextEdit::cut(); }); }
 void PageEditor::paste() { insertFromMimeData(QApplication::clipboard()->mimeData()); }
+void PageEditor::paste_plain_text()
+{
+    const auto* source=QApplication::clipboard()->mimeData();
+    if (!source || !source->hasText()) return;
+    QMimeData plain; plain.setText(source->text()); insertFromMimeData(&plain);
+}
 
 bool PageEditor::move_current(int direction)
 {
@@ -901,7 +981,7 @@ bool PageEditor::move_current(int direction)
     const auto id = current_block_id();
     if (!move_subtree(page, id.toStdString(), direction))
         return false;
-    write_page(page, id);
+    apply_structure(page);
     return true;
 }
 
@@ -911,7 +991,7 @@ bool PageEditor::indent_current()
     const auto id = current_block_id();
     if (!indent(page, id.toStdString()))
         return false;
-    write_page(page, id);
+    apply_structure(page);
     return true;
 }
 
@@ -921,7 +1001,7 @@ bool PageEditor::outdent_current()
     const auto id = current_block_id();
     if (!outdent(page, id.toStdString()))
         return false;
-    write_page(page, id);
+    apply_structure(page);
     return true;
 }
 
@@ -937,7 +1017,120 @@ void PageEditor::set_block_kind(BlockKind kind)
             }
         }
     }
-    write_page(page, id);
+    apply_structure(page);
+}
+
+void PageEditor::apply_structure(const Page& target, const QString& focus_id)
+{
+    typing_position_=-1;
+    validate(target);
+    const auto position=capture_position();
+    const auto title=page_title();
+    struct Shape { std::string id, parent; int kind; bool checked; int level; };
+    std::vector<QTextBlock> blocks; std::vector<Shape> now, next;
+    for (auto block=document()->begin();block.isValid();block=block.next()) {
+        const auto format=block.blockFormat(); blocks.push_back(block);
+        now.push_back({format.stringProperty(Id).toStdString(),format.stringProperty(ParentId).toStdString(),
+            format.intProperty(Kind),format.boolProperty(Checked),format.indent()});
+    }
+    std::unordered_map<std::string,int> depths;
+    for (const auto& block:target.blocks) {
+        const int level=block.parent_id.empty()?0:depths.at(block.parent_id)+1; depths.emplace(block.id,level);
+        next.push_back({block.id,block.parent_id,int(block.kind),block.checked,level});
+    }
+    const auto same=[](const Shape& a,const Shape& b) {
+        return a.id==b.id && a.parent==b.parent && a.kind==b.kind && a.checked==b.checked && a.level==b.level;
+    };
+    std::size_t prefix=0, suffix=0;
+    while (prefix<now.size() && prefix<next.size() && same(now[prefix],next[prefix])) ++prefix;
+    while (suffix<now.size()-prefix && suffix<next.size()-prefix && same(now[now.size()-1-suffix],next[next.size()-1-suffix])) ++suffix;
+    const auto old_count=now.size()-prefix-suffix, new_count=next.size()-prefix-suffix;
+    auto render=[&](QTextCursor& cursor,const Block& block,int level) {
+        apply_block_format(cursor,block,level);
+        if (block.runs.empty() && (block.kind==BlockKind::Image || block.kind==BlockKind::Attachment)) {
+            Run run; run.asset=Asset{block.kind==BlockKind::Image,block.asset_label,block.attachment_id};
+            cursor.insertText(QString(QChar::ObjectReplacementCharacter),run_format(run));
+        } else for (const auto& run:block.runs)
+            cursor.insertText(run.asset?QString(QChar::ObjectReplacementCharacter):QString::fromStdString(run.text),run_format(run));
+        cursor.setCharFormat(QTextCharFormat{});
+    };
+    if (old_count || new_count) {
+        // Begin from the user's cursor so undo restores the caret there (BUG-003).
+        QTextCursor cursor=textCursor(); cursor.clearSelection(); const int caret=cursor.position(); cursor.beginEditBlock();
+        std::size_t rendered=0; bool insert_first=true;
+        if (prefix>0) {
+            // Remove from the end of the untouched previous block. Starting the
+            // edit away from the caret lets undo return the caret to it.
+            const auto before=blocks[prefix-1]; cursor.setPosition(before.position()+before.length()-1);
+            if (old_count) {
+                const auto last=blocks[prefix+old_count-1];
+                cursor.setPosition(last.position()+last.length()-1,QTextCursor::KeepAnchor); cursor.removeSelectedText();
+            }
+        } else if (old_count) {
+            // At the start of the page one empty block remains to render into.
+            const auto first=blocks[0], last=blocks[old_count-1];
+            cursor.setPosition(first.position()); cursor.setPosition(last.position()+last.length()-1,QTextCursor::KeepAnchor);
+            cursor.removeSelectedText(); insert_first=false;
+        } else {
+            cursor.setPosition(0); cursor.insertBlock(); cursor.movePosition(QTextCursor::PreviousBlock); insert_first=false;
+        }
+        for (; rendered<new_count; ++rendered) {
+            if (rendered || insert_first) cursor.insertBlock(QTextBlockFormat{},QTextCharFormat{});
+            render(cursor,target.blocks[prefix+rendered],next[prefix+rendered].level);
+        }
+        if (!new_count && !insert_first) cursor.deleteChar(); // Drop the leftover empty first block.
+        if (prefix==0) {
+            // The editor keeps its undoable title copy on the first block only.
+            auto first=document()->begin(); auto format=first.blockFormat(); format.setProperty(PageTitle,title);
+            QTextCursor(first).setBlockFormat(format);
+            for (auto block=first.next();block.isValid() && block.blockNumber()<=int(new_count);block=block.next())
+                if (block.blockFormat().hasProperty(PageTitle)) { auto other=block.blockFormat(); other.clearProperty(PageTitle); QTextCursor(block).setBlockFormat(other); }
+        }
+        // Undo returns the caret to where this cursor stands when the group closes.
+        cursor.setPosition(std::min(caret,document()->characterCount()-1));
+        cursor.endEditBlock();
+    }
+    if (!focus_id.isEmpty()) { go_to_block(focus_id); return; }
+    auto locate=[&](const std::string& id) {
+        for (auto block=document()->begin();block.isValid();block=block.next())
+            if (block.blockFormat().stringProperty(Id).toStdString()==id) return block;
+        return QTextBlock{};
+    };
+    const auto block=locate(position.block), anchor=locate(position.anchor_block);
+    if (!block.isValid()) return;
+    QTextCursor caret(document());
+    const auto end=block.position()+std::clamp(position.offset,0,block.length()-1);
+    caret.setPosition(anchor.isValid()?anchor.position()+std::clamp(position.anchor_offset,0,anchor.length()-1):end);
+    caret.setPosition(end,QTextCursor::KeepAnchor); setTextCursor(caret); ensureCursorVisible();
+}
+
+BlockState PageEditor::block_state() const
+{
+    BlockState state; const auto block=textCursor().block(); const auto format=block.blockFormat();
+    state.id=format.stringProperty(Id).toStdString(); state.index=block.blockNumber()+1;
+    state.count=document()->blockCount(); state.depth=format.indent();
+    const auto id=format.stringProperty(Id), parent=format.stringProperty(ParentId);
+    for (auto previous=block.previous();previous.isValid();previous=previous.previous()) {
+        const auto other=previous.blockFormat();
+        if (other.stringProperty(Id)==parent && !parent.isEmpty()) break;
+        if (other.stringProperty(ParentId)==parent) { state.up=state.indent=true; break; }
+    }
+    QSet<QString> descendants{id};
+    for (auto following=block.next();following.isValid();following=following.next()) {
+        const auto other=following.blockFormat(); const auto owner=other.stringProperty(ParentId);
+        if (descendants.contains(owner)) { descendants.insert(other.stringProperty(Id)); continue; }
+        state.down=owner==parent; break;
+    }
+    state.outdent=!parent.isEmpty();
+    return state;
+}
+
+std::unordered_set<std::string> PageEditor::take_absorbed_blocks()
+{
+    // Undo may have brought a merged block back; it is live again, not absorbed.
+    for (auto block=document()->begin();block.isValid() && !absorbed_.empty();block=block.next())
+        absorbed_.erase(block.blockFormat().stringProperty(Id).toStdString());
+    auto result=std::move(absorbed_); absorbed_.clear(); return result;
 }
 
 void PageEditor::toggle_checked()
@@ -999,7 +1192,7 @@ void PageEditor::insert_divider()
     const auto following=new_id();
     page.blocks.insert(end,{{new_id().toStdString(),parent,BlockKind::Divider,{}},
                             {following.toStdString(),parent,BlockKind::Paragraph,{}}});
-    write_page(page,following);
+    apply_structure(page,following);
 }
 
 void PageEditor::toggle_bold()
@@ -1052,6 +1245,38 @@ void PageEditor::focusOutEvent(QFocusEvent* event)
     QTextEdit::focusOutEvent(event);
 }
 
+void PageEditor::resizeEvent(QResizeEvent* event)
+{
+    painted_active_={};
+    QTextEdit::resizeEvent(event);
+}
+
+void PageEditor::update_active_region()
+{
+    const auto rect=active_block_rect().adjusted(-3,-3,3,5);
+    viewport()->update((painted_active_.isNull()?rect:painted_active_.united(rect)).toAlignedRect());
+    painted_active_=rect;
+}
+
+bool PageEditor::fast_typing_allowed(const QKeyEvent* event) const
+{
+    const auto cursor=textCursor();
+    if (cursor.hasSelection() || !absorbed_.empty()) return false;
+    const auto text=event->text();
+    for (const auto c:text) if (c==QChar::ParagraphSeparator || c==QChar::ObjectReplacementCharacter || c=='\n' || c=='\r') return false;
+    const auto format=cursor.blockFormat(); const auto kind=format.intProperty(Kind);
+    if (kind==int(BlockKind::Divider) || kind==int(BlockKind::Image) || kind==int(BlockKind::Attachment)) return false;
+    // Same-page default labels follow this block's text in the same undo step.
+    if (default_targets_.count(format.stringProperty(Id).toStdString())) return false;
+    // Typing beside a reference or card may extend or relabel it.
+    if (cursor.charFormat().hasProperty(RefTarget) || cursor.charFormat().objectType()==CardObject) return false;
+    if (cursor.positionInBlock()<cursor.block().length()-1) {
+        auto next=cursor; next.movePosition(QTextCursor::NextCharacter,QTextCursor::KeepAnchor);
+        if (next.charFormat().hasProperty(RefTarget) || next.charFormat().objectType()==CardObject) return false;
+    }
+    return true;
+}
+
 void PageEditor::mouseMoveEvent(QMouseEvent* event)
 {
     if (grip_pressed_) {
@@ -1102,7 +1327,7 @@ void PageEditor::mouseReleaseEvent(QMouseEvent* event)
         const bool apply=dragging_ && drop_valid_;
         const auto page=drop_preview_; const auto focus=dragged_id_;
         cancel_drag();
-        if (apply) write_page(page,focus);
+        if (apply) apply_structure(page);
         event->accept(); return;
     }
     if (event->button() == Qt::LeftButton && event->modifiers() & Qt::ControlModifier) {
@@ -1126,7 +1351,8 @@ void PageEditor::contextMenuEvent(QContextMenuEvent* event)
     menu.addSeparator();
     menu.addAction("Cut", this, &PageEditor::cut);
     menu.addAction("Copy", this, &QTextEdit::copy);
-    menu.addAction("Paste plain text", this, &PageEditor::paste);
+    menu.addAction("Paste", this, &PageEditor::paste);
+    menu.addAction("Paste plain text\tCtrl+Shift+V", this, &PageEditor::paste_plain_text);
     menu.addAction("Select all", this, &QTextEdit::selectAll);
     menu.exec(event->globalPos());
 }

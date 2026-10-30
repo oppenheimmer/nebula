@@ -1,0 +1,25 @@
+# Development checks only; the application itself never uses the network.
+name: checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the development image
+        run: ./scripts/dev.sh build-image
+      - name: GCC
+        run: ./scripts/dev.sh test gcc
+      - name: Clang
+        run: ./scripts/dev.sh test clang
+      - name: Core without Qt or SQLite
+        run: ./scripts/dev.sh test core
+      - name: AddressSanitizer and UndefinedBehaviorSanitizer
+        run: ./scripts/dev.sh test asan
+      - name: Repeat interaction suites (BUG-014, BUG-015)
+        run: ./scripts/dev.sh stress 10

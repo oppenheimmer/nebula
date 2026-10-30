@@ -5,6 +5,7 @@
 
 // A separate process deliberately dies with an active SQLite transaction. It
 // creates a hot-journal fixture without exposing a crash hook in the application.
+// The marker uses an existing table: workspaces refuse unknown schema objects.
 int main(int argc,char** argv)
 {
     if (argc!=3) return 2;
@@ -14,7 +15,7 @@ int main(int argc,char** argv)
         "CREATE TEMP TABLE original_blocks AS SELECT * FROM blocks;"
         "UPDATE pages SET title='After process exit',revision=revision+1;"
         "DELETE FROM blocks; INSERT INTO blocks SELECT * FROM original_blocks;"
-        "CREATE TABLE interrupted_marker(value TEXT);";
+        "INSERT INTO maintenance(name,value) VALUES('interrupted_marker','1');";
     if (sqlite3_exec(db,changes,nullptr,nullptr,nullptr)!=SQLITE_OK) return 4;
     if (std::string(argv[2])=="commit" && sqlite3_exec(db,"COMMIT",nullptr,nullptr,nullptr)!=SQLITE_OK) return 5;
     std::cout<<"ready\n"<<std::flush;

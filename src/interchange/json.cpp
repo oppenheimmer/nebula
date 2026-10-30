@@ -1,4 +1,4 @@
-#include "nebula/storage/workspace.hpp"
+#include "nebula/interchange/interchange.hpp"
 #include "nebula/format/codec.hpp"
 #include "internal.hpp"
 #include <QDateTime>
@@ -8,9 +8,11 @@
 #include <QStringList>
 #include <set>
 
-namespace nebula {
+namespace nebula::interchange {
 namespace {
-using namespace interchange;
+using namespace detail;
+// Imported revisions stay far below int64 overflow so later saves can increment them.
+constexpr std::int64_t RevisionLimit=std::int64_t(1)<<62;
 struct Field {const char* name; char type;}; // s=text, n=nullable text, i=decimal int64, b=bool, j=JSON object.
 struct Table {const char* name; std::vector<Field> fields;};
 const std::vector<Table> tables{
@@ -146,18 +148,8 @@ void validate_records(const Workspace& workspace,sqlite3* db) {
             }
         }
         for (const auto& view:workspace.views(database.id)) {
-            auto known=[&](const std::string& id){return id.empty() || std::any_of(definitions.begin(),definitions.end(),[&](const auto& def){return def.id==id;});};
-            if (!known(view.sort_property)) throw std::runtime_error("Unknown view sort property");
-            std::set<std::string> visible;
-            for (const auto& id:view.visible_properties) if (id.empty() || !known(id) || !visible.insert(id).second) throw std::runtime_error("Invalid view columns");
-            for (const auto& filter:view.filters) {
-                if (!known(filter.property_id)) throw std::runtime_error("Unknown filter property");
-                auto kind=PropertyKind::Text; for (const auto& def:definitions) if (def.id==filter.property_id) kind=def.kind;
-                if (filter.comparison==Comparison::Contains) {
-                    if ((kind!=PropertyKind::Text && kind!=PropertyKind::Tags) || !std::holds_alternative<std::string>(filter.value))
-                        throw std::runtime_error("Invalid Contains filter");
-                } else if (filter.comparison!=Comparison::Empty && filter.comparison!=Comparison::NotEmpty) validate_value(kind,filter.value);
-            }
+            try { validate_view(view,definitions); }
+            catch (const std::invalid_argument& error) { throw std::runtime_error(std::string("Invalid saved view: ")+error.what()); }
         }
     }
     sql::Statement fragments(db,"SELECT page_id,fragment,original_position FROM deleted_blocks");
@@ -186,19 +178,20 @@ std::set<std::string> file_list(const fs::path& root) {
     return result;
 }
 } // namespace
-void Workspace::export_json(const std::filesystem::path& destination) const {
-    using namespace interchange;
-    if(sql::scalar(database_.get(),"PRAGMA user_version")!="9") throw std::runtime_error("Open and upgrade the workspace before JSON export");
-    reject_managed_destination(directory_,destination); files::WorkspaceLock lock(directory_,false); Snapshot snapshot(database_.get());
-    validate_records(*this,database_.get()); const auto data=records(database_.get());
-    for (const auto& issue:audit_attachments_unlocked()) if (issue.prevents_backup) throw std::runtime_error("Incomplete managed files: "+issue.message);
-    NewDirectory output(destination); fs::create_directory(destination/"attachments"); QJsonArray files;
-    for (const auto& name:file_list(directory_)) {
-        const auto relative=relative_file(q(name)); fs::create_directories((destination/relative).parent_path());
-        const auto digest=files::copy_new(directory_/relative,destination/relative);
+void export_json(const Workspace& workspace,const std::filesystem::path& destination) {
+    sqlite3* database=WorkspaceInternals::connection(workspace); const auto& directory=workspace.directory();
+    if(WorkspaceInternals::schema_version(database)!=WorkspaceInternals::current_schema()) throw std::runtime_error("Open and upgrade the workspace before JSON export");
+    reject_managed_destination(directory,destination); files::WorkspaceLock lock(directory,false); Snapshot snapshot(database);
+    validate_records(workspace,database); const auto data=records(database);
+    for (const auto& issue:WorkspaceInternals::audit_unlocked(workspace)) if (issue.prevents_backup) throw std::runtime_error("Incomplete managed files: "+issue.message);
+    NewDirectory output(destination); files::make_private_directory(destination/"attachments"); QJsonArray files;
+    for (const auto& name:file_list(directory)) {
+        const auto relative=relative_file(q(name));
+        fs::create_directories((destination/relative).parent_path());
+        const auto digest=files::copy_beneath(directory,relative,destination/relative);
         files.append(QJsonObject{{"path",q(name)},{"size",QString::number(digest.size)},{"sha256",q(digest.sha256)}});
     }
-    const QJsonObject object{{"format","nebula-workspace"},{"version",1},{"schema",9},{"tables",data},{"files",files}};
+    const QJsonObject object{{"format","nebula-workspace"},{"version",1},{"schema",WorkspaceInternals::interchange_contract()},{"tables",data},{"files",files}};
     const auto content=QJsonDocument(object).toJson(QJsonDocument::Indented);
     if(content.size()>64*1024*1024) throw std::runtime_error("JSON manifest exceeds the supported 64 MiB limit");
     files::write_new(destination/"workspace.json",content.toStdString());
@@ -207,8 +200,7 @@ void Workspace::export_json(const std::filesystem::path& destination) const {
     for(auto i=directories.rbegin();i!=directories.rend();++i) files::sync_directory(*i);
     output.complete();
 }
-Workspace Workspace::import_json(const std::filesystem::path& source,const std::filesystem::path& destination) {
-    using namespace interchange;
+Workspace import_json(const std::filesystem::path& source,const std::filesystem::path& destination) {
     if(!source.is_absolute() || fs::is_symlink(source) || !fs::is_directory(source)) throw std::invalid_argument("Choose an existing JSON export folder");
     reject_managed_destination(fs::weakly_canonical(source),destination);
     const auto object=parse(read(source/"workspace.json")); keys(object,{"format","version","schema","tables","files"},true);
@@ -227,8 +219,9 @@ Workspace Workspace::import_json(const std::filesystem::path& source,const std::
     NewDirectory output(destination);
     auto workspace=Workspace::open(destination);
     {
-        files::WorkspaceLock lock(workspace.directory_,true); sql::Transaction transaction(workspace.database_.get());
-        sql::execute(workspace.database_.get(),"DELETE FROM workspace_meta");
+        sqlite3* connection=WorkspaceInternals::connection(workspace);
+        files::WorkspaceLock lock(workspace.directory(),true); sql::Transaction transaction(connection);
+        sql::execute(connection,"DELETE FROM workspace_meta");
         for(const auto& table:tables) {
             const auto list=data[table.name]; if(!list.isArray()) throw std::runtime_error("Expected canonical table array");
             QStringList placeholders; for(std::size_t i=0;i<table.fields.size();++i) placeholders.push_back("?");
@@ -237,10 +230,15 @@ Workspace Workspace::import_json(const std::filesystem::path& source,const std::
                 if(!entry.isObject()) throw std::runtime_error("Expected canonical row object");
                 const auto row=entry.toObject();
                 QStringList fields; for(const auto& field:table.fields) fields.push_back(field.name); keys(row,fields,true);
-                sql::Statement add(workspace.database_.get(),s(command).c_str()); int column=1;
+                sql::Statement add(connection,s(command).c_str()); int column=1;
                 for(const auto& field:table.fields) {
                     const auto value=row[field.name];
-                    if(field.type=='i') add.bind(column,integer(value));
+                    if(field.type=='i') {
+                        const auto number=integer(value);
+                        if(QString(table.name)=="pages" && QString(field.name)=="revision" && (number<1 || number>=RevisionLimit))
+                            throw std::runtime_error("Page revisions must be between 1 and 2^62");
+                        add.bind(column,number);
+                    }
                     else if(field.type=='b') {if(!value.isBool()) throw std::runtime_error("Expected boolean"); add.bind(column,value.toBool());}
                     else if(field.type=='j') {
                         if(!value.isObject()) throw std::runtime_error("Expected payload object");
@@ -258,20 +256,21 @@ Workspace Workspace::import_json(const std::filesystem::path& source,const std::
                 add.done();
             }
         }
-        validate_records(workspace,workspace.database_.get());
+        WorkspaceInternals::rebuild_recovery_members(connection);
+        validate_records(workspace,connection);
         for(const auto& entry:object["files"].toArray()) {
             const auto file=entry.toObject(); const auto relative=relative_file(file["path"].toString());
-            fs::create_directories((destination/relative).parent_path()); const auto digest=files::copy_new(source/relative,destination/relative);
+            fs::create_directories((destination/relative).parent_path()); const auto digest=files::copy_beneath(source,relative,destination/relative);
             if(digest.size!=integer(file["size"]) || q(digest.sha256)!=file["sha256"]) throw std::runtime_error("JSON attachment checksum mismatch");
         }
-        for(const auto& issue:workspace.audit_attachments_unlocked()) if(issue.prevents_backup) throw std::runtime_error("Incomplete imported attachment: "+issue.message);
+        for(const auto& issue:WorkspaceInternals::audit_unlocked(workspace)) if(issue.prevents_backup) throw std::runtime_error("Incomplete imported attachment: "+issue.message);
         files::sync_directory(destination/"attachments"); transaction.commit();
     }
-    workspace.id_=sql::scalar(workspace.database_.get(),"SELECT workspace_id FROM workspace_meta WHERE id=1");
+    WorkspaceInternals::set_identity(workspace,sql::scalar(WorkspaceInternals::connection(workspace),"SELECT workspace_id FROM workspace_meta WHERE id=1"));
     workspace.rebuild_links(); workspace.rebuild_search();
     std::vector<fs::path> directories{destination/"attachments"};
     for(const auto& entry:fs::recursive_directory_iterator(destination/"attachments")) if(entry.is_directory()) directories.push_back(entry.path());
     for(auto i=directories.rbegin();i!=directories.rend();++i) files::sync_directory(*i);
     output.complete(); return workspace;
 }
-} // namespace nebula
+} // namespace nebula::interchange

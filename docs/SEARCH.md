@@ -62,12 +62,20 @@ preserving the previous database. No external tokenizer/library is required.
 The core document model remains independent of Qt and SQLite. The storage adapter
 uses existing Qt Core Unicode operations.
 
-Each page has per-block rows plus a whole-page row for terms across blocks.
-Titles/properties accompany both. Results use FTS5 BM25 relevance, then title and
-block ID; ranking is not a persistent identity or a guaranteed ordering across
-index implementations. Canonical page/database joins determine availability.
-Related note, reference and search changes commit together. Failed index writes
-fail the save and retain pending edits.
+Each page has one page row holding its title and property text, and one row per
+nonempty block body; each text is stored once. A result first looks for single rows
+containing every term (a block result opens that block; a title/property match opens
+the page). Pages whose terms are spread across blocks or between the title and a
+block also match and open the page; that pass is skipped once single-row matches fill
+the 100 results. Results use FTS5 BM25 relevance (summed per term for spread
+matches), then title and page ID; ranking is not a persistent identity or a
+guaranteed ordering across index implementations. Result context is built from
+canonical blocks rather than stored excerpts. Saves update only the rows of changed
+blocks; referring pages are reindexed only when a label they display changes. A
+contentless table was not used because the SQLite 3.33 baseline lacks contentless
+deletes. Canonical page/database joins determine availability. Related note,
+reference and search changes commit together. Failed index writes fail the save and
+retain pending edits.
 
 Search → Rebuild search and reference indexes reconstructs the derived tables from
 canonical notes/properties/references, then saves any pending edits. Page IDs,

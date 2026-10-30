@@ -1,5 +1,7 @@
 #pragma once
 #include "nebula/app/prototype_window.hpp"
+#include "nebula/app/link_targets.hpp"
+#include "nebula/app/navigation.hpp"
 #include "nebula/app/page_session.hpp"
 #include "nebula/editor/page_editor.hpp"
 
@@ -17,6 +19,7 @@ class WorkspaceWindow : public PrototypeWindow {
     Q_OBJECT
 public:
     explicit WorkspaceWindow(Workspace& workspace, const QString& display_path = {}, QWidget* parent = nullptr);
+    ~WorkspaceWindow() override;
     bool flush();
     bool open_page(const std::string& id, const std::string& block = {});
     void create_page(const QString& title);
@@ -52,8 +55,13 @@ private:
     QStandardItemModel* completion_model_;
     std::vector<LinkCandidate> completion_targets_;
     bool completing_ = false;
-    struct NavigationPosition { std::string page; EditorPosition editor; };
-    std::vector<NavigationPosition> back_history_, forward_history_;
+    using NavigationPosition = NavigationHistory::Entry;
+    NavigationHistory history_;
+    mutable LinkTargets link_targets_;
+    QTimer* table_refresh_;
+    bool in_item_change_ = false;
+    std::string rendered_row_, link_signature_;
+    std::filesystem::path open_copies_;
     std::optional<NavigationPosition> detached_position_;
     bool history_navigation_ = false;
     std::optional<NavigationPosition> current_position() const;
@@ -90,5 +98,14 @@ private:
     void undo_block_transfer(bool applied);
     void reload_page(const std::string& block = {});
     void update_transfer_actions();
+    void schedule_table_refresh();
+    void refresh_after_save();
+    void save_conflict_copy();
+    void empty_trash(QWidget* parent);
+    void delete_view();
+    void rename_property();
+    void delete_property();
+    void check_integrity();
+    void open_attachment();
 };
 } // namespace nebula

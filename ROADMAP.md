@@ -200,17 +200,18 @@ only the selected data folder writable at `/data` in the editor container. An
 explicit `--workspace HOST_FOLDER` bypasses the chooser and can select folders
 outside the home directory. The host path remains visible in the window.
 
-The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`, SQLite
-`application_id = 0x4e454255` (`NEBU`), `user_version = 1`, and
+The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`,
+SQLite `application_id = 0x4e454255` (`NEBU`), `user_version = 1`, and
 `workspace_meta(id INTEGER PRIMARY KEY CHECK(id=1), workspace_id TEXT NOT NULL
 UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
-Initialization occurs in a transaction; reopening preserves that identity.
-Unrelated databases and unsupported versions are rejected without modifying their
-contents. **Version 1 stores no pages or notes.** The current version 7 format
-adds persistent databases, pages, block payloads, properties, views, derived link
-edges, and deleted-block recovery. [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the
-schema, JSON versions, ownership, autosave/undo boundaries, and backup contract.
-The prototype notice applies only to explicit in-memory demo mode.
+Initialization occurs in a transaction; reopening preserves that identity. Unrelated
+databases and unsupported versions are rejected without modifying their contents.
+**Version 1 stores no pages or notes.** The current version 10 format adds persistent
+databases, pages, block payloads, properties, views, derived link edges, search rows,
+managed attachments, and deleted-block recovery.
+[WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the schema, JSON versions,
+ownership, autosave/undo boundaries, and backup contract. The prototype notice
+applies only to explicit in-memory demo mode.
 
 Application operations must give related edits coherent validation and undo
 semantics. Autosave needs explicit saved/unsaved/error states. A change is saved
@@ -241,8 +242,10 @@ recovery/restore verification.
 The macOS release follows the Linux release and begins with build and smoke checks.
 Calendar and other database presentations are possible later extensions. Advanced
 relations, formulas, and broader Notion feature parity are not first-release
-commitments. A spatial canvas, synchronization, shared workspaces, and a hosted
-service are outside the agreed product scope.
+commitments. Dragging files or images into the editor and translating the user
+interface are deferred until after the first release (SUG-43). A spatial canvas,
+synchronization, shared workspaces, and a hosted service are outside the agreed
+product scope.
 
 ## Progress conventions
 
@@ -570,6 +573,19 @@ and a release candidate with known limitations documented.
   failure, retain attachments, and verify cancel/Escape, restore, block undo/redo
   and restart behavior. These buttons must never invoke permanent purge. Rename
   the visible reference lists to “Referenced by:” and “References”.
+- [ ] M08.8 Finish the remaining Suggestions follow-ups (scheduled 2026-10-30):
+  build the Link… picker incrementally from the cached link-target rows instead of
+  creating a tree item for every block (SUG-28); move view editing and import/
+  export coordination out of `WorkspaceWindow` into Qt-free application services
+  with focused tests (SUG-34); share one set of Qt UTF-8 conversion helpers across
+  the storage, format, interchange and desktop modules (SUG-36); rebuild the
+  development image with `clang-format` and the Clang libFuzzer runtime, run the
+  libFuzzer targets and record results, then reformat existing dense files in
+  formatting-only commits (SUG-38/SUG-40); confirm the GitHub CI workflow passes on
+  a real runner (SUG-40); measure GUI autosaves against concurrent headless
+  backups/exports of a large workspace and record whether chunked backup steps
+  avoid save failures (SUG-22). Agreeing the proposed integrated benchmark budgets
+  belongs to M08.3.
 
 Exit criteria: required checks have recorded outcomes; supported saved data
 survives the documented recovery scenarios; no unresolved release-blocking defect
@@ -580,8 +596,11 @@ remains. Performance meets the agreed thresholds on recorded hardware/fixtures.
 Deliverables: an installable Linux package, release notes, and user/developer
 instructions matching the shipped behavior.
 
-- [ ] M09.1 Select and document a packaging approach, minimum supported environment,
-  dependency versions, and required license notices.
+- [ ] M09.1 Pin the development/release base image by digest (`BASE_IMAGE` in
+  `Dockerfile.dev`) with a package snapshot; ship only the Qt image plugins Nebula
+  needs and add Qt image-plugin security updates to the release checklist (from
+  SUG-08/SUG-42). Select and document a packaging approach, minimum supported
+  environment, dependency versions, and required license notices.
 - [ ] M09.2 Validate installation, launch, workspace creation, editing, search,
   export, backup, and restore in a clean supported environment without network.
 - [ ] M09.3 Verify upgrade behavior and provide build, installation, data-location,
@@ -614,6 +633,13 @@ with platform integration and distribution instructions.
 Exit criteria: the macOS package completes the agreed offline workflow and passes
 cross-platform data-transfer checks. Its supported environments and distribution
 procedure are documented.
+
+Progress from the Suggestions implementation (2026-10-30), without completing an M08
+task: integrated benchmarks over representative fixtures now exist for M08.3
+(measured values and proposed budgets are in the work log, not yet agreed gates);
+sanitizer, fuzz and stress modes support M08.1/M08.4; Empty trash, schema hardening
+and conflict recovery support M08.1. Each M08 task stays open until its own exit
+evidence is recorded.
 
 ## Risk register
 
@@ -893,6 +919,29 @@ problems remain in the risk register until reproduced.
   undo/redo and three-scope recovery after reopening. The new dialog driver
   reports unexpected error dialogs directly instead of hanging on them.
 
+### BUG-016 — Ranged structural rewrite returned the caret to the wrong block on undo
+
+- **Milestone/state:** SUG-27/SUG-14 (M05 behavior); fixed and verified during the
+  Suggestions implementation, before commit.
+- **Environment/reproduction:** Debian 13 Docker, Qt 6.8.2/GCC 14.2.0, offscreen.
+  Convert the sample `reference` block to a heading and undo; separately, place the
+  caret at the start of block 1000 of a 2,000-block page, press Alt+Down and undo.
+- **Expected/actual:** undo restores the document and leaves the caret in the
+  edited/moved block. The first version put it in the first block (the existing
+  `block_kind_conversion_preserves_content_and_references` BUG-003 regression
+  failed), then, after that fix, in the following block.
+- **Diagnosis:** the ranged rewrite first opened its undo group from a cursor at
+  position 0. Starting from the user's cursor fixed BUG-003's case. When the first
+  edit began exactly at the caret, Qt recorded no separate cursor position and placed
+  the caret after the re-inserted text on undo (G23).
+- **Resolution:** begin the group from `textCursor()` and, when a previous block
+  exists, start the removal at that block's end so the first edit is away from the
+  caret.
+- **Verification:** the BUG-003 test and the new
+  `structural_commands_rewrite_only_the_affected_range` (which asserts the post-undo
+  block) failed before each fix and pass with GCC, Clang, ASan/UBSan and native
+  Xwayland.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -976,10 +1025,486 @@ milestone, evidence, and the resulting action.
   keyboard actions outside mutation groups; exercise shortcuts in the full window
   in addition to triggering their QAction directly.
 - **G22 — Block archives do not cover every attachment undo (2026-10-30, M06):**
-  BUG-013 removes an object while keeping its block ID, so no deleted-block
-  fragment exists. Retain registered imports independently of current reference
-  counts; clean only unregistered leftovers until a deliberate purge policy can
-  account for undo, recovery and retained backups.
+  BUG-013 removes an object while keeping its block ID, so no deleted-block fragment
+  exists. Retain registered imports independently of current reference counts; clean
+  only unregistered leftovers until a deliberate purge policy can account for undo,
+  recovery and retained backups. Empty trash (SUG-05) is now that policy: it runs
+  only after clearing editor and block-transfer undo.
+- **G23 — Qt undo positions the caret from the group's edits (2026-10-30, M05):**
+  QTextDocument restores the cursor from where an undo group began unless the first
+  edit starts exactly there, in which case the caret lands after the re-inserted
+  text. Start structural groups from the user's cursor and make the first edit begin
+  elsewhere (BUG-016).
+- **G24 — Disabled triggers change fault injection (2026-10-30, M08):** Nebula
+  connections now refuse and disable triggers (SUG-03), so tests can no longer inject
+  write failures with SQL triggers from a second connection. Tests drop the derived
+  `page_search` table instead; every write path updates it, so the whole operation
+  still rolls back.
+- **G25 — QCollator ignores numeric mode in the C locale (2026-10-30, M04):** the
+  container runs `C.UTF-8`, where Qt's collator compared "Item 10" before "Item 9".
+  View ordering therefore uses an application-owned, locale-independent natural
+  comparison of case-folded text, which also keeps orderings identical across
+  machines.
+- **G26 — FTS5 deletes by unindexed column scan the table (2026-10-30, M07):**
+  `DELETE FROM page_search WHERE page_id=?` reads every row. Version 10 keeps a
+  `page_search_rows` map from page/block to FTS rowid so updates delete by rowid.
+- **G27 — Concurrent agents can share one working tree (2026-10-30, process):**
+  another agent committed `963cdfb` and `382aad4` from this tree while the
+  Suggestions work was uncommitted; both edited `workspace_window.cpp`,
+  `CMakeLists.txt` and this roadmap. Partial staging kept each change set apart, and
+  BUG-015 surfaced only in the combined tree. Inspect `git status`/`git log` before
+  committing, stage by hunk, and rerun the combined suites.
+
+## Suggestions
+
+This is an architecture, security and quality review of commit `761dd84`, requested
+by the user on 2026-10-30. The entries are proposals, not scheduled work. They do not
+change milestone status or authorize implementation. Move accepted items into the
+relevant milestone task list. Before fixing a confirmed defect, reproduce it with a
+failing test and record it in the bug log. Line references are to `761dd84`.
+
+- **Severity:** High means likely data loss, exposure, or a release-blocking slowdown
+  in normal use. Medium means real but bounded impact. Low means an edge case or
+  polish.
+- **Basis:** *Confirmed* means traced through the source, plus existing tests where
+  cited. *Plausible* means the code path exists but has not been reproduced.
+
+Several things are already solid. All SQL values are bound parameters, and FTS terms
+are quoted, so no SQL or FTS injection path was found. HTML paste loads no resources.
+Managed files are created with `O_EXCL`/`O_NOFOLLOW` and flushed before commit.
+Interchange paths reject traversal and symlinks. Saves are transactional with
+optimistic revisions. The suggestions below build on that.
+
+Recommended order:
+
+1. Before writing M07.8 code, agree on the network guardrails (SUG-01) and the
+   representative performance fixtures (SUG-33). M07.8 and M08 then start from
+   measured baselines.
+2. Make the small, contained fixes, each with a regression test: SUG-02, SUG-11,
+   SUG-14, SUG-15, SUG-16, SUG-07, SUG-29 and SUG-04.
+3. For the M08 core: SUG-25–SUG-28 and SUG-30 (these refine R05), the retention
+   policy in SUG-05/SUG-12, conflict handling in SUG-13/SUG-37, schema hardening in
+   SUG-03, and the verification work in SUG-40.
+4. Before M09: SUG-06, SUG-08, SUG-10, SUG-41 and SUG-42.
+
+### Implementation status — 2026-10-30
+
+At the user's request every suggestion was implemented or decided in the same day.
+The entries below remain as the original review; this table records the outcome.
+Evidence and checks are in the work log ([Suggestions implementation
+checkpoint](#suggestions-implementation-checkpoint--2026-10-30)).
+
+| ID | Outcome | Change and evidence |
+| --- | --- | --- |
+| SUG-01 | Addressed by M07.8 | The concurrent M07.8 work recorded and implemented the fetch guardrails ([PREVIEW_DESIGN.md](docs/PREVIEW_DESIGN.md), `382aad4`). Editor integration remains in M07.8. |
+| SUG-02 | Done | Data commands mount only a new 0700 staging folder and rename it into place; existing destinations are refused before Docker runs. Launcher test. |
+| SUG-03 | Done | Defensive mode, `trusted_schema` off, triggers/views disabled; schema object whitelist before and after migration and for read-only/restore. Storage test. |
+| SUG-04 | Done | New workspace, backup, restore and export folders are 0700 and databases 0600. Storage test. |
+| SUG-05 | Done | Restore… → Empty trash permanently… purges trash, recovery records and unreferenced files, clears undo and runs `VACUUM`. Storage and window tests. |
+| SUG-06 | Done | Opening hands out a checksum-verified, read-only, original-named copy that is removed with the window. Window test. |
+| SUG-07 | Done | Message boxes and data-bearing labels use plain text. Window test. |
+| SUG-08 | Done; packaging in M09.1 | Previews decode on a worker thread with a 128 MiB allocation limit; card paths are re-resolved at most once per second. Plugin set and update tracking moved to M09.1. |
+| SUG-09 | Done | `SQLITE_OPEN_NOFOLLOW` and component-by-component `O_NOFOLLOW` opens for every copy and digest. Storage test. |
+| SUG-10 | Done | README and ATTACHMENTS.md describe the manifest as corruption detection. |
+| SUG-11 | Done | Storage refuses backup/export folders; the chooser also confirms non-empty unrelated folders. Storage and window tests. |
+| SUG-12 | Done | The editor reports merged blocks, which are not archived; `deleted_block_members` replaces per-save fragment decoding. Editor, storage and window tests. |
+| SUG-13 | Done | Exclusive cross-process session lock; conflicts get their own status, Keep my version as a new page, and a close option. Subprocess and window tests. |
+| SUG-14 | Done | Structural commands keep the caret offset and selection, including after undo (BUG-016). Editor test. |
+| SUG-15 | Done | Paste and Paste plain text (Ctrl+Shift+V) are separate. Editor test. |
+| SUG-16 | Done | Percent-decoding, file-name labels and reported missing files; traversal still rejects the import. Storage test. |
+| SUG-17 | Done | Saves refresh only changed rows, outside item signals, and leave open cell editors alone. Window test. |
+| SUG-18 | Done | JSON import rejects revisions of 2^62 or more; saves guard the bound. Storage test. |
+| SUG-19 | Done | Fragments whose parent moved away return as top-level blocks with a notice. Storage test. |
+| SUG-20 | Done | `create_journal` and `create_dated_entry` are single transactions. Storage and window tests. |
+| SUG-21 | Done | SIGTERM/SIGINT/SIGHUP reach the event loop through a self-pipe and flush pending edits. Window test. |
+| SUG-22 | Done; WAL not adopted; measurement in M08.8 | Read-only busy timeout and 256-page backup steps with a restart fallback. WAL rejected for read-only tool mounts. Large-backup test; contention not separately measured. |
+| SUG-23 | Done | Locale-independent natural case-insensitive order, case-folded Contains, tag-set equality, decimal comma, tolerant tags. Storage and application tests. |
+| SUG-24 | Decided | `workspace_id` names a lineage; documented in WORKSPACE_FORMAT.md and INTERCHANGE.md. |
+| SUG-25 | Done | Typing fast path, per-page label and card-path caches, neighbour-based toolbar state, partial repaint, visible-only dividers. Editor tests and benchmark. |
+| SUG-26 | Done | Identity-diffed saves with reused statements, label-aware referrer reindexing, and row/link refresh only on change. Storage tests and benchmark. |
+| SUG-27 | Done | Structural edits rewrite only the affected block range. Editor test and benchmark. |
+| SUG-28 | Partial; remainder in M08.8 | Lightweight page summaries/link-target rows and a cached `LinkTargets` service; the Link… picker still creates tree items for every cached row. |
+| SUG-29 | Done | `links(source_page)` index in migration and rebuild. Query-plan test. |
+| SUG-30 | Done; contentless rejected | Title/properties and each block body are stored once; result context comes from canonical blocks. Contentless deletes need SQLite 3.43. |
+| SUG-31 | Done | Prepare/copy/commit import with worker-thread progress and cancel; backups hash once and restore twice. Storage tests. |
+| SUG-32 | Done | Full checks after migrations, weekly or on request, recorded in `maintenance`. Storage and window tests. |
+| SUG-33 | Done; thresholds proposed | `benchmark workspace` with before/after results in the work log. |
+| SUG-34 | Partial; remainder in M08.8 | Navigation history, property text and link targets moved to Qt-free services (`app_tests`); view editing and interchange coordination remain in the window. |
+| SUG-35 | Done | Interchange is free functions over `WorkspaceInternals`; `sql.hpp` is a documented internal header. |
+| SUG-36 | Partial; remainder in M08.8 | One supported-version range, a migration step table and a shared `validate_view`; duplicated Qt UTF-8 helpers remain. |
+| SUG-37 | Done; English messages | `StorageError` categories drive conflict handling; translation stays with SUG-43. |
+| SUG-38 | Decided; reformatting in M08.8 | `.clang-format` applies to new files; existing files are reformatted later in formatting-only commits. The current image has no clang-format. |
+| SUG-39 | Done | `valid_identity` enforced by core validation, link filters, JSON and clipboard decoding. Storage test. |
+| SUG-40 | Done; CI and libFuzzer runs in M08.8 | `test asan`, warnings-as-errors, `stress`, five fuzz targets with a smoke driver, optional libFuzzer build, and a CI workflow that has not run yet. |
+| SUG-41 | Done | Configure-time FTS5 check and startup probe. |
+| SUG-42 | Done; pinning in M09.1 | Dirty-tree guard for data commands and a `BASE_IMAGE` build argument; digest and snapshot pinning moved to M09.1. |
+| SUG-43 | Decided | Delete view, rename/delete property and Empty trash are first-release features (implemented). File/image drag-and-drop and UI translation are deferred until after the first release. |
+
+### Security and privacy
+
+- **SUG-01 — Set guardrails before M07.8 adds the first network code** (advisory,
+  M07.8). No target links a network module today, so the preview fetcher will set the
+  pattern for the only exception in AGENTS.md. Proposed contract:
+  - Fetch only after an explicit paste of an `http`/`https` URL.
+  - Send GET only, with no cookies, credentials or Referer.
+  - Follow a small number of redirects, and only to http(s) URLs.
+  - Enforce a timeout and a byte cap while streaming.
+  - Allow cancellation without blocking the UI thread.
+  - Extract text without running scripts or loading subresources.
+  - Store the preview as plain runs, with control and bidirectional-override
+    characters removed.
+
+  Decide whether loopback and private-network hosts are fetched without confirmation:
+  a pasted link can reach a router or local admin page. Record the Qt Network/TLS
+  backend licence and macOS implications in DEPENDENCIES.md. Test the success,
+  failure, timeout, oversize and cancel paths against a loopback server inside the
+  network-less test container.
+- **SUG-02 — `dev.sh` mounts the destination's parent read-write** (Medium,
+  Confirmed, tooling). The `backup`, `restore`, `export-md`, `export-json` and
+  `import-json` commands mount `dirname NEW_FOLDER` writable at `/output`
+  (`scripts/dev.sh:102-115`). As a result, `./scripts/dev.sh backup ~/nebula
+  ~/nebula-backup` gives the container write access to the whole home directory,
+  including the "read-only" source through a second path. This undermines the README
+  statement that the source is mounted read-only. Instead, create an empty staging
+  folder beside the destination on the host, mount only that folder, and rename it
+  into place after success. Assert the exact mount set in `tests/launcher_tests.sh`.
+- **SUG-03 — Treat opened and restored databases as untrusted schema** (Medium,
+  Confirmed absence of checks, M08.1). `Workspace::open` and `Workspace::read_only`
+  accept any file with the NEBU application ID, a known `user_version` and a passing
+  `quick_check` (`src/storage/workspace.cpp:82-198`, `src/storage/backup.cpp:9-26`).
+  Restore then copies the schema verbatim. A crafted or hand-edited backup can
+  therefore carry triggers or views that rewrite or delete rows during ordinary
+  saves. Its manifest cannot detect this because the manifest travels with the
+  backup. Compare `sqlite_schema` with the objects expected for each supported
+  version, allowing FTS5 shadow tables, and fail on any extras. Enable
+  `SQLITE_DBCONFIG_DEFENSIVE` and `PRAGMA trusted_schema=OFF`. Where the SQLite
+  baseline allows, also disable triggers and views on Nebula connections. This
+  matters for the Linux↔macOS transfers in M10.5.
+- **SUG-04 — Use private file modes for diary data** (Medium, Confirmed, M08).
+  Workspace, backup and export folders get default directory modes
+  (`src/storage/workspace.cpp:58`), and SQLite creates `nebula.sqlite3` with its
+  default 0644. Attachments, manifests and export files, by contrast, are written
+  0600 (`src/attachments/files.cpp`). On a shared machine with a traversable home
+  directory, other accounts can read the notes but not the attachments. Create
+  Nebula-owned folders as 0700 and the database as 0600: pre-create the file, or
+  `fchmod` it after creation (SQLite gives journals the database's mode). Document
+  the policy in WORKSPACE_FORMAT.md.
+- **SUG-05 — Content cannot be permanently deleted** (Medium, Confirmed, M08 policy
+  decision). Nothing ever purges `deleted_blocks`. Registered attachments are always
+  kept (G22). Trashed pages and databases have no permanent delete. All of this is
+  copied into every backup and every lossless JSON export. For a diary, this means
+  deleted text keeps travelling indefinitely. SQLite free pages also keep removed
+  bytes until `VACUUM` or `secure_delete`. Define a retention and purge policy that
+  covers fragments, trash, attachments, undo safety and existing backups, with a
+  user-visible "empty trash" action.
+- **SUG-06 — Open current attachment hands out the managed file itself** (Medium,
+  Confirmed path, M08). `QDesktopServices::openUrl` receives the writable,
+  extensionless file `attachments/<id>` (`src/app/workspace_window.cpp:182-185`). An
+  external editor that saves in place changes bytes that ATTACHMENTS.md calls
+  immutable, and backup and JSON export then fail their checksums. Without an
+  extension, the desktop picks the handler by sniffing the content. Open a read-only,
+  non-executable temporary copy named after the original basename, or store managed
+  files as 0400. Clean up the temporary copies afterwards.
+- **SUG-07 — Untrusted strings go through rich-text auto-detection** (Low, Confirmed,
+  M08.2). Most `QLabel`s and every `QMessageBox` use Qt's default `AutoText`. Their
+  text includes user- or import-controlled values, such as property names, JSON field
+  names, manifest paths and unresolved reference names
+  (`src/app/workspace_window.cpp:77`, `:332`, `:697`). If the first line contains a
+  known HTML tag, Qt renders it as HTML. This allows spoofed messages and `<img>`
+  loads of local files. Set `Qt::PlainText` wherever data is shown, as is already
+  done for `workspaceLocation` and the search status label.
+- **SUG-08 — Untrusted images are decoded on the UI thread** (Low, M08/M09). Import
+  validation (`src/app/workspace_window.cpp:853`) and card previews
+  (`src/editor/page_editor.cpp:74-86`) decode user files synchronously during
+  painting, using every installed Qt image plugin. Ship only the image plugins Nebula
+  needs, and set an explicit `QImageReader::setAllocationLimit`. Decode previews
+  outside the paint path. Add Qt image-plugin security updates to the release
+  checklist.
+- **SUG-09 — Symlink checks run before link-following opens** (Low, M08).
+  `Workspace::open` rejects a symlinked `nebula.sqlite3` with `fs::is_symlink`, then
+  opens the path with `sqlite3_open_v2`, which follows links
+  (`src/storage/workspace.cpp:64-70`). Directory walks use the same check-then-use
+  pattern. Exploiting this needs a concurrent local attacker, but the race is cheap
+  to remove: use `SQLITE_OPEN_NOFOLLOW` (supported within the SQLite 3.33 baseline)
+  and `openat`/`O_NOFOLLOW` traversal.
+- **SUG-10 — Describe the backup manifest as corruption detection** (Low,
+  documentation, M08.5). Restore detects only accidental changes, because anyone who
+  can edit a backup can also regenerate `backup-manifest.json`. Say so in the README
+  and ATTACHMENTS.md so users do not treat it as tamper evidence. Signing would be a
+  separate decision.
+
+### Data reliability and correctness
+
+- **SUG-11 — Opening a backup or export folder as a workspace changes it** (Medium,
+  Confirmed, M08.1). The chooser accepts any folder, and `Workspace::open` does not
+  check for `backup-manifest.json` (`src/storage/workspace.cpp:50`). Opening a backup
+  with an older schema migrates it immediately. With the current schema, any edit or
+  attachment import modifies it. Either way, a later restore fails the manifest
+  check, so the backup is unusable exactly when it is needed. Refuse folders that
+  contain a backup manifest, and offer a restore into a new folder instead. Warn
+  before creating a workspace in a non-empty folder that is not a workspace, such as
+  a JSON or Markdown export or the home directory.
+- **SUG-12 — Merges create recovery fragments for text that still exists** (Medium,
+  Confirmed, M08.4). Backspace or Delete at a block boundary keeps the first block's
+  ID and drops the second (`backspace_merges_and_undo_restores_identity`). The next
+  save then archives the second block's text (`archive_removed`,
+  `src/storage/records.cpp:41-72`), even though that text now lives in the merged
+  block. Ordinary writing therefore fills Restore… with duplicates, and restoring one
+  duplicates its text. Each save also decodes every unrestored fragment of the page
+  (`records.cpp:63-70`), and Restore… lists every unrestored fragment in the
+  workspace. Skip archiving when a merge keeps the content, and store fragment
+  membership in a table rather than re-decoding JSON on every save. Apply the
+  retention policy from SUG-05.
+- **SUG-13 — A revision conflict can only be resolved by discarding edits** (Medium,
+  Confirmed, M08.1). Nothing stops two Nebula processes, such as two `dev.sh run`
+  sessions, from editing the same workspace. A stale save fails with "Record is
+  missing or changed in another window" (`src/storage/sql.hpp:65`). Retries fail the
+  same way, navigation is blocked, and closing offers only Discard. Hold an exclusive
+  workspace-open lock, separate from the attachment lock. On a conflict, offer to
+  keep the unsaved document (for example as a new page) before reloading.
+- **SUG-14 — Structural commands move the caret to the start of the block** (Low to
+  Medium, Confirmed, M05 behavior). Move, indent, outdent, block-kind changes and
+  grip drops rewrite the document, then call `go_to_block`
+  (`src/editor/page_editor.cpp:325-387`, `:898-941`). That places the caret at offset
+  0 and drops the selection, so typing resumes in the wrong place after Tab in
+  mid-sentence or Alt+Up while editing. Restore the previous in-block offset and
+  anchor, as `restore_position` already does, and assert this in the existing
+  keyboard tests.
+- **SUG-15 — "Paste plain text" pastes rich content** (Low, Confirmed). The
+  context-menu action calls `PageEditor::paste` (`page_editor.cpp:1129`), which
+  prefers the Nebula payload or HTML (`:805`). Rename the action "Paste", and add a
+  separate plain-text paste (for example Ctrl+Shift+V) that reads only `text/plain`.
+- **SUG-16 — Common attachment syntax aborts a whole Markdown import** (Low,
+  Confirmed, M07.3). `![](attachments/a.png)` produces an empty asset label, which
+  later fails `validate` (`src/core/document.cpp:72-77`). Any `%` in a path,
+  including the common `%20`, is rejected as unsafe
+  (`src/interchange/markdown.cpp:45`). Fall back to the file name as the label, and
+  percent-decode before the existing traversal checks. Report a single unusable link
+  instead of aborting the import.
+- **SUG-17 — Autosave refreshes can discard table edits** (Low, Plausible, M04
+  behavior). Every successful flush calls `refresh_table()`
+  (`src/app/workspace_window.cpp:330`), which clears the table (`:373`). If the 500
+  ms timer fires while a cell editor is open, the in-progress edit is lost. The
+  `itemChanged` handler also rebuilds the table while Qt is still delivering that
+  item's change (`:258-273`). Update the affected row in place, and skip refreshes
+  while a cell editor is active. Queue refreshes instead of running them inside item
+  signals.
+- **SUG-18 — Imported revisions near `INT64_MAX` make pages unsavable** (Low,
+  Plausible, M07.5). JSON import accepts any int64 revision
+  (`src/interchange/json.cpp:243`). The next save evaluates `revision+1` in SQLite,
+  which overflows to a REAL, and `++page.revision` in C++, which is undefined
+  behavior. After that, the revision check can no longer match. Bound accepted
+  revisions (for example below 2^53), and add the boundary to the JSON rejection
+  tests.
+- **SUG-19 — Some recovery fragments can never be restored** (Low, Plausible). If a
+  fragment's original parent was later moved to another page,
+  `restore_deleted_blocks` reports "Restore the deleted parent block first"
+  (`src/storage/records.cpp:389`), even though the parent is live elsewhere. Restore
+  such fragments as roots, or at their recorded anchor, with an explicit message.
+- **SUG-20 — Bootstrap and journal helpers are not atomic** (Low, Confirmed). The
+  default Journal database, its three properties and its view are written as separate
+  autocommit statements (`src/app/workspace_window.cpp:306-313`). A failure part-way
+  leaves an incomplete Journal that is never repaired, because the database list is
+  no longer empty. Journal entry likewise adds "Entry date" to whichever database is
+  selected before it creates the page (`:229-233`). Perform each of these as one
+  storage transaction.
+- **SUG-21 — Termination signals skip the pending-edit flush** (Low, Confirmed,
+  documented). Closing a window flushes pending edits. SIGTERM and SIGINT (`docker
+  stop`, `kill`, service managers), however, end the process without saving the last
+  500 ms. A signal handler that forwards to the event loop (self-pipe plus
+  `QSocketNotifier`), then flushes and quits, would narrow the documented loss
+  window.
+- **SUG-22 — Measure lock contention between the GUI and headless tools** (Low,
+  M08.1). With the rollback journal and a 3 s busy timeout, a long headless backup (a
+  single `sqlite3_backup_step(-1)` call) can make GUI autosaves fail with "database
+  is locked". Read-only tool connections set no busy timeout at all
+  (`src/storage/backup.cpp:17`). Measure this with large fixtures. Then consider
+  stepping the backup in chunks, adding a busy timeout to read-only connections, and
+  evaluating WAL mode. WAL offers fewer syncs and non-blocking readers, but its
+  `-wal`/`-shm` files need handling on read-only mounts.
+- **SUG-23 — Ordering and entry rules surprise users** (Low, UX). Title and text
+  sorting and Contains filters use case-sensitive byte comparisons
+  (`src/core/database.cpp:34-92`, documented in WORKSPACE_FORMAT.md), so "apple"
+  sorts after "Zebra". Number entry ignores locale decimal separators. A trailing
+  comma in tags is rejected rather than ignored. Tag Equals depends on tag order.
+  Consider a display collation key in the desktop layer, while keeping storage
+  ordering deterministic.
+- **SUG-24 — JSON import keeps the source workspace identity** (Low, design).
+  `import_json` replaces the new workspace's ID with the exported one
+  (`src/interchange/json.cpp:231`). Importing one export twice therefore produces two
+  independent workspaces with the same identity and indistinguishable backup
+  manifests. Decide whether `workspace_id` identifies a lineage or an instance. If it
+  identifies an instance, generate a new ID on import and record the source ID
+  separately.
+
+### Performance and scalability
+
+- **SUG-25 — Each keystroke makes several whole-document passes** (High, M08.3).
+  - `mutate` takes a full snapshot before every edit (`page_editor.cpp:580`), and
+    `normalize` walks every block.
+  - When default labels exist, `refresh_reference_labels` scans all fragments, takes
+    another snapshot (`:493`), and resolves each external target through SQL.
+  - The window then snapshots again and copies and validates the whole page several
+    times just to set toolbar states (`src/app/prototype_window.cpp:144-163`).
+  - Every cursor move repaints the whole viewport (`page_editor.cpp:253`), and
+    `paintEvent` walks all blocks to find dividers (`:281`).
+  - Each visible card runs a SQL query and file checks on every paint (`:74`).
+
+  Track changed blocks from `contentsChange`, and derive toolbar state from the
+  current block's neighbours. Cache card paths and labels per page, and repaint only
+  the previous and current active rectangles.
+- **SUG-26 — Each autosave rewrites far more than the edit** (High, M08.3).
+  - `save_page_in_transaction` reloads the stored page, then deletes and reinserts
+    every block, preparing a new statement per row (`src/storage/records.cpp:27-39`,
+    `:181-208`). It also decodes the page's unrestored fragments.
+  - `refresh_search` then reindexes the page and every page that refers to it
+    (`src/storage/search.cpp:93-102`), even when no title or heading used by a
+    default label changed. A hub page that every journal entry references therefore
+    reindexes the whole diary at each 500 ms pause.
+  - `flush()` then reloads and decodes every page in the database for the table, and
+    loads full target pages just for outgoing-link titles
+    (`src/app/workspace_window.cpp:330`, `:433`).
+
+  Diff blocks by ID and write only what changed, and reuse prepared statements.
+  Reindex referrers only when a label they display changes, and refresh only the
+  saved row.
+- **SUG-27 — Structural edits replace the entire text document** (Medium, M08.3).
+  Move, indent, outdent, kind changes, dividers and drops call `write_page`, which
+  removes and reinserts all text (`page_editor.cpp:325-387`). The cost grows with
+  page size: the checkpoints above record up to 84 ms for an adjacent move on 1,000
+  short blocks. Each command also records a full-document deletion and insertion in
+  QTextDocument's unbounded undo history, so memory keeps growing during long
+  sessions on long pages. Apply local cursor operations to the affected range, and
+  measure undo memory over long sessions.
+- **SUG-28 — Pickers and completion load every page** (Medium to High, M08.3). Wiki
+  completion and the Link… picker build candidates from every block of every page
+  (`src/app/workspace_window.cpp:558-573`). `enter_wiki_link` rebuilds them for each
+  typed `]]`. The reference-filter controls, Move block to page and Restore… also
+  call `pages()` for each database (`:95`, `:956`, `:538`), and each call decodes
+  whole documents. Add storage queries that return lightweight page, heading and
+  block rows, use them incrementally, and stop building full block trees for pickers.
+- **SUG-29 — No index on `links(source_page)`** (Medium, Confirmed, M07.7 follow-up).
+  Both reference-filter directions filter `links` by `source_page`
+  (`src/storage/link_query.cpp:9-10`). The table, however, is indexed only by its
+  `(source_block, run_index)` key and `links_target`, so every candidate page scans
+  the whole link table. Add a `links(source_page)` index, both through a schema
+  migration and in `rebuild_links`, and confirm the query plans with `EXPLAIN QUERY
+  PLAN`.
+- **SUG-30 — The search index stores most text several times** (Medium, M08.3). Every
+  block row repeats the page title and all property text
+  (`src/storage/search.cpp:69`). The whole-page row stores the body twice, once
+  indexed and once as the unindexed excerpt (`:83`). Index size and write volume
+  therefore grow with blocks × (title + properties). A title match also returns one
+  row per block before de-duplication. Keep the title and properties only on the page
+  row, and use an external-content or contentless table for bodies. Build excerpts
+  from the canonical blocks when displaying results.
+- **SUG-31 — Attachment I/O holds locks and repeats hashing** (Medium, M08.3). Import
+  copies the whole source file on the UI thread while holding the exclusive file lock
+  and a `BEGIN IMMEDIATE` transaction (`src/storage/attachments.cpp:50-79`). Backup
+  reads every attachment three times (copy, audit and manifest), and restore reads it
+  four times (`src/storage/backup.cpp:55-81`). Stage and hash the file before opening
+  the transaction, and reuse the digests computed while copying. Run large copies off
+  the UI thread, with progress and cancel.
+- **SUG-32 — Startup runs full integrity scans under a write lock** (Low to Medium,
+  M08.3). Every open runs `PRAGMA quick_check` and `PRAGMA foreign_key_check` inside
+  `BEGIN IMMEDIATE` (`src/storage/workspace.cpp:80-202`). Both scale with database
+  size, so launch time grows with the diary and other connections wait in the
+  meantime. Run the full checks after migrations, on request or periodically, and
+  measure open time with large fixtures.
+- **SUG-33 — Benchmark the integrated application with representative data** (High,
+  process, M08.3). The benchmark drives a bare `PageEditor` with 1,000 one-sentence
+  paragraphs (`src/prototype/main.cpp:25-70`). It therefore leaves out the window
+  refresh, autosave, SQLite, search indexing, labels and cards that SUG-25 and SUG-26
+  describe. Add fixtures such as:
+  - a 10,000-block page;
+  - a 5,000-entry Journal;
+  - a hub page with 1,000 backlinks;
+  - a page with 200 images and many default labels.
+
+  Measure keystroke latency, save time, open time and memory in `WorkspaceWindow`.
+  Record thresholds before using any of them as a gate.
+
+### Architecture, maintainability and verification
+
+- **SUG-34 — Split `WorkspaceWindow` into testable application services** (Medium).
+  The 989-line class builds widgets and also owns autosave, table and view editing,
+  navigation history, wiki completion, unresolved-target workflows, attachments,
+  search and interchange, calling `Workspace` directly. AGENTS.md asks for separate
+  application operations, yet `PageSession` is the only Qt-free application layer.
+  Extract navigation history, link-target lookup, view editing and interchange
+  coordination into Qt-independent services with unit tests, leaving the window as an
+  adapter.
+- **SUG-35 — Module boundaries leak** (Low to Medium).
+  `include/nebula/storage/workspace.hpp:95-98` declares the Markdown and JSON
+  interchange operations as `Workspace` members, but they are defined in
+  `nebula_interchange`. `nebula_storage` therefore advertises symbols it does not
+  provide. Interchange also includes storage-private headers
+  (`src/interchange/internal.hpp:2`, `src/interchange/markdown.cpp:3`). Give storage
+  a narrow API (transactions, snapshots, canonical record access), and implement
+  interchange as free functions over it.
+- **SUG-36 — Centralize schema support and shared helpers** (Low, before the next
+  schema change). The supported versions are listed as string comparisons in two
+  places that must change together (`src/storage/workspace.cpp:94`,
+  `src/storage/backup.cpp:22`). The UTF-8 conversion helpers, `execute`/`scalar`, and
+  view validation (`save_view` versus JSON `validate_records`) are duplicated. Use
+  one supported-range constant, a list of migration steps with a test for each step,
+  and shared validators.
+- **SUG-37 — Typed storage errors** (Medium, with SUG-13). Storage throws
+  `std::runtime_error` and `std::invalid_argument`, and the desktop shows their
+  English text directly. It cannot tell a stale revision from a busy database, a full
+  disk or invalid input, so it cannot offer the matching recovery (reload, retry or
+  correct the input), and the messages cannot be translated. Report error categories
+  from storage, and choose messages and actions in the desktop layer.
+- **SUG-38 — Decide on a formatting standard** (Low, decision needed). Many functions
+  put several statements on one line, up to about 400 characters, in
+  `workspace_window.cpp`, `records.cpp` and `search.cpp`. This hides control flow
+  during review, creates noisy diffs and limits line-level debugging. AGENTS.md asks
+  new code to match its surroundings, so adopting a `.clang-format` column limit
+  needs an explicit decision. If adopted, apply it file by file in commits that
+  change only formatting.
+- **SUG-39 — Define the identity grammar** (Low, M08.5). Storage creates 32-character
+  lowercase hexadecimal IDs (`src/storage/sql.hpp:64`), while the editor creates
+  hyphenated UUIDs (`src/editor/page_editor.cpp:52`). JSON and clipboard input accept
+  any non-empty string without NUL. Document the accepted syntax and length, and
+  validate IDs wherever data enters the workspace.
+- **SUG-40 — Strengthen automated verification** (Medium, M08.4). All container
+  builds use Release (`scripts/dev.sh:88`). There is no sanitizer build,
+  warnings-as-errors, coverage report, fuzzing or CI configuration, so every check
+  depends on someone running it by hand. Add:
+  - ASan/UBSan Debug builds;
+  - fuzz targets for `parse_wiki_link`, the block/view/document codec, JSON and
+    Markdown import, HTML paste and the backup manifest;
+  - `-Werror` for project targets;
+  - a CI workflow that runs `test gcc`, `test clang` and `test core`, later joined by
+    the macOS runner.
+
+  Use the CI workflow to stress-test BUG-014.
+- **SUG-41 — Check required SQLite features up front** (Low, M09.1). CMake checks
+  only the SQLite version (`CMakeLists.txt:30`), but the schema also needs FTS5 at
+  run time. With a distribution SQLite that lacks FTS5, the problem appears only when
+  the version 7→8 migration fails. Add configure-time and startup checks with a clear
+  message.
+- **SUG-42 — Make data operations in the wrapper reproducible** (Low, M09). The
+  headless backup, restore, import and export commands first rebuild from the working
+  tree (`scripts/dev.sh:111-112`). User data is therefore processed by whatever
+  uncommitted code is checked out, and the command fails if that code does not
+  compile. The image also uses a moving `debian:trixie-slim` tag with unpinned
+  packages (`Dockerfile.dev:1`). Warn on, or refuse, a dirty tree for data commands.
+  For release builds, pin the base image digest and package snapshot (already an open
+  decision).
+
+### Scope decisions needed
+
+- **SUG-43 — Record decisions on missing management operations.** Several management
+  operations are missing:
+  - saved views cannot be deleted;
+  - property definitions cannot be renamed or deleted;
+  - trash cannot be emptied (SUG-05);
+  - files and images cannot be dropped into the editor;
+  - UI strings are not translatable (`tr()` is unused).
+
+  None of these is a defect, and none is authorized work. Record whether each belongs
+  to the first release or later, so that none is added implicitly.
 
 ## Work log
 
@@ -1527,6 +2052,22 @@ begin as part of this shutdown.
   Resume with M07.8, then reliability/accessibility/performance and release work;
   actual OS IME, screen-reader and macOS verification remain unperformed.
 
+### Architecture, security and quality review — 2026-10-30
+
+- At the user's request, reviewed all 63 tracked files at `761dd84` for
+  vulnerabilities, defects and quality issues: source, tests, CMake, Docker tooling
+  and documentation. The findings and proposals are recorded as SUG-01–SUG-43 in
+  [Suggestions](#suggestions). No application code, task list or milestone status
+  changed.
+- **Checks:** the review was static only, reading code paths and existing tests. No
+  build, test suite, benchmark or reproduction was run for it. *Confirmed* findings
+  are therefore traced in code, not shown by a failing test, and *Plausible* findings
+  still need reproduction. Documentation checks: `git diff --check` and local link
+  review.
+- **Next:** the user decides which suggestions to accept. Accepted items move into
+  milestone task lists, and reproduced defects get BUG entries with regression tests.
+  M07 remains In progress, with M07.8 next.
+
 ### Concurrent integration and trash-safety scope — 2026-10-30
 
 - The user resumed roadmap execution and requested professional reference-list
@@ -1619,6 +2160,106 @@ begin as part of this shutdown.
   The application does not yet offer pasted-link previews. M07.8 stays unchecked,
   and M07/M08 remain In progress. Shared-window integration awaits the concurrent
   agent as requested; OS IME, screen-reader and macOS checks remain open.
+
+### Suggestions implementation checkpoint — 2026-10-30
+
+- At the user's request, implemented or decided SUG-01–SUG-43; outcomes are in
+  [Implementation status](#implementation-status--2026-10-30). Workspace schema 10
+  adds derived structures only (reverse-link index, recovery membership, maintenance
+  timestamp, page/block search rows). Versions 1–9 migrate transactionally and the
+  lossless JSON contract stays at schema 9. New modules: `nebula::interchange` free
+  functions over `WorkspaceInternals`, Qt-free application services (navigation
+  history, property text, link targets), a termination-signal adapter, storage error
+  categories and a shared schema range.
+- User-visible additions: Empty trash permanently…, Delete view, Rename/Delete
+  property, Keep my version as a new page, Check workspace integrity…, Paste plain
+  text (Ctrl+Shift+V), import progress/cancel, read-only opened copies, folder checks
+  in the chooser, and private file modes. README, TRASH.md and the format,
+  attachment, search, interchange, Markdown and clipboard documents describe them.
+- **Concurrent work in the same tree (G27):** another agent committed `963cdfb`
+  (M08.7 trash controls) and `382aad4` (M07.8 preview adapter) while this work was
+  uncommitted. BUG-015, recorded by that agent, was introduced by this work's
+  Restore-dialog edit and fixed by them in the shared tree. It explains the restore
+  failure that hung this session's desktop runs until their fix landed; later
+  isolated and full runs passed. Their files and roadmap sections were left as
+  written. The only edit to their committed text is the Empty trash paragraph in
+  TRASH.md, which had anticipated this operation. SUG-01 is addressed by their M07.8
+  design.
+- **Checks on the final combined tree:** `./scripts/dev.sh test gcc`, `test clang`
+  and `test asan` (Debug, AddressSanitizer + UBSan, leak detection off) each passed
+  all 13 CTest entries with warnings as errors: core, launcher, previews, storage,
+  storage_hardening (22 cases), interchange, editor, desktop, trash_safety,
+  review_desktop (11), fuzz_smoke (five targets), app (3) and smoke. `test core`
+  passed 2/2 without Qt/SQLite. `test-native` on Xwayland passed 58 editor, 60
+  desktop, 11 review-desktop and 8 trash-safety cases (setup/cleanup excluded).
+  `stress 10` (and an earlier `stress 15`) repeated the interaction suites without
+  failure. Launcher tests cover staging, refused existing destinations and the path
+  that warns outside a Git checkout. Environment: the existing image
+  `sha256:d96a2a1a…6f6e`, Qt 6.8.2, SQLite 3.46.1, GCC 14.2.0, Clang 19.1.7, RHEL 9.8
+  host. The image was not rebuilt and no host packages were installed.
+- **Failures corrected during implementation:** BUG-016 (undo caret after ranged
+  rewrite); trigger-based fault injection replaced (G24); QCollator numeric order
+  (G25); a stale-save path reported a validation error before the conflict (now
+  conflict first); a new JSON test expected the overflow refusal one save early and
+  was corrected. The product defects were caught by failing tests before their fixes.
+- **Integrated benchmark** (`benchmark workspace`, offscreen, same host/image; the
+  original code was built from `761dd84` in a temporary worktree with the same
+  fixtures, adapted only for missing APIs). After values are the range over four
+  runs, the first two measured before the search-pass optimization:
+
+| Measurement | `761dd84` | After |
+| --- | --- | --- |
+| Typing p95, 10,000-block page | 104.3 ms | 4.4–8.2 ms |
+| Save after typing, 10,000-block page | 11,270 ms | 76–131 ms |
+| Adjacent move, 10,000-block page | 298 ms | 31–50 ms |
+| Open 10,000-block page | 755 ms | 369–603 ms |
+| Save after editing a page with 1,200 referrers | 9,113 ms | 0–1 ms |
+| Save after renaming that page | 8,608 ms | 163–292 ms |
+| Typing p95, page with 200 images and default labels | 10.1 ms | 0.9–1.0 ms |
+| Import 200 images | 11.7 s | 1.1–1.8 s |
+| Switch to 5,000-entry Journal table | 177 ms | 77–137 ms |
+| Search "diary entry" | 36 ms | 15–32 ms (82 ms before skipping the cross-block pass) |
+| Reopen workspace | 124 ms | 0–1 ms (weekly check not due) |
+| Peak RSS | 90,292 KiB | 74,556–77,692 KiB |
+
+  The editor-only `benchmark single` measured 6.8 ms typing p95 and 5 ms move.
+  Proposed M08.3 investigation budgets for these fixtures (not yet gates): 16 ms
+  typing p95, 250 ms save after body edits, 1 s for a hub rename, 1 s page open, 300
+  ms table switch and 128 MiB peak RSS.
+- **Not verified:** the CI workflow has not run on a GitHub runner yet; libFuzzer
+  and clang-format are absent from the current image, so only the deterministic
+  fuzz driver ran; real OS IME, screen-reader, GUI/CLI lock contention and macOS
+  checks remain unperformed.
+- **Pending work:** the remaining follow-ups for SUG-22, SUG-28, SUG-34, SUG-36,
+  SUG-38 and SUG-40 are scheduled as M08.8. M07.8 editor integration of link
+  previews (owned by the concurrent preview work), the other M08 tasks and the
+  M09/M10 release work remain open. Drag-and-drop and UI translation are deferred
+  beyond the first release. M07 and M08 stay In progress.
+- At the user's request this checkpoint is committed with a subject-only message
+  and the configured author, without co-author or other trailers. The other
+  agent's uncommitted `.gitignore` change was left unstaged. The push result is
+  recorded in the next checkpoint.
+
+### Suggestions integration verification — 2026-10-30
+
+- The user confirmed that the concurrent Suggestions agent finished. Captured
+  its complete working tree at `/tmp/nebula-suggestions-final-fcjp3lg7` before
+  continuing M07.8 window integration. Preserved the schema/editor refactor,
+  recovery fix, documentation, test tooling and development-only CI workflow.
+- **Checks:** the earlier captured integration passed all 13 CTest entries after
+  a clean GCC build with warnings-as-errors. Compared the final capture with
+  that source: code differences were the final search optimization and storage
+  hardening tests, plus tooling and documentation updates. The final capture's
+  GCC build and all 13 CTest entries passed as well. This is direct verification
+  of the captured source; the other agent's Clang/ASan/native/stress/benchmark
+  results remain separately recorded in its checkpoint above.
+- M07.8's independent controller preparation passed 12 behavior cases with GCC,
+  Clang and native Xwayland (setup/cleanup excluded). The tests attach the
+  controller explicitly; automatic paste hookup and launcher networking still
+  need integration before M07.8 can be marked complete. Actual OS IME and reader
+  acceptance remain M08 work. The host has IBus and Orca 40.3 executables, but
+  IBus currently reports no connected bus/engine; their availability alone does
+  not establish input-method or screen-reader verification.
 
 ## Technical references discussed
 

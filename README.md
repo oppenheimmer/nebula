@@ -40,33 +40,46 @@ the optional project-local SDK workflow are described in
 
 The launcher rebuilds the executable, then asks where to keep the workspace. It
 suggests `~/Document/nebula/`. Choose an existing Nebula folder or enter a new
-location; Open workspace creates `nebula.sqlite3`, `attachments/`, and the file
-coordination lock `.nebula.lock` there.
-Cancel leaves the location untouched. The selected host folder survives container
-exit and is shown above the editor.
+location; Open workspace creates `nebula.sqlite3`, `attachments/`, and the lock files
+`.nebula.lock` and `.nebula-session.lock` there. New workspace folders are private to
+your account (0700) and the database file is 0600. Cancel leaves the location
+untouched. The selected host folder survives container exit and is shown above the
+editor. Backup and export folders are refused, so restore or import them instead; a
+non-empty folder that is not a workspace asks for confirmation first. A workspace can
+be open in only one Nebula process at a time. Unsupported or modified schema objects
+(for example triggers) are refused.
 
 Choose a database, create a page, and select its row to edit the flowing document.
-Double-click table cells to edit titles or typed properties. New view/Edit view
-configure filters, sorting, and visible columns over the same pages. A new workspace
-includes a Journal database with Entry date, Mood, and Tags. Journal entry asks for
-the intended calendar date. Trash and Restore preserve page/database identities.
-Restore also lists deleted block fragments after restart. Restore a trashed page,
-database, or missing parent first; restoring a fragment preserves edits to blocks
-that are already present.
+Double-click table cells to edit titles or typed properties. Numbers accept a decimal
+point or comma; tags are comma-separated, and empty or repeated entries are ignored.
+New view/Edit view/Delete view manage filters, sorting, and visible columns over the
+same pages; Rename property and Delete property change the database's fields
+(deleting removes that field's values after confirmation). Text sorts
+case-insensitively in natural order ("Item 9" before "Item 10"), and Contains ignores
+case. A new workspace includes a Journal database with Entry date, Mood, and Tags.
+Journal entry asks for the intended calendar date. Trash and Restore preserve
+page/database identities. Restore also lists deleted block fragments after restart.
+Restore a trashed page, database, or missing parent first; restoring a fragment
+preserves edits to blocks that are already present.
 
-The small red trash icons act on three different scopes: beside the database
-selector for the whole database, beside the page title for that page, and in the
-block toolbar for the active block and its nested blocks. Each opens a
-confirmation with Cancel as the default. Database trash also requires an
-acknowledgement checkbox. These controls retain content and attachments for
-Restore; block trash can also be undone while the page stays open.
-See [TRASH.md](docs/TRASH.md) for scope, recovery and permanent-deletion behavior.
+The small red trash icons act on three different scopes: beside the database selector
+for the whole database, beside the page title for that page, and in the block toolbar
+for the active block and its nested blocks. Each opens a confirmation with Cancel as
+the default. Database trash also requires an acknowledgement checkbox. These controls
+retain content and attachments for Restore; block trash can also be undone while the
+page stays open. Restore… also offers **Empty trash permanently…** for content you
+want gone for good; see [TRASH.md](docs/TRASH.md) for scope, recovery and permanent
+deletion.
 
 Edits save after a 500 ms pause, before navigating to another page, and when closing
 the window. The status distinguishes pending edits, successful saves, and failures.
 Ctrl+S saves immediately. On failure, edits remain visible and closing asks whether
-to keep the window open or discard pending changes. Undo survives autosave but is
-cleared when switching pages and does not survive restart.
+to keep the window open or discard pending changes. If the page changed elsewhere,
+Workspace → Keep my version as a new page saves your edits as a separate copy. Undo
+survives autosave but is cleared when switching pages and does not survive restart.
+Terminating the process (for example `docker stop`) saves pending edits first.
+Workspace → Check workspace integrity… runs the full database check, which also runs
+automatically after upgrades and weekly on open.
 
 Ctrl+Shift+F opens local workspace search over titles, blocks and properties.
 Select a database or search all active notes, then open a matching page/block.
@@ -131,6 +144,7 @@ scrolls the document.
 | Nest under the previous sibling | Tab, or Indent |
 | Leave the current parent | Shift+Tab, or Outdent |
 | Bold / italic | Ctrl+B / Ctrl+I |
+| Paste only plain text | Ctrl+Shift+V, or Paste plain text in the context menu |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
 | Move the active block and its children to another page | Ctrl+Shift+M, or Workspace → Move block to page… |
 | Undo / redo the latest block transfer | Ctrl+Alt+Z / Ctrl+Alt+Shift+Z, or the Workspace menu |
@@ -139,15 +153,18 @@ scrolls the document.
 | Return to the previous position / go forward | Alt+Left / Alt+Right |
 
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
-Wrapping text does not create a block. Splitting a parent gives the trailing block
-a new identity and transfers its children there; structural edits can be undone.
-Enter on an empty list/to-do block returns it to a paragraph. Consecutive typing
-forms one undo group until navigation, another command, a focus change, or a pause
-of at least one second.
-Use Attachments → Import image… / Import file… to save a managed copy and insert
-a card. Moving or deleting the original source does not affect the note. Image
-cards preview local files; Open current attachment and Save a copy… use the
-selected card. Import is undoable and saves immediately.
+Moving and nesting keep the caret and selection where they were. Wrapping text does
+not create a block. Joining two blocks with Backspace/Delete does not add a recovery
+entry, since their text is still on the page. Splitting a parent gives the trailing
+block a new identity and transfers its children there; structural edits can be
+undone. Enter on an empty list/to-do block returns it to a paragraph. Consecutive
+typing forms one undo group until navigation, another command, a focus change, or a
+pause of at least one second. Use Attachments → Import image… / Import file… to save
+a managed copy and insert a card. Large files show progress and can be cancelled.
+Moving or deleting the original source does not affect the note. Image cards preview
+local files; Open current attachment hands other programs a read-only copy named like
+the original, so they cannot change the managed bytes. Save a copy… uses the selected
+card. Import is undoable and saves immediately.
 
 For importing host files in Docker, use `./scripts/dev.sh run --import-root
 /path/to/source-folder`; the chosen folder appears read-only at `/imports`.
@@ -201,33 +218,46 @@ completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
 ./scripts/dev.sh restore /path/to/new-backup /path/to/new-workspace
 ```
 
-These commands work without a display. Destinations must be new folders outside
-the source workspace. The source is mounted read-only; the database is copied
-using SQLite's backup API. Restore creates a new workspace copy and preserves the
-original backup. Managed attachment availability and hashes are verified; a
-manifest covers the database and attachment files. Missing or changed files fail
-the backup, and restore rejects an incomplete or modified backup. The format and durability
-rules are documented in [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
+These commands work without a display. Destinations must be new folders outside the
+source workspace. The source is mounted read-only, and the container can write only
+to a private staging folder that is renamed into place afterwards; the database is
+copied using SQLite's backup API. Restore creates a new workspace copy and preserves
+the original backup. Managed attachment availability and hashes are verified; a
+manifest covers the database and attachment files. Missing or changed files fail the
+backup, and restore rejects an incomplete or accidentally modified backup. The
+manifest detects corruption, not deliberate tampering: anyone who can edit a backup
+can also rewrite its manifest. Data commands refuse uncommitted source changes unless
+`NEBULA_ALLOW_DIRTY=1` is set. The format and durability rules are documented in
+[WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
 ## Checks and measurements
 
 `test gcc` and `test clang` run CTest for the document core, launcher, editor,
-workspace lifecycle/recovery, application window, and launch check. `test core` builds the
-document core without Qt or SQLite.
+workspace lifecycle/recovery, application window, fuzz smoke cases and launch check,
+with warnings treated as errors. `test core` builds the document core without Qt or
+SQLite. `test asan` repeats the suite in a Debug build with AddressSanitizer and
+UndefinedBehaviorSanitizer.
 
 ```sh
+./scripts/dev.sh test asan
+./scripts/dev.sh stress 20
 ./scripts/dev.sh test-native
 ./scripts/dev.sh run --smoke-test
 ./scripts/dev.sh run --screenshot /build/prototype.png
 ./scripts/dev.sh benchmark single
 ./scripts/dev.sh benchmark separate
+./scripts/dev.sh benchmark workspace
 ```
 
+`stress` repeats the editor and desktop suites to expose timing-dependent failures.
 `test-native` runs editor and desktop interactions on X11/Xwayland. The screenshot
-appears at `build-container-gcc/prototype.png`. Smoke tests and screenshots skip
-the chooser unless `--workspace` is supplied. Benchmarks print JSON measurements
-for the same 1,000-block fixture; see
-[EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md) for methodology.
+appears at `build-container-gcc/prototype.png`. Smoke tests and screenshots skip the
+chooser unless `--workspace` is supplied. `benchmark single`/`separate` print JSON
+measurements for the 1,000-block editor fixture; see
+[EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md) for methodology. `benchmark
+workspace` measures the real window over a 10,000-block page, a 5,000-entry Journal,
+a page referenced by 1,000 entries and a page with 200 images.
+`.github/workflows/ci.yml` runs the same Docker checks on GitHub-hosted Linux.
 
 Nebula's source is [MIT licensed](LICENSE). Dependencies retain their own licenses.
 Project management conventions are in [AGENTS.md](AGENTS.md).

@@ -35,11 +35,15 @@ Restore a database before its pages and a page before its blocks. Restore also
 keeps existing edits to blocks that are already present. Undo history is limited
 to the currently open page/window; Restore is the route after navigation/restart.
 
-A separate Empty Trash operation, when available, permanently removes retained
-content and unused files after its own explicit confirmation. It is distinct
-from the red recoverable-trash controls. Permanent deletion cannot be undone;
-existing backups and exports keep their independent copies. Keep a verified
-backup before choosing permanent deletion.
+Restore… → **Empty trash permanently…** is the separate permanent-deletion operation.
+After its own confirmation (Cancel is the default) it saves pending edits, clears the
+open page's undo and the block-transfer undo, then deletes trashed pages, trashed
+databases (with their properties and views) and every deleted-block recovery record.
+Imported files that no remaining page references are removed, and the database file
+is compacted so deleted text does not linger in free pages. References to purged
+pages or blocks report them as unavailable and show their stored text. Permanent
+deletion cannot be undone; existing backups and exports keep their independent
+copies. Keep a verified backup first.
 
 The page's reference panels use **Referenced by:** for incoming references and
 **References** for outgoing references. Their keyboard navigation and stable-ID

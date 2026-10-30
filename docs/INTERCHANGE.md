@@ -13,12 +13,13 @@ Headless Docker equivalents:
 ./scripts/dev.sh import-json /path/to/export /path/to/new-workspace
 ```
 
-The wrapper mounts the source read-only and the selected destination parent
-writable. No network is used. Open older workspaces normally to migrate them
-before exporting. A new subfolder within the workspace is writable in the GUI
-container; a separately imported workspace remains independent and needs its own
-backup. The original workspace's backups do not include export folders or nested
-workspaces.
+The wrapper mounts the source read-only and only a new private staging folder
+writable, then renames the finished export or workspace into place. It refuses
+uncommitted source changes unless `NEBULA_ALLOW_DIRTY=1` is set. No network is used.
+Open older workspaces normally to migrate them before exporting. A new subfolder
+within the workspace is writable in the GUI container; a separately imported
+workspace remains independent and needs its own backup. The original workspace's
+backups do not include export folders or nested workspaces.
 
 ## Preservation and collisions
 
@@ -31,10 +32,12 @@ References preserve kind, stable target IDs, custom/default label mode, rich
 display text, unresolved names and database scope. Missing page/block targets
 remain unavailable or unresolved. They are never redirected by title.
 
-Import requires a fresh destination. Any existing folder/file is refused, even
-if empty. No merge, replacement, title matching or overwrite mode exists, so
-imported IDs remain unchanged. Markdown import supplies the separate operation
-for adding new pages with remapped identities to an existing database.
+Import requires a fresh destination. Any existing folder/file is refused, even if
+empty. The imported workspace keeps the export's `workspace_id`, which names a
+workspace lineage rather than one copy. No merge, replacement, title matching or
+overwrite mode exists, so imported IDs remain unchanged. Markdown import supplies the
+separate operation for adding new pages with remapped identities to an existing
+database.
 
 All registered attachment files are retained, including those needed by undo or
 recovery and those with no current object reference. Regular legacy/unregistered
@@ -56,7 +59,7 @@ The folder contains UTF-8 workspace.json and attachments/. The root has exactly:
 | --- | --- |
 | format | String `nebula-workspace`. |
 | version | JSON number 1. |
-| schema | JSON number 9, identifying the current canonical record contract. Earlier schema 8 exports are also accepted. |
+| schema | JSON number 9, identifying the current canonical record contract. Earlier schema 8 exports are also accepted. Workspace schema 10 adds only derived structures, so it still exports contract 9. |
 | tables | Object with exactly the nine arrays below. |
 | files | Array of `path`, `size`, `sha256` objects. |
 
@@ -99,13 +102,14 @@ files. File IDs and display names are separate; original source paths are absent
 
 ## Validation and failure behavior
 
-Unsupported format/schema versions, duplicate JSON keys (including escaped
-equivalent keys), unknown/missing fields, wrong types, out-of-range integers,
-invalid UTF-8, duplicate identities, foreign-key failures, malformed trees/order,
-mistyped/misowned properties, invalid view settings, malformed recovery fragments
-and invalid UTC timestamps are rejected. Identity fields cannot be empty or
-contain NUL; root/absent recovery anchors retain their defined empty/null forms.
-Reference target absence is allowed and preserved. Text NUL characters are
+Unsupported format/schema versions, duplicate JSON keys (including escaped equivalent
+keys), unknown/missing fields, wrong types, out-of-range integers, invalid UTF-8,
+duplicate identities, identities outside the documented grammar (1–128 bytes of UTF-8
+without control characters), page revisions of 2^62 or more, foreign-key failures,
+malformed trees/order, mistyped/misowned properties, invalid view settings, malformed
+recovery fragments and invalid UTC timestamps are rejected. Identity fields cannot be
+empty or contain NUL; root/absent recovery anchors retain their defined empty/null
+forms. Reference target absence is allowed and preserved. Text NUL characters are
 preserved in supported string fields. The manifest is limited to 64 MiB; a larger
 export fails explicitly and removes its partial destination.
 

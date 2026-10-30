@@ -32,20 +32,21 @@ bool safe_relative(const std::string& text) {
     return text=="nebula.sqlite3" || text.rfind("attachments/",0)==0;
 }
 } // namespace
-void write_backup_manifest(const std::filesystem::path& root,const std::string& workspace)
+void write_backup_manifest(const std::filesystem::path& root,const std::string& workspace,const Digests& digests)
 {
     QJsonArray files;
     for (const auto& path:data_files(root)) {
-        const auto actual=digest(root/std::filesystem::u8path(path));
-        files.append(QJsonObject{{"path",utf8(path)},{"size",QString::number(actual.size)},{"sha256",utf8(actual.sha256)}});
+        const auto found=digests.find(path);
+        if (found==digests.end()) throw std::runtime_error("Backup file was not verified while copying: "+path);
+        files.append(QJsonObject{{"path",utf8(path)},{"size",QString::number(found->second.size)},{"sha256",utf8(found->second.sha256)}});
     }
     const auto text=QJsonDocument(QJsonObject{{"version",1},{"workspace_id",utf8(workspace)},{"files",files}}).toJson(QJsonDocument::Indented);
     write_new(root/"backup-manifest.json",text.toStdString()); sync_directory(root);
 }
-void verify_backup_manifest(const std::filesystem::path& root,const std::string& workspace,bool required)
+Digests verify_backup_manifest(const std::filesystem::path& root,const std::string& workspace,bool required)
 {
     const auto path=root/"backup-manifest.json";
-    if (!std::filesystem::exists(path)) { if (required) throw std::runtime_error("This backup is missing its attachment manifest"); return; }
+    if (!std::filesystem::exists(path)) { if (required) throw std::runtime_error("This backup is missing its attachment manifest"); return {}; }
     if (std::filesystem::is_symlink(path) || !std::filesystem::is_regular_file(path)) throw std::runtime_error("Unsafe backup manifest");
     QFile file(QString::fromStdString(path.u8string()));
     if (!file.open(QIODevice::ReadOnly) || file.size()>64*1024*1024) throw std::runtime_error("Cannot read backup manifest or manifest exceeds 64 MiB");
@@ -55,7 +56,7 @@ void verify_backup_manifest(const std::filesystem::path& root,const std::string&
     if (object["version"].toDouble(-1)!=1 || !object["workspace_id"].isString()
         || object["workspace_id"].toString()!=utf8(workspace) || !object["files"].isArray()) throw std::runtime_error("Unsupported or mismatched backup manifest");
     const auto expected=data_files(root);
-    std::set<std::string> listed;
+    std::set<std::string> listed; Digests verified;
     for (const auto& value:object["files"].toArray()) {
         if (!value.isObject()) throw std::runtime_error("Invalid backup manifest file entry");
         const auto entry=value.toObject();
@@ -65,9 +66,11 @@ void verify_backup_manifest(const std::filesystem::path& root,const std::string&
         if (!safe_relative(relative) || !listed.insert(relative).second || !valid || size<0 || checksum.size()!=64
             || !std::all_of(checksum.begin(),checksum.end(),[](char c){return (c>='0'&&c<='9') || (c>='a'&&c<='f');}))
             throw std::runtime_error("Invalid backup manifest path, size or checksum");
-        const auto actual=digest(root/std::filesystem::u8path(relative));
+        const auto actual=digest_beneath(root,std::filesystem::u8path(relative));
         if (actual.size!=size || actual.sha256!=checksum) throw std::runtime_error("Backup file verification failed: "+relative);
+        verified.emplace(relative,actual);
     }
     if (listed!=expected) throw std::runtime_error("Backup file list differs from its manifest");
+    return verified;
 }
 } // namespace nebula::files

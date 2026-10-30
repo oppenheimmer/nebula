@@ -8,6 +8,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <stdexcept>
@@ -36,8 +37,18 @@ QString normalize_workspace_directory(const QString& input, const QString& user_
     return clean;
 }
 
-WorkspaceDialog::WorkspaceDialog(const QString& user_home, QWidget* parent, DirectoryPicker picker)
-    : QDialog(parent), user_home_(user_home), picker_(std::move(picker))
+FolderKind classify_workspace_folder(const QString& directory)
+{
+    const QDir folder(directory);
+    if (!folder.exists()) return FolderKind::New;
+    if (folder.exists("backup-manifest.json")) return FolderKind::Backup;
+    if (folder.exists("nebula.sqlite3")) return FolderKind::Workspace;
+    if (folder.exists("workspace.json") || folder.exists("CONVERSION.txt")) return FolderKind::Export;
+    return folder.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden).isEmpty() ? FolderKind::New : FolderKind::Other;
+}
+
+WorkspaceDialog::WorkspaceDialog(const QString& user_home, QWidget* parent, DirectoryPicker picker, Confirmer confirm_other)
+    : QDialog(parent), user_home_(user_home), picker_(std::move(picker)), confirm_other_(std::move(confirm_other))
 {
     setWindowTitle("Choose your Nebula workspace");
     setMinimumWidth(580);
@@ -62,6 +73,7 @@ WorkspaceDialog::WorkspaceDialog(const QString& user_home, QWidget* parent, Dire
     error_->setObjectName("workspaceError");
     error_->setWordWrap(true);
     error_->setStyleSheet("color: #a12622;");
+    error_->setTextFormat(Qt::PlainText);
     layout->addWidget(error_);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Open | QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Open)->setText("Open workspace");
@@ -88,7 +100,26 @@ void WorkspaceDialog::show_error(const QString& message) { error_->setText(messa
 void WorkspaceDialog::accept()
 {
     try {
-        directory_->setText(normalize_workspace_directory(directory_->text(), user_home_));
+        const auto directory = normalize_workspace_directory(directory_->text(), user_home_);
+        directory_->setText(directory);
+        switch (classify_workspace_folder(directory)) {
+        case FolderKind::Backup:
+            throw std::invalid_argument("This folder is a Nebula backup. Restore it into a new folder instead of opening it.");
+        case FolderKind::Export:
+            throw std::invalid_argument("This folder is a Nebula export. Import it instead of opening it as a workspace.");
+        case FolderKind::Other: {
+            const auto confirmed = confirm_other_ ? confirm_other_(directory) : [&] {
+                QMessageBox box(QMessageBox::Question, "Use a non-empty folder?",
+                    "This folder already contains other files. Create a Nebula workspace inside it anyway?\n\n" + directory,
+                    QMessageBox::Yes | QMessageBox::Cancel, this);
+                box.setObjectName("confirmNonEmptyFolder"); box.setTextFormat(Qt::PlainText); box.setDefaultButton(QMessageBox::Cancel);
+                return box.exec() == QMessageBox::Yes;
+            }();
+            if (!confirmed) return;
+            break;
+        }
+        case FolderKind::New: case FolderKind::Workspace: break;
+        }
         QDialog::accept();
     } catch (const std::invalid_argument& error) {
         show_error(QString::fromUtf8(error.what()));

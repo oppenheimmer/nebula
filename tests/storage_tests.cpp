@@ -24,6 +24,12 @@ void sql(const QString& file, const char* command) {
     if (opened!=SQLITE_OK || sqlite3_exec(raw,command,nullptr,nullptr,nullptr)!=SQLITE_OK)
         throw std::runtime_error(sqlite3_errmsg(raw));
 }
+std::int64_t count(const QString& file, const char* command) {
+    sqlite3* raw=nullptr; sqlite3_open(file.toUtf8().constData(),&raw); std::unique_ptr<sqlite3,DatabaseCloser> db(raw);
+    sqlite3_stmt* statement=nullptr;
+    if (sqlite3_prepare_v2(raw,command,-1,&statement,nullptr)!=SQLITE_OK) throw std::runtime_error(sqlite3_errmsg(raw));
+    const auto result=sqlite3_step(statement)==SQLITE_ROW?sqlite3_column_int64(statement,0):-1; sqlite3_finalize(statement); return result;
+}
 QByteArray bytes(const QString& file) { QFile in(file); if (!in.open(QIODevice::ReadOnly)) return {}; return in.readAll(); }
 void put(const QString& file,const QByteArray& data) { QFile out(file); if (!out.open(QIODevice::WriteOnly) || out.write(data)!=data.size()) throw std::runtime_error("Cannot write test file"); }
 }
@@ -288,7 +294,7 @@ void StorageTests::killed_process_before_and_after_commit()
         auto w=Workspace::open(path(folder.path())); const auto page=w.load_page(id); validate(page.document);
         QCOMPARE(page.title,mode=="commit"?std::string("After process exit"):std::string("Before process exit"));
         QCOMPARE(page.revision,mode=="commit"?std::int64_t(2):std::int64_t(1));
-        if (mode=="pending") QVERIFY_THROWS_EXCEPTION(std::runtime_error,sql(folder.filePath("nebula.sqlite3"),"SELECT * FROM interrupted_marker"));
+        QCOMPARE(count(folder.filePath("nebula.sqlite3"),"SELECT count(*) FROM maintenance WHERE name='interrupted_marker'"),mode=="commit"?1:0);
     }
 }
 void StorageTests::unresolved_references_never_bind_by_title()
@@ -317,7 +323,12 @@ void StorageTests::deleted_subtrees_survive_restart_and_restore()
     QCOMPARE(w.backlinks(ReferenceKind::Page,id).size(),std::size_t(1));
     auto p=w.load_page(id); p.document.blocks.erase(p.document.blocks.begin()+7); w.save_page(p);
     const auto image_group=w.deleted_blocks()[0].id;
-    w.backup_to(path(folder.filePath("backup"))); auto backup=Workspace::open(path(folder.filePath("backup")));
+    w.backup_to(path(folder.filePath("backup")));
+    // A backup is restored into a new folder; opening it in place is refused (SUG-11).
+    const auto manifest=bytes(folder.filePath("backup/backup-manifest.json")), database=bytes(folder.filePath("backup/nebula.sqlite3"));
+    QVERIFY_THROWS_EXCEPTION(StorageError,Workspace::open(path(folder.filePath("backup"))));
+    QCOMPARE(bytes(folder.filePath("backup/nebula.sqlite3")),database); QCOMPARE(bytes(folder.filePath("backup/backup-manifest.json")),manifest);
+    auto backup=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
     const auto image=backup.restore_deleted_blocks(image_group);
     QCOMPARE(image.document.blocks[7].asset_label,std::string("Sample image representation"));
 }
@@ -496,7 +507,8 @@ void StorageTests::transfer_failure_rolls_back_both_pages_and_index()
     const auto source=w.create_page(db.id,"Source",{},{{"root","",BlockKind::Paragraph,{{"Jump",false,false,Reference{ReferenceKind::Block,"child"}}}},
         {"child","root",BlockKind::Paragraph,{{"Child"}}}});
     const auto destination=w.create_page(db.id,"Destination");
-    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER reject_transfer BEFORE INSERT ON blocks WHEN NEW.id='child' BEGIN SELECT RAISE(ABORT,'injected transfer failure'); END;");
+    // Nebula connections run with triggers disabled; a missing derived table fails the write instead.
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search;");
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.transfer_blocks(source,destination,"root"));
     QCOMPARE(encode_document(w.load_page(source.document.id).document),encode_document(source.document));
     QCOMPARE(encode_document(w.load_page(destination.document.id).document),encode_document(destination.document));
@@ -504,10 +516,10 @@ void StorageTests::transfer_failure_rolls_back_both_pages_and_index()
     QCOMPARE(w.load_page(destination.document.id).revision,destination.revision);
     QCOMPARE(w.backlinks(ReferenceKind::Block,"child")[0].source_page,source.document.id);
     QVERIFY(w.deleted_blocks().empty());
-    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER reject_transfer;");
+    w.rebuild_search();
     auto transfer=w.transfer_blocks(source,destination,"root");
     const auto revision=transfer.source_revision;
-    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER reject_undo BEFORE INSERT ON blocks WHEN NEW.id='child' BEGIN SELECT RAISE(ABORT,'injected undo failure'); END;");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search;");
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.set_transfer_applied(transfer,false));
     QVERIFY(transfer.applied); QCOMPARE(transfer.source_revision,revision);
     QCOMPARE(w.resolve_reference({ReferenceKind::Block,"child"}).page_id,destination.document.id);
@@ -638,11 +650,11 @@ void StorageTests::failed_reference_creation_leaves_no_page_or_partial_binding()
     QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Projects");
     auto source=w.create_page(a.id,"Source",{},{{"source","",BlockKind::Paragraph,{{"Future",false,false,Reference{ReferenceKind::Page,"","Future",a.id,false}}}}});
     const auto original=source;
-    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_reference_edge BEFORE INSERT ON links BEGIN SELECT RAISE(ABORT,'injected reference failure'); END;");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search;");
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.create_reference_target(source,{"source",0,1},b.id,"Future"));
     QCOMPARE(source.revision,original.revision); QCOMPARE(encode_document(w.load_page(source.document.id).document),encode_document(original.document));
     QVERIFY(w.pages(b.id).empty()); QVERIFY(w.deleted_blocks().empty());
-    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_reference_edge;");
+    w.rebuild_search();
     auto changed=source; changed.title="New title"; w.save_page(changed);
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.create_reference_target(source,{"source",0,1},b.id,"Future")); QVERIFY(w.pages(b.id).empty());
     source=w.load_page(source.document.id); w.trash_database(b.id,true);
@@ -668,11 +680,11 @@ void StorageTests::failed_or_unsafe_import_preserves_page_and_source()
 {
     QTemporaryDir folder; const auto original=folder.filePath("source.bin"); put(original,"keep source");
     auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Source"); const auto before=page;
-    sql(folder.filePath("workspace/nebula.sqlite3"),"CREATE TRIGGER fail_import BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT,'injected import failure'); END;");
+    sql(folder.filePath("workspace/nebula.sqlite3"),"DROP TABLE page_search;");
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,path(original),false));
     QCOMPARE(page.revision,before.revision); QCOMPARE(encode_document(w.load_page(page.document.id).document),encode_document(before.document));
     QVERIFY(w.attachments().empty()); QVERIFY(w.audit_attachments().empty()); QCOMPARE(bytes(original),QByteArray("keep source"));
-    sql(folder.filePath("workspace/nebula.sqlite3"),"DROP TRIGGER fail_import;");
+    w.rebuild_search();
     auto changed=page; changed.title="Changed"; w.save_page(changed);
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.import_attachment(page,page.document.blocks[0].id,path(original),false)); QVERIFY(w.attachments().empty());
     page=w.load_page(page.document.id);

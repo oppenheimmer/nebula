@@ -143,23 +143,20 @@ void PrototypeWindow::queue_refresh()
 
 void PrototypeWindow::refresh_selection()
 {
-    auto page = editor_->snapshot();
-    const auto id = editor_->current_block_id().toStdString();
-    const auto found = std::find_if(page.blocks.begin(), page.blocks.end(),
-                                    [&](const Block& block) { return block.id == id; });
-    if (found == page.blocks.end())
+    // Derived from the active block's neighbours; the document is not converted.
+    const auto state = editor_->block_state();
+    if (state.id.empty())
         return;
     if (comparison_active_) {
         selection_->setText("Comparison mode: each text widget has its own selection and undo. Use the Block editor tab to move or nest blocks.");
     } else {
         selection_->setText(QString("Block %1 of %2 · Nesting level %3 · Select a later sibling to indent it.")
-            .arg(found - page.blocks.begin() + 1).arg(page.blocks.size()).arg(nebula::depth(page, id)));
+            .arg(state.index).arg(state.count).arg(state.depth));
     }
-    const auto possible = [&](auto operation) { auto copy = page; return operation(copy); };
-    move_up_->setEnabled(!comparison_active_ && possible([&](Page& copy) { return move_subtree(copy, id, -1); }));
-    move_down_->setEnabled(!comparison_active_ && possible([&](Page& copy) { return move_subtree(copy, id, 1); }));
-    indent_->setEnabled(!comparison_active_ && possible([&](Page& copy) { return indent(copy, id); }));
-    outdent_->setEnabled(!comparison_active_ && possible([&](Page& copy) { return outdent(copy, id); }));
+    move_up_->setEnabled(!comparison_active_ && state.up);
+    move_down_->setEnabled(!comparison_active_ && state.down);
+    indent_->setEnabled(!comparison_active_ && state.indent);
+    outdent_->setEnabled(!comparison_active_ && state.outdent);
 }
 
 } // namespace nebula

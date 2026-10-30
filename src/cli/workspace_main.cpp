@@ -1,4 +1,5 @@
 #include "nebula/storage/workspace.hpp"
+#include "nebula/interchange/interchange.hpp"
 #include <iostream>
 
 int main(int argc,char** argv)
@@ -15,10 +16,10 @@ int main(int argc,char** argv)
         nebula::InterchangeReport report;
         if (command=="backup") nebula::Workspace::read_only(source).backup_to(destination);
         else if (command=="restore") { const auto restored=nebula::Workspace::restore(source,destination); }
-        else if (command=="export-md") report=nebula::Workspace::read_only(source).export_markdown(destination);
-        else if (command=="export-json") nebula::Workspace::read_only(source).export_json(destination);
-        else if (command=="import-json") {const auto imported=nebula::Workspace::import_json(source,destination);}
-        else report=nebula::Workspace::open(destination).import_markdown(source,argv[4]);
+        else if (command=="export-md") report=nebula::interchange::export_markdown(nebula::Workspace::read_only(source),destination);
+        else if (command=="export-json") nebula::interchange::export_json(nebula::Workspace::read_only(source),destination);
+        else if (command=="import-json") {const auto imported=nebula::interchange::import_json(source,destination);}
+        else { auto workspace=nebula::Workspace::open(destination); report=nebula::interchange::import_markdown(workspace,source,argv[4]); }
         for (const auto& warning:report.warnings) std::cout<<"Conversion: "<<warning<<'\n';
         std::cout<<"Completed "<<argv[1]<<" to "<<destination.u8string()<<'\n'; return 0;
     } catch (const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }

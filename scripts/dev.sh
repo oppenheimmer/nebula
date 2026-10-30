@@ -9,8 +9,9 @@ compiler=${2:-gcc}
 usage() {
     cat <<'HELP'
 Usage: ./scripts/dev.sh build-image
-       ./scripts/dev.sh test [gcc|clang|core]
-       ./scripts/dev.sh benchmark [single|separate]
+       ./scripts/dev.sh test [gcc|clang|core|asan]
+       ./scripts/dev.sh stress [REPEATS]
+       ./scripts/dev.sh benchmark [single|separate|workspace]
        ./scripts/dev.sh test-native
        ./scripts/dev.sh backup SOURCE_FOLDER NEW_BACKUP_FOLDER
        ./scripts/dev.sh restore BACKUP_FOLDER NEW_WORKSPACE_FOLDER
@@ -29,6 +30,8 @@ Run asks for a workspace folder; --workspace HOST_FOLDER selects one directly.
 --import-root exposes one existing host folder read-only at /imports for file import.
 The chooser sees your home read-only. Only the chosen folder is mounted writable.
 Run rebuilds the executable automatically. --demo opens the editor without a workspace.
+Data commands write into a private staging folder beside the destination, then rename it.
+They refuse uncommitted source changes unless NEBULA_ALLOW_DIRTY=1 is set.
 HELP
 }
 
@@ -38,6 +41,20 @@ mount_spec() {
     printf 'type=bind,"source=%s","target=%s"' "$source_path" "$target_path"
     [[ ${3:-} != readonly ]] || printf ',readonly'
     return 0
+}
+
+# Data commands rebuild the tool from this checkout. Refuse uncommitted source
+# changes so user data is not processed by unreviewed code (override for development).
+require_reviewed_tree() {
+    if git -C "$project_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if [[ -n $(git -C "$project_dir" status --porcelain --untracked-files=no -- src include CMakeLists.txt 2>/dev/null) ]] \
+            && [[ ${NEBULA_ALLOW_DIRTY:-} != 1 ]]; then
+            printf 'Source files have uncommitted changes. Commit them, or set NEBULA_ALLOW_DIRTY=1 to process data with this build.\n' >&2
+            exit 2
+        fi
+    else
+        printf 'Warning: not a Git checkout; data commands use this source tree as is.\n' >&2
+    fi
 }
 
 if [[ "$command_name" == help || "$command_name" == --help || "$command_name" == -h ]]; then
@@ -51,16 +68,23 @@ fi
 
 case "$command_name" in
     test)
+        build_type=Release; sanitize=OFF
         case "$compiler" in
             gcc) cxx=g++; editor=ON ;;
             clang) cxx=clang++; editor=ON ;;
             core) cxx=g++; editor=OFF ;;
+            asan) cxx=g++; editor=ON; build_type=Debug; sanitize=ON ;;
             *) usage >&2; exit 2 ;;
         esac
         ;;
+    stress)
+        repeats=${2:-20}
+        [[ "$repeats" =~ ^[0-9]+$ && "$repeats" -gt 0 ]] || { usage >&2; exit 2; }
+        compiler=gcc
+        ;;
     benchmark)
         mode=${2:-single}
-        [[ "$mode" == single || "$mode" == separate ]] || { usage >&2; exit 2; }
+        [[ "$mode" == single || "$mode" == separate || "$mode" == workspace ]] || { usage >&2; exit 2; }
         compiler=gcc
         ;;
     run|test-native|shell|backup|restore|export-md|import-md|export-json|import-json) compiler=gcc ;;
@@ -84,13 +108,26 @@ run=(docker run --rm --init --network=none --cap-drop=ALL
 
 case "$command_name" in
     test)
-        exec "${run[@]}" --env "NEBULA_CXX_COMPILER=$cxx" --env "NEBULA_BUILD_EDITOR=$editor" "$image" \
-            sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
+        # Leak checking needs ptrace, which the restricted container does not grant.
+        exec "${run[@]}" --env "NEBULA_CXX_COMPILER=$cxx" --env "NEBULA_BUILD_EDITOR=$editor" \
+            --env "NEBULA_BUILD_TYPE=$build_type" --env "NEBULA_SANITIZE=$sanitize" \
+            --env "ASAN_OPTIONS=detect_leaks=0:abort_on_error=1" --env "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1" "$image" \
+            sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE="$NEBULA_BUILD_TYPE" \
                 -DCMAKE_CXX_COMPILER="$NEBULA_CXX_COMPILER" -DNEBULA_BUILD_EDITOR="$NEBULA_BUILD_EDITOR" \
+                -DNEBULA_SANITIZE="$NEBULA_SANITIZE" -DNEBULA_WERROR=ON \
                 && cmake --build /build --parallel 4 \
                 && ctest --test-dir /build --output-on-failure'
         ;;
+    stress)
+        # Repeat the interaction suites to expose timing-dependent failures (BUG-014).
+        exec "${run[@]}" --env "NEBULA_REPEATS=$repeats" "$image" \
+            sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON \
+                && cmake --build /build --parallel 4 \
+                && ctest --test-dir /build --output-on-failure -R "editor|desktop" --repeat until-fail:"$NEBULA_REPEATS"'
+        ;;
     benchmark)
+        "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON && cmake --build /build --parallel 4' >&2
         exec "${run[@]}" "$image" /build/nebula_prototype --benchmark "$mode" --blocks 1000
         ;;
     shell)
@@ -98,6 +135,7 @@ case "$command_name" in
         ;;
     backup|restore|export-md|export-json|import-json)
         if (( $# != 3 )); then usage >&2; exit 2; fi
+        require_reviewed_tree
         source_folder=$(CDPATH= cd -- "$2" && pwd -P)
         destination_parent=$(dirname -- "$3")
         destination_name=$(basename -- "$3")
@@ -108,14 +146,31 @@ case "$command_name" in
             "$source_folder"|"$source_folder"/*)
                 printf 'Choose a destination outside the source workspace.\n' >&2; exit 2 ;;
         esac
+        if [[ -e "$destination_parent/$destination_name" || -L "$destination_parent/$destination_name" ]]; then
+            printf 'Choose a new destination folder; %s already exists.\n' "$destination_parent/$destination_name" >&2; exit 2
+        fi
         "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON && cmake --build /build --parallel 4'
-        exec "${run[@]}" --mount "$(mount_spec "$source_folder" /source readonly)" \
-            --mount "$(mount_spec "$destination_parent" /output)" "$image" \
-            /build/nebula_workspace "$command_name" /source "/output/$destination_name"
+        # Mount only a new private staging folder, never the destination's parent
+        # (often the home directory). Rename the result into place on success.
+        staging=$(mktemp -d "$destination_parent/.nebula-staging.XXXXXX")
+        chmod 700 "$staging"
+        status=0
+        "${run[@]}" --mount "$(mount_spec "$source_folder" /source readonly)" \
+            --mount "$(mount_spec "$staging" /output)" "$image" \
+            /build/nebula_workspace "$command_name" /source "/output/$destination_name" || status=$?
+        if (( status == 0 )) && [[ -d "$staging/$destination_name" && ! -e "$destination_parent/$destination_name" ]]; then
+            mv -- "$staging/$destination_name" "$destination_parent/$destination_name"
+            rmdir -- "$staging"
+            exit 0
+        fi
+        rm -rf -- "$staging"
+        (( status != 0 )) || { printf 'The workspace tool produced no output folder.\n' >&2; status=1; }
+        exit "$status"
         ;;
     import-md)
         if (( $# != 4 )); then usage >&2; exit 2; fi
+        require_reviewed_tree
         source_folder=$(CDPATH= cd -- "$2" && pwd -P)
         workspace_folder=$(CDPATH= cd -- "$3" && pwd -P)
         "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
@@ -138,7 +193,8 @@ case "$command_name" in
             --mount type=bind,source=/tmp/.X11-unix,target=/tmp/.X11-unix,readonly
             --mount "$(mount_spec "$auth_file" /run/nebula-xauthority readonly)")
         if [[ "$command_name" == test-native ]]; then
-            exec "${gui[@]}" "$image" sh -ec '/build/editor_tests && /build/desktop_tests'
+            exec "${gui[@]}" "$image" sh -ec '/build/editor_tests && /build/desktop_tests && /build/review_desktop_tests \
+                && { [ ! -x /build/trash_safety_tests ] || /build/trash_safety_tests; }'
         fi
         host_workspace=
         host_import_root=

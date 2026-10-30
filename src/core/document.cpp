@@ -1,6 +1,7 @@
 #include "nebula/core/document.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,17 +43,49 @@ std::optional<std::size_t> previous_sibling(const Page& page, std::size_t index)
 
 } // namespace
 
+bool valid_utf8(const std::string& text)
+{
+    for (std::size_t i = 0; i < text.size();) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        std::size_t length = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xe ? 3 : (c >> 3) == 0x1e ? 4 : 0;
+        if (!length || i + length > text.size())
+            return false;
+        std::uint32_t point = length == 1 ? c : c & (0x7f >> length);
+        for (std::size_t k = 1; k < length; ++k) {
+            const auto next = static_cast<unsigned char>(text[i + k]);
+            if ((next >> 6) != 0x2)
+                return false;
+            point = (point << 6) | (next & 0x3f);
+        }
+        const std::uint32_t minimum[] = {0, 0, 0x80, 0x800, 0x10000};
+        if (point < minimum[length] || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff))
+            return false;
+        i += length;
+    }
+    return true;
+}
+
+bool valid_identity(const std::string& id)
+{
+    if (id.empty() || id.size() > 128 || !valid_utf8(id))
+        return false;
+    return std::none_of(id.begin(), id.end(), [](char c) {
+        const auto byte = static_cast<unsigned char>(c);
+        return byte < 0x20 || byte == 0x7f;
+    });
+}
+
 void validate(const Page& page)
 {
-    if (page.id.empty() || page.blocks.empty())
-        throw std::invalid_argument("A page needs an ID and at least one block");
+    if (!valid_identity(page.id) || page.blocks.empty())
+        throw std::invalid_argument("A page needs a valid ID and at least one block");
     std::unordered_set<std::string> ids;
     std::vector<std::string> ancestors;
     for (const auto& block : page.blocks) {
         if (int(block.kind)<0 || int(block.kind)>6)
             throw std::invalid_argument("Unknown block kind");
-        if (block.id.empty() || !ids.insert(block.id).second)
-            throw std::invalid_argument("Block IDs must be nonempty and unique");
+        if (!valid_identity(block.id) || !ids.insert(block.id).second)
+            throw std::invalid_argument("Block IDs must be valid and unique");
         while (!ancestors.empty() && ancestors.back() != block.parent_id)
             ancestors.pop_back();
         if (!block.parent_id.empty() && ancestors.empty())
@@ -222,6 +255,25 @@ void insert_attachment(Page& page, const std::string& after, const std::string& 
         {card,page.blocks[start].parent_id,image?BlockKind::Image:BlockKind::Attachment,{},name,false,attachment},
         {following,page.blocks[start].parent_id,BlockKind::Paragraph,{}}});
     validate(next); page=std::move(next);
+}
+
+Page with_fresh_ids(const Page& page, std::string page_id, const std::function<std::string()>& next_id)
+{
+    validate(page);
+    std::unordered_map<std::string, std::string> remap;
+    for (const auto& block : page.blocks)
+        remap.emplace(block.id, next_id());
+    Page copy{std::move(page_id), page.blocks};
+    for (auto& block : copy.blocks) {
+        block.id = remap.at(block.id);
+        if (!block.parent_id.empty())
+            block.parent_id = remap.at(block.parent_id);
+        for (auto& run : block.runs)
+            if (run.reference && run.reference->kind == ReferenceKind::Block && remap.count(run.reference->target_id))
+                run.reference->target_id = remap.at(run.reference->target_id);
+    }
+    validate(copy);
+    return copy;
 }
 
 Page sample_page()

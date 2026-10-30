@@ -36,6 +36,7 @@ while their text remains. Images become `[image]`. A resource-free document
 adapter prevents loading images, stylesheets, or other external resources. HTML
 does not import files or create Nebula references by guessing titles or URLs.
 
-Plain text normalizes CRLF/CR to LF and uses paragraph separators to create
-blocks. HTML and Nebula formats take precedence when present; an invalid Nebula
-payload is rejected rather than silently using its text fallback.
+Plain text normalizes CRLF/CR to LF and uses paragraph separators to create blocks.
+Ctrl+Shift+V (Paste plain text) reads only `text/plain`, ignoring any Nebula or HTML
+formats on the clipboard. HTML and Nebula formats take precedence when present; an
+invalid Nebula payload is rejected rather than silently using its text fallback.

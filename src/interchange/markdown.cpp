@@ -1,15 +1,14 @@
-#include "nebula/storage/workspace.hpp"
+#include "nebula/interchange/interchange.hpp"
 #include "internal.hpp"
-#include "../storage/records_internal.hpp"
 #include <QRegularExpression>
 #include <QStringList>
 #include <QUrl>
 #include <map>
 #include <set>
 
-namespace nebula {
+namespace nebula::interchange {
 namespace {
-using namespace interchange;
+using namespace detail;
 QString encoded(const std::string& value) {
     const auto text=q(value);
     static const QRegularExpression safe("^[A-Za-z0-9_.-]+$");
@@ -41,20 +40,30 @@ struct InlineContext {
     std::vector<fs::path>& copied;
     std::optional<Asset> asset(const QString& url,const QString& label,bool image) {
         if (!url.startsWith("attachments/")) return {};
-        const auto name=url.mid(12);
-        if (name.isEmpty() || name=="." || name==".." || name.contains('/') || name.contains('\\') || name.contains('%') || name.contains(QChar::Null))
+        // Markdown writers percent-encode spaces and punctuation; decode before
+        // the traversal checks so "%2F" or "%2E%2E" cannot escape the folder.
+        const auto name=QUrl::fromPercentEncoding(url.mid(12).toUtf8());
+        if (name.isEmpty() || name=="." || name==".." || name.contains('/') || name.contains('\\') || name.contains(QChar::Null))
             throw std::runtime_error("Unsafe Markdown attachment path");
         if (fs::is_symlink(source/"attachments")) throw std::runtime_error("Markdown attachment directory is a symlink");
-        auto found=assets.find(url);
+        const auto visible=label.trimmed().isEmpty()?name:label;
+        auto found=assets.find(name);
         if (found==assets.end()) {
             const auto id=sql::id(db); const auto output=target/"attachments"/id;
-            const auto digest=files::copy_new(source/"attachments"/fs::u8path(s(name)),output); copied.push_back(output);
-            AttachmentInfo info{id,s(label),digest.sha256,digest.size,image};
+            files::Digest digest;
+            try { digest=files::copy_beneath(source,fs::u8path("attachments/"+s(name)),output); }
+            catch (const std::invalid_argument&) { throw; }
+            catch (const std::exception&) {
+                warn(report,"Missing or unreadable attachment files keep their link label as text: "+s(name));
+                return Asset{image,{},{}};
+            }
+            copied.push_back(output);
+            AttachmentInfo info{id,s(visible),digest.sha256,digest.size,image};
             sql::Statement add(db,"INSERT INTO attachments(id,name,size,sha256,image) VALUES(?,?,?,?,?)");
             add.bind(1,id).bind(2,info.name).bind(3,info.size).bind(4,info.sha256).bind(5,image).done();
-            found=assets.emplace(url,std::move(info)).first;
+            found=assets.emplace(name,std::move(info)).first;
         }
-        return Asset{image,s(label),found->second.id};
+        return Asset{image,s(visible),found->second.id};
     }
 };
 std::vector<Run> inline_text(const QString& input,InlineContext* context,InterchangeReport& report,bool links=true) {
@@ -76,7 +85,9 @@ std::vector<Run> inline_text(const QString& input,InlineContext* context,Interch
                 const auto label=input.mid(first,end-first), url=input.mid(end+2,finish-end-2);
                 flush(); auto labels=inline_text(label,nullptr,report,false); QString visible;
                 for (const auto& run:labels) visible+=q(run.text);
-                if (auto asset=context->asset(url,visible,image)) runs.push_back({{},bold,italic,{},*asset});
+                const auto asset=context->asset(url,visible,image);
+                if (asset && !asset->attachment_id.empty()) runs.push_back({{},bold,italic,{},*asset});
+                else if (asset) { for (auto& run:labels) { run.bold=run.bold||bold; run.italic=run.italic||italic; runs.push_back(std::move(run)); } }
                 else {
                     const auto hash=url.indexOf('#'); const auto file=hash<0?url:url.left(hash);
                     const auto page=context->pages.find(file);
@@ -104,23 +115,23 @@ std::vector<Run> inline_text(const QString& input,InlineContext* context,Interch
 QString plain_label(const std::vector<Run>& runs) { QString text; for (const auto& run:runs) text+=q(run.text); return text; }
 } // namespace
 
-InterchangeReport Workspace::export_markdown(const std::filesystem::path& destination) const
+InterchangeReport export_markdown(const Workspace& workspace,const std::filesystem::path& destination)
 {
-    using namespace interchange;
+    const auto& directory_=workspace.directory();
     reject_managed_destination(directory_,destination);
-    files::WorkspaceLock lock(directory_,false); Snapshot snapshot(database_.get()); NewDirectory output(destination);
+    files::WorkspaceLock lock(directory_,false); Snapshot snapshot(WorkspaceInternals::connection(workspace)); NewDirectory output(destination);
     InterchangeReport report;
     warn(report,"Markdown omits database membership, properties, views, timestamps, revisions, trash, recovery history and stable identities. Use lossless JSON for preservation.");
     std::map<std::string,std::string> owners; std::vector<PageRecord> all;
-    for (const auto& db:databases()) for (auto page:pages(db.id)) {for (const auto& block:page.document.blocks) owners[block.id]=page.document.id; all.push_back(std::move(page));}
+    for (const auto& db:workspace.databases()) for (auto page:workspace.pages(db.id)) {for (const auto& block:page.document.blocks) owners[block.id]=page.document.id; all.push_back(std::move(page));}
     std::set<std::string> included; for (const auto& page:all) included.insert(page.document.id);
     std::set<std::string> copied;
     auto asset=[&](bool image,const std::string& label,const std::string& id) {
         if (id.empty()) {warn(report,"Legacy label-only image/file cards export as text because no managed bytes exist."); return escaped(q(label));}
-        const auto info=attachment(id); if (!info) throw std::runtime_error("Missing managed attachment metadata: "+id);
+        const auto info=workspace.attachment(id); if (!info) throw std::runtime_error("Missing managed attachment metadata: "+id);
         if (copied.insert(id).second) {
-            if (!fs::exists(destination/"attachments")) fs::create_directory(destination/"attachments");
-            const auto digest=files::copy_new(attachment_path(id),destination/"attachments"/id);
+            files::make_private_directory(destination/"attachments"); workspace.attachment_path(id);
+            const auto digest=files::copy_beneath(directory_,fs::u8path("attachments/"+id),destination/"attachments"/id);
             if (digest.sha256!=info->sha256 || digest.size!=info->size) throw std::runtime_error("Managed attachment checksum mismatch");
         }
         return (image?"![":"[")+escaped(q(label))+"](attachments/"+q(id)+")";
@@ -141,7 +152,7 @@ InterchangeReport Workspace::export_markdown(const std::filesystem::path& destin
                     if (run.bold || run.italic) warn(report,"Inline asset bold/italic presentation is omitted in Markdown.");
                     body+=asset(run.asset->image,run.asset->label,run.asset->attachment_id); continue;
                 }
-                const auto label=run.reference && !run.reference->custom_label?reference_label(*run.reference).value_or(run.text):run.text;
+                const auto label=run.reference && !run.reference->custom_label?workspace.reference_label(*run.reference).value_or(run.text):run.text;
                 if (label.find('\0')!=std::string::npos) warn(report,"Embedded NUL text becomes the Unicode replacement character in Markdown.");
                 auto value=styled(run,q(label));
                 if (run.reference) {
@@ -173,9 +184,9 @@ InterchangeReport Workspace::export_markdown(const std::filesystem::path& destin
     output.complete(); return report;
 }
 
-InterchangeReport Workspace::import_markdown(const std::filesystem::path& source,const std::string& database)
+InterchangeReport import_markdown(Workspace& workspace,const std::filesystem::path& source,const std::string& database)
 {
-    using namespace interchange;
+    const auto& directory_=workspace.directory(); sqlite3* connection=WorkspaceInternals::connection(workspace);
     if (!source.is_absolute() || fs::is_symlink(source) || !fs::is_directory(source)) throw std::invalid_argument("Choose an existing regular Markdown folder");
     std::vector<fs::path> inputs; InterchangeReport report;
     for (const auto& entry:fs::directory_iterator(source)) {
@@ -183,15 +194,15 @@ InterchangeReport Workspace::import_markdown(const std::filesystem::path& source
         else if (entry.path().filename()!="attachments" && entry.path().filename()!="CONVERSION.txt") warn(report,"Non-Markdown entries are ignored; only top-level .md files are imported.");
     }
     std::sort(inputs.begin(),inputs.end()); if (inputs.empty()) throw std::invalid_argument("No top-level .md files found");
-    files::WorkspaceLock lock(directory_,true); sql::Transaction transaction(database_.get());
-    sql::Statement active(database_.get(),"SELECT id FROM databases WHERE id=? AND NOT trashed");
+    files::WorkspaceLock lock(directory_,true); sql::Transaction transaction(connection);
+    sql::Statement active(connection,"SELECT id FROM databases WHERE id=? AND NOT trashed");
     active.bind(1,database); if (!active.row()) throw std::invalid_argument("Choose an active destination database");
     std::vector<ImportedPage> imported; std::map<QString,std::string> page_ids,anchors; std::vector<fs::path> copied;
     std::map<QString,AttachmentInfo> assets;
     try {
         // Allocate every identity before resolving links, including forward links.
         for (const auto& input:inputs) {
-            ImportedPage page; page.file=q(input.filename().u8string()); page.id=sql::id(database_.get()); page_ids[page.file]=page.id;
+            ImportedPage page; page.file=q(input.filename().u8string()); page.id=sql::id(connection); page_ids[page.file]=page.id;
             auto content=q(read(input)); if (content.contains(QChar::Null)) throw std::runtime_error("Markdown cannot contain NUL characters");
             content.replace("\r\n","\n"); content.replace('\r','\n'); if (content.startsWith(QChar(0xfeff))) content.remove(0,1);
             auto lines=content.split('\n'); page.title=q(input.stem().u8string()); qsizetype start=0;
@@ -201,7 +212,7 @@ InterchangeReport Workspace::import_markdown(const std::filesystem::path& source
             QString paragraph,anchor; BlockKind kind=BlockKind::Paragraph; bool checked=false;
             auto flush=[&]{
                 if (paragraph.isEmpty() && anchor.isEmpty()) return;
-                Block block{sql::id(database_.get()),{},kind,{{s(paragraph)}}}; block.checked=checked;
+                Block block{sql::id(connection),{},kind,{{s(paragraph)}}}; block.checked=checked;
                 if (!anchor.isEmpty()) {if (!anchors.emplace(page.file+"#"+anchor,block.id).second) throw std::runtime_error("Duplicate Markdown block anchor");}
                 page.blocks.push_back(std::move(block)); paragraph.clear(); anchor.clear(); kind=BlockKind::Paragraph; checked=false;
             };
@@ -222,12 +233,12 @@ InterchangeReport Workspace::import_markdown(const std::filesystem::path& source
                 else if (body.startsWith('#') || body.startsWith('>') || body.startsWith("  ") || body.contains('|'))
                     warn(report,"Unsupported heading levels, quotes, nesting and tables remain literal paragraph text.");
                 paragraph=body;
-                if (kind==BlockKind::Divider || body.isEmpty()) {if (anchor.isEmpty()) anchor="generated-"+q(sql::id(database_.get())); flush();}
+                if (kind==BlockKind::Divider || body.isEmpty()) {if (anchor.isEmpty()) anchor="generated-"+q(sql::id(connection)); flush();}
             }
-            flush(); if (page.blocks.empty()) page.blocks.push_back({sql::id(database_.get())});
+            flush(); if (page.blocks.empty()) page.blocks.push_back({sql::id(connection)});
             imported.push_back(std::move(page));
         }
-        InlineContext context{database_.get(),source,directory_,report,page_ids,anchors,assets,copied};
+        InlineContext context{connection,source,directory_,report,page_ids,anchors,assets,copied};
         for (auto& page:imported) {
             for (auto& block:page.blocks) {
                 const auto content=block.runs.empty()?QString{}:q(block.runs[0].text);
@@ -237,14 +248,14 @@ InterchangeReport Workspace::import_markdown(const std::filesystem::path& source
                     block.asset_label=asset.label; block.attachment_id=asset.attachment_id; block.runs.clear();
                 }
             }
-            create_page_in_transaction(database,s(page.title),{},page.blocks,page.id);
+            WorkspaceInternals::create_page_in_transaction(workspace,database,s(page.title),page.blocks,page.id);
             report.pages.push_back(page.id);
         }
-        // All destination identities now exist; populate default labels and indexes once.
-        storage_detail::rebuild_search(database_.get());
+        // Each page was indexed as it was created; imported links use fixed labels,
+        // so no workspace-wide rebuild is needed.
         files::sync_directory(directory_/"attachments"); transaction.commit();
     } catch (...) {for (const auto& file:copied) {std::error_code error; fs::remove(file,error);} throw;}
     warn(report,"Imported pages and blocks receive new identities; links within the imported set are remapped. Existing pages are never overwritten.");
     return report;
 }
-} // namespace nebula
+} // namespace nebula::interchange

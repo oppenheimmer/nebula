@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -66,8 +67,14 @@ struct Page {
     std::vector<Block> blocks;
 };
 
+// Identities are 1–128 bytes of valid UTF-8 without control characters.
+bool valid_identity(const std::string& id);
+bool valid_utf8(const std::string& text);
 // Throws std::invalid_argument for an invalid prototype document.
 void validate(const Page& page);
+// Copy a page with fresh block identities; references between copied blocks
+// follow their copies and all other targets are unchanged.
+Page with_fresh_ids(const Page& page, std::string page_id, const std::function<std::string()>& next_id);
 // Default references inside a block title use [link], avoiding recursive labels.
 std::string reference_title(const Block& block);
 int depth(const Page& page, const std::string& block_id);

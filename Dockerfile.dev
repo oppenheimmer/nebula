@@ -1,4 +1,7 @@
-FROM debian:trixie-slim
+# Release builds pin this to a digest (debian:trixie-slim@sha256:...) and a package
+# snapshot; see ROADMAP M09.1. Development keeps the moving tag by default.
+ARG BASE_IMAGE=debian:trixie-slim
+FROM ${BASE_IMAGE}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

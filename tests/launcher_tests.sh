@@ -24,6 +24,14 @@ if [[ "$1" == image ]]; then exit 0; fi
 shopt -s nullglob
 calls=("$NEBULA_TEST_CALLS"/*)
 printf '%s\0' "$@" > "$NEBULA_TEST_CALLS/${#calls[@]}"
+# Emulate the workspace tool creating its destination inside the staging mount.
+output_source=
+for arg in "$@"; do
+    case "$arg" in *'"target=/output"'*) output_source=${arg#*\"source=}; output_source=${output_source%%\",*} ;; esac
+done
+if [[ -n "$output_source" ]]; then
+    for arg in "$@"; do [[ "$arg" != /output/* ]] || mkdir -p -- "$output_source/${arg#/output/}"; done
+fi
 for arg in "$@"; do
     if [[ "$arg" == --select-workspace ]]; then
         printf '%s' "${NEBULA_TEST_SELECTION:-}"
@@ -123,6 +131,12 @@ load_call 1
 has_argument /build/nebula_workspace || fail 'backup must use the headless workspace tool'
 has_argument "type=bind,\"source=$fixture/source\",\"target=/source\",readonly" || fail 'backup source must be read-only'
 has_argument /output/backup || fail 'backup destination was lost'
+has_argument "type=bind,\"source=$fixture\",\"target=/output\"" && fail 'the destination parent must not be mounted'
+[[ -d "$fixture/backup" ]] || fail 'staged backup was not moved into place'
+compgen -G "$fixture/.nebula-staging.*" >/dev/null && fail 'staging folder left behind'
+reset_calls
+if bash "$launcher" backup "$fixture/source" "$fixture/backup" 2>/dev/null; then fail 'an existing destination must be refused'; fi
+compgen -G "$NEBULA_TEST_CALLS/*" >/dev/null && fail 'an existing destination must be refused before Docker runs'
 reset_calls
 if bash "$launcher" backup "$fixture/source" "$fixture/source/inside" 2>/dev/null; then fail 'nested backup must fail'; fi
 printf 'PASS: launcher rebuild, cancel, selection, quoting, mounts, demo, and failures\n'

@@ -1,6 +1,7 @@
 #pragma once
 #include "nebula/core/document.hpp"
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <variant>
 
@@ -31,11 +32,22 @@ struct View {
     std::vector<LinkFilter> link_filters;
 };
 
+// Optional text comparison used for display ordering and Contains filters. The
+// default compares UTF-8 bytes; adapters can supply case-insensitive rules.
+// Ties under a collation fall back to bytes and then page ID, so results stay deterministic.
+struct TextRules {
+    std::function<int(const std::string&, const std::string&)> compare;
+    std::function<bool(const std::string& text, const std::string& needle)> contains;
+};
+
 bool valid_date(const std::string& iso);
 void validate_link_filters(const std::vector<LinkFilter>& filters);
 void validate_value(PropertyKind kind, const PropertyValue& value);
-bool matches(const PropertyValue& actual, const Filter& filter);
-int compare_values(const PropertyValue& a, const PropertyValue& b);
-std::vector<PageRecord> apply_view(std::vector<PageRecord> pages, const View& view);
+// Checks names, columns, sort and filter types against a database's definitions.
+void validate_view(const View& view, const std::vector<PropertyDefinition>& definitions);
+// Tag Equals compares the tag sets, independent of entry order.
+bool matches(const PropertyValue& actual, const Filter& filter, const TextRules& rules = {});
+int compare_values(const PropertyValue& a, const PropertyValue& b, const TextRules& rules = {});
+std::vector<PageRecord> apply_view(std::vector<PageRecord> pages, const View& view, const TextRules& rules = {});
 
 } // namespace nebula

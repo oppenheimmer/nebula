@@ -40,11 +40,15 @@ Exported folders are not included in workspace backups.
   page/block gets a fresh ID, allocated before links resolve, including forward
   references. Missing files/anchors become explicit unresolved references; they
   are never matched by title or created automatically.
-- `![label](attachments/FILE)` imports an image and
-  `[label](attachments/FILE)` imports a file. Export copies referenced managed
-  bytes into that folder and verifies registered hashes. Import copies bytes into
-  new managed IDs, preserving original inputs. A standalone asset becomes a card;
-  an asset among text becomes an inline asset. Asset names are display labels.
+- `![label](attachments/FILE)` imports an image and `[label](attachments/FILE)`
+  imports a file. FILE may be percent-encoded (`My%20photo.png`); it is decoded
+  before the traversal checks, so encoded separators or dot segments are still
+  refused and reject the import. An empty label uses the file name. A missing or
+  unreadable file keeps its link label as text and is listed in the report instead of
+  aborting the import. Export copies referenced managed bytes into that folder and
+  verifies registered hashes. Import copies bytes into new managed IDs, preserving
+  original inputs. A standalone asset becomes a card; an asset among text becomes an
+  inline asset. Asset names are display labels.
 
 This is an application subset, not a general CommonMark or another app's import
 implementation. Unsupported heading levels, nesting, quotes, underscore emphasis,
