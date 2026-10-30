@@ -1,8 +1,8 @@
 #pragma once
-#include "nebula/app/prototype_window.hpp"
 #include "nebula/app/link_targets.hpp"
 #include "nebula/app/navigation.hpp"
 #include "nebula/app/page_session.hpp"
+#include "nebula/app/prototype_window.hpp"
 #include "nebula/editor/page_editor.hpp"
 
 class QComboBox;
@@ -25,8 +25,10 @@ public:
     void create_page(const QString& title);
     void refresh_databases();
     void refresh_table();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
+
 private:
     Workspace& workspace_;
     PageSession session_;

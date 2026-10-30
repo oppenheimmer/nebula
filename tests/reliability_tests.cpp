@@ -3,8 +3,8 @@
 #include "nebula/format/codec.hpp"
 #include "nebula/interchange/interchange.hpp"
 #include <QApplication>
-#include <QElapsedTimer>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
@@ -16,8 +16,14 @@
 
 using namespace nebula;
 namespace {
-std::filesystem::path path(const QString& text) { return std::filesystem::u8path(text.toUtf8().constData()); }
-QString worker() { return QCoreApplication::applicationDirPath() + "/nebula_reliability_worker"; }
+std::filesystem::path path(const QString& text)
+{
+    return std::filesystem::u8path(text.toUtf8().constData());
+}
+QString worker()
+{
+    return QCoreApplication::applicationDirPath() + "/nebula_reliability_worker";
+}
 void put(const QString& name, const QByteArray& bytes)
 {
     QFile file(name);
@@ -37,8 +43,8 @@ private slots:
 void ReliabilityTests::process_kills_preserve_committed_notes_and_files_data()
 {
     QTest::addColumn<QString>("phase");
-    for (const auto* phase : {"page-pending", "page-committed", "trash-pending", "trash-committed",
-                              "attachment-copy", "attachment-promoted", "attachment-committed"})
+    for (const auto* phase : {"page-pending", "page-committed", "trash-pending", "trash-committed", "attachment-copy",
+                              "attachment-promoted", "attachment-committed"})
         QTest::newRow(phase) << QString::fromLatin1(phase);
 }
 void ReliabilityTests::process_kills_preserve_committed_notes_and_files()
@@ -53,11 +59,16 @@ void ReliabilityTests::process_kills_preserve_committed_notes_and_files()
         auto workspace = Workspace::open(root);
         const auto journal = workspace.create_journal();
         const auto date = workspace.properties(journal.id).front().id;
-        target = workspace.create_page(workspace.create_database("Projects").id, "Duplicate", {},
-            {{"heading", {}, BlockKind::Heading, {{"Heading"}}}}).document.id;
-        auto page = workspace.create_page(journal.id, "Duplicate", {{date, Date{"2026-10-29"}}},
-            {{"source", {}, BlockKind::Paragraph, {{"Original text "},
-                {"Heading", false, false, Reference{ReferenceKind::Block, "heading"}}}}});
+        target = workspace
+                     .create_page(workspace.create_database("Projects").id, "Duplicate", {},
+                                  {{"heading", {}, BlockKind::Heading, {{"Heading"}}}})
+                     .document.id;
+        auto page = workspace.create_page(
+            journal.id, "Duplicate", {{date, Date{"2026-10-29"}}},
+            {{"source",
+              {},
+              BlockKind::Paragraph,
+              {{"Original text "}, {"Heading", false, false, Reference{ReferenceKind::Block, "heading"}}}}});
         id = page.document.id;
         original = encode_document(page.document);
     }
@@ -110,14 +121,16 @@ void ReliabilityTests::process_kills_preserve_committed_notes_and_files()
 
 void ReliabilityTests::autosave_survives_headless_backup_and_export_pressure()
 {
-    QTemporaryDir temporary(qEnvironmentVariable("NEBULA_TEST_TMPDIR", QDir::tempPath()) + "/nebula-reliability-XXXXXX");
+    QTemporaryDir temporary(qEnvironmentVariable("NEBULA_TEST_TMPDIR", QDir::tempPath()) +
+                            "/nebula-reliability-XXXXXX");
     const auto root = path(temporary.filePath("workspace"));
     auto workspace = Workspace::open(root);
     const auto database = workspace.create_database("Notes");
     const auto page = workspace.create_page(database.id, "Edited note");
     workspace.transaction([&] {
         for (int i = 0; i < 2000; ++i)
-            workspace.create_page(database.id, "Bulk " + std::to_string(i), {},
+            workspace.create_page(
+                database.id, "Bulk " + std::to_string(i), {},
                 {{"bulk-" + std::to_string(i), {}, BlockKind::Paragraph, {{std::string(16384, 'x')}}}});
     });
     WorkspaceWindow window(workspace);
@@ -129,15 +142,18 @@ void ReliabilityTests::autosave_survives_headless_backup_and_export_pressure()
     auto* editor = window.page_editor();
     editor->setFocus();
     QProcess process;
-    process.start(worker(), {"maintenance", QString::fromStdString(root.u8string()), QString::fromStdString(page.document.id),
-                             temporary.filePath("unused"), temporary.path()});
+    process.start(worker(), {"maintenance", QString::fromStdString(root.u8string()),
+                             QString::fromStdString(page.document.id), temporary.filePath("unused"), temporary.path()});
     QVERIFY(process.waitForStarted());
     QTRY_VERIFY_WITH_TIMEOUT(process.canReadLine() || process.state() == QProcess::NotRunning, 10000);
     QCOMPARE(process.readLine(), QByteArray("ready\n"));
     int edits = 0;
     bool save_failed = false;
     QTimer typing, monitor;
-    connect(&typing, &QTimer::timeout, &window, [&] { QTest::keyClick(editor, Qt::Key_X); ++edits; });
+    connect(&typing, &QTimer::timeout, &window, [&] {
+        QTest::keyClick(editor, Qt::Key_X);
+        ++edits;
+    });
     connect(&monitor, &QTimer::timeout, &window, [&] {
         save_failed = save_failed || window.findChild<QLabel*>("saveState")->text().startsWith("Save failed");
     });
@@ -158,8 +174,8 @@ void ReliabilityTests::autosave_survives_headless_backup_and_export_pressure()
     auto imported = interchange::import_json(path(temporary.filePath("json")), path(temporary.filePath("imported")));
     QCOMPARE(imported.pages(database.id).size(), std::size_t(2001));
     qInfo().noquote() << "Concurrent maintenance:" << process.readAllStandardOutput().trimmed()
-                     << "database_bytes=" << QFileInfo(temporary.filePath("workspace/nebula.sqlite3")).size()
-                     << "edits=" << edits << "autosaves=" << saved_before_flush << "save_failures=0";
+                      << "database_bytes=" << QFileInfo(temporary.filePath("workspace/nebula.sqlite3")).size()
+                      << "edits=" << edits << "autosaves=" << saved_before_flush << "save_failures=0";
 }
 void ReliabilityTests::reused_read_only_export_includes_other_connection_commits()
 {
@@ -174,17 +190,18 @@ void ReliabilityTests::reused_read_only_export_includes_other_connection_commits
         writer.save_page(page);
         const auto folder = temporary.filePath("export-" + QString::number(i));
         interchange::export_json(reader, path(folder));
-        auto imported = interchange::import_json(path(folder), path(temporary.filePath("import-" + QString::number(i))));
+        auto imported =
+            interchange::import_json(path(folder), path(temporary.filePath("import-" + QString::number(i))));
         QCOMPARE(imported.load_page(page.document.id).title, page.title);
         QCOMPARE(encode_document(imported.load_page(page.document.id).document), encode_document(page.document));
     }
     sqlite3* raw = nullptr;
     QCOMPARE(sqlite3_open((root / "nebula.sqlite3").u8string().c_str(), &raw), SQLITE_OK);
     std::unique_ptr<sqlite3, DatabaseCloser> connection(raw);
-    QCOMPARE(sqlite3_exec(raw, "UPDATE page_search_content SET c4='corrupted' WHERE c4<>''",
-                         nullptr, nullptr, nullptr), SQLITE_OK);
+    QCOMPARE(sqlite3_exec(raw, "UPDATE page_search_content SET c4='corrupted' WHERE c4<>''", nullptr, nullptr, nullptr),
+             SQLITE_OK);
     QVERIFY_THROWS_EXCEPTION(std::runtime_error,
-        interchange::export_json(reader, path(temporary.filePath("refuse-corrupt-index"))));
+                             interchange::export_json(reader, path(temporary.filePath("refuse-corrupt-index"))));
     QCOMPARE(encode_document(writer.load_page(page.document.id).document), encode_document(page.document));
 }
 

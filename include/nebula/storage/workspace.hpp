@@ -1,13 +1,13 @@
 #pragma once
 
+#include "nebula/attachments/files.hpp"
+#include "nebula/core/database.hpp"
+#include "nebula/storage/errors.hpp"
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
 #include <unordered_set>
-#include "nebula/attachments/files.hpp"
-#include "nebula/core/database.hpp"
-#include "nebula/storage/errors.hpp"
 
 struct sqlite3;
 
@@ -23,7 +23,9 @@ struct LinkEdge {
     std::string source_context, label, unresolved_name, database_scope;
     std::int64_t position = 0, run_index = 0;
 };
-struct DeletedBlockGroup { std::string id, page_id, page_title, label; };
+struct DeletedBlockGroup {
+    std::string id, page_id, page_title, label;
+};
 enum class ReferenceState { Available, Unresolved, PageTrashed, DatabaseTrashed, Unavailable };
 struct ReferenceTarget {
     ReferenceState state = ReferenceState::Unavailable;
@@ -41,13 +43,20 @@ struct AttachmentInfo {
     std::int64_t size = 0;
     bool image = false;
 };
-struct ImportedAttachment { AttachmentInfo file; std::string card, following; };
+struct ImportedAttachment {
+    AttachmentInfo file;
+    std::string card, following;
+};
 struct AttachmentIssue {
     std::string path, attachment_id, message;
     bool removable = false, prevents_backup = false;
 };
-struct SearchResult { std::string page_id, block_id, title, database_name, context; };
-struct InterchangeReport { std::vector<std::string> pages, warnings; };
+struct SearchResult {
+    std::string page_id, block_id, title, database_name, context;
+};
+struct InterchangeReport {
+    std::vector<std::string> pages, warnings;
+};
 // Lightweight rows for pickers and lists; no block trees are decoded.
 struct PageSummary {
     std::string id, title, database_id, database_name;
@@ -58,8 +67,14 @@ struct LinkTargetRow {
     std::string id, label, page_id, page_title, database_name;
     bool heading = false;
 };
-struct PurgeReport { std::size_t databases = 0, pages = 0, fragments = 0, files = 0; bool compacted = false; };
-struct IntegrityReport { std::vector<std::string> problems; bool ok() const { return problems.empty(); } };
+struct PurgeReport {
+    std::size_t databases = 0, pages = 0, fragments = 0, files = 0;
+    bool compacted = false;
+};
+struct IntegrityReport {
+    std::vector<std::string> problems;
+    bool ok() const { return problems.empty(); }
+};
 
 class Workspace;
 // A managed file being copied. prepare/commit run on the database thread;
@@ -71,6 +86,7 @@ public:
     ~StagedAttachment();
     void copy(const files::Progress& progress = {});
     const std::string& identity() const { return identity_; }
+
 private:
     friend class Workspace;
     StagedAttachment() = default;
@@ -104,8 +120,8 @@ public:
     void delete_property(const std::string& id);
     std::vector<PropertyDefinition> properties(const std::string& database) const;
     PageRecord create_page(const std::string& database, const std::string& title,
-                          const std::map<std::string,PropertyValue>& properties = {},
-                          const std::vector<Block>& initial_blocks = {});
+                           const std::map<std::string, PropertyValue>& properties = {},
+                           const std::vector<Block>& initial_blocks = {});
     // Adds a missing Entry date property and the dated page in one transaction.
     PageRecord create_dated_entry(const std::string& database, const std::string& date);
     PageRecord load_page(const std::string& id) const;
@@ -118,8 +134,7 @@ public:
     void save_page(PageRecord& page, const std::unordered_set<std::string>& absorbed = {});
     // Move committed records. Flush pending edits before either workspace move.
     void move_page(PageRecord& page, const std::string& database);
-    BlockTransfer transfer_blocks(const PageRecord& source, const PageRecord& destination,
-                                  const std::string& block);
+    BlockTransfer transfer_blocks(const PageRecord& source, const PageRecord& destination, const std::string& block);
     void set_transfer_applied(BlockTransfer& transfer, bool applied);
     ReferenceTarget resolve_reference(const Reference& reference) const;
     std::optional<std::string> reference_label(const Reference& reference) const;
@@ -128,7 +143,7 @@ public:
     StagedAttachment prepare_attachment(const std::filesystem::path& source, bool image);
     ImportedAttachment commit_attachment(PageRecord& page, const std::string& after, StagedAttachment& staged);
     ImportedAttachment import_attachment(PageRecord& page, const std::string& after,
-        const std::filesystem::path& source, bool image);
+                                         const std::filesystem::path& source, bool image);
     std::optional<AttachmentInfo> attachment(const std::string& id) const;
     std::vector<AttachmentInfo> attachments() const;
     std::filesystem::path attachment_path(const std::string& id) const;
@@ -153,7 +168,7 @@ public:
     std::vector<LinkEdge> outgoing_links(const std::string& page) const;
     void rebuild_links();
     std::vector<SearchResult> search(const std::string& text, const std::string& database = {},
-                                   const std::vector<LinkFilter>& filters = {}) const;
+                                     const std::vector<LinkFilter>& filters = {}) const;
     void rebuild_search();
     // Full SQLite and relationship check. Opening runs it after migrations and
     // when the previous check is older than a week.
@@ -163,17 +178,16 @@ public:
 
 private:
     friend struct WorkspaceInternals;
-    Workspace(std::filesystem::path directory, std::string id,
-              std::unique_ptr<sqlite3, DatabaseCloser> database);
+    Workspace(std::filesystem::path directory, std::string id, std::unique_ptr<sqlite3, DatabaseCloser> database);
     std::filesystem::path directory_;
     std::string id_;
     std::unique_ptr<sqlite3, DatabaseCloser> database_;
     std::shared_ptr<files::SessionLock> session_;
-    void replace_transfer_documents(const Page& source, std::int64_t source_revision,
-                                    const Page& destination, std::int64_t destination_revision);
+    void replace_transfer_documents(const Page& source, std::int64_t source_revision, const Page& destination,
+                                    std::int64_t destination_revision);
     PageRecord create_page_in_transaction(const std::string& database, const std::string& title,
-        const std::map<std::string,PropertyValue>& properties, const std::vector<Block>& blocks,
-        const std::string& identity = {});
+                                          const std::map<std::string, PropertyValue>& properties,
+                                          const std::vector<Block>& blocks, const std::string& identity = {});
     void save_page_in_transaction(PageRecord& page, const std::unordered_set<std::string>& absorbed = {});
     std::vector<AttachmentIssue> audit_attachments_unlocked() const;
 };

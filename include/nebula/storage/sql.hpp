@@ -1,22 +1,33 @@
 #pragma once
 // Narrow SQLite helpers shared by storage and the interchange adapters. This is
 // an internal module API: application and desktop code use Workspace instead.
-#include <sqlite3.h>
+#include "nebula/storage/errors.hpp"
 #include <cstdint>
 #include <memory>
+#include <sqlite3.h>
 #include <string>
-#include "nebula/storage/errors.hpp"
 
 namespace nebula::sql {
 
 inline ErrorKind kind_of(int code)
 {
     switch (code & 0xff) {
-    case SQLITE_BUSY: case SQLITE_LOCKED: return ErrorKind::Busy;
-    case SQLITE_CONSTRAINT: case SQLITE_MISMATCH: case SQLITE_RANGE: case SQLITE_TOOBIG: return ErrorKind::Invalid;
-    case SQLITE_CORRUPT: case SQLITE_NOTADB: return ErrorKind::Corrupt;
-    case SQLITE_CANTOPEN: case SQLITE_NOTFOUND: return ErrorKind::Unavailable;
-    default: return ErrorKind::Io;
+    case SQLITE_BUSY:
+    case SQLITE_LOCKED:
+        return ErrorKind::Busy;
+    case SQLITE_CONSTRAINT:
+    case SQLITE_MISMATCH:
+    case SQLITE_RANGE:
+    case SQLITE_TOOBIG:
+        return ErrorKind::Invalid;
+    case SQLITE_CORRUPT:
+    case SQLITE_NOTADB:
+        return ErrorKind::Corrupt;
+    case SQLITE_CANTOPEN:
+    case SQLITE_NOTFOUND:
+        return ErrorKind::Unavailable;
+    default:
+        return ErrorKind::Io;
     }
 }
 
@@ -96,7 +107,8 @@ public:
     std::string text(int column) const
     {
         const auto* value = sqlite3_column_text(stmt_.get(), column);
-        return value ? std::string(reinterpret_cast<const char*>(value), sqlite3_column_bytes(stmt_.get(), column)) : "";
+        return value ? std::string(reinterpret_cast<const char*>(value), sqlite3_column_bytes(stmt_.get(), column))
+                     : "";
     }
     std::int64_t number(int column) const { return sqlite3_column_int64(stmt_.get(), column); }
     double real(int column) const { return sqlite3_column_double(stmt_.get(), column); }
@@ -137,7 +149,8 @@ public:
         if (savepoint_.empty())
             sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
         else
-            sqlite3_exec(db_, ("ROLLBACK TO " + savepoint_ + "; RELEASE " + savepoint_).c_str(), nullptr, nullptr, nullptr);
+            sqlite3_exec(db_, ("ROLLBACK TO " + savepoint_ + "; RELEASE " + savepoint_).c_str(), nullptr, nullptr,
+                         nullptr);
     }
     void commit()
     {
@@ -146,7 +159,10 @@ public:
     }
 };
 
-inline std::string id(sqlite3* db) { return scalar(db, "SELECT lower(hex(randomblob(16)))"); }
+inline std::string id(sqlite3* db)
+{
+    return scalar(db, "SELECT lower(hex(randomblob(16)))");
+}
 
 inline void changed(sqlite3* db)
 {

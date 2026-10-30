@@ -1,16 +1,19 @@
 #pragma once
+#include "nebula/core/position.hpp"
 #include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
-#include "nebula/core/position.hpp"
 
 namespace nebula {
 
 // Window-lifetime Back/Forward history of page positions.
 class NavigationHistory {
 public:
-    struct Entry { std::string page; EditorPosition editor; };
+    struct Entry {
+        std::string page;
+        EditorPosition editor;
+    };
     explicit NavigationHistory(std::size_t limit = 200) : limit_(limit) {}
     // Records the departing position unless nothing changed. Clears Forward.
     bool record(const Entry& previous, const Entry& current);

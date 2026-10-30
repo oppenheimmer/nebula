@@ -1,8 +1,8 @@
 #pragma once
+#include "nebula/attachments/files.hpp"
 #include <filesystem>
 #include <map>
 #include <string>
-#include "nebula/attachments/files.hpp"
 
 namespace nebula::files {
 // Relative path ("nebula.sqlite3", "attachments/<id>") to the digest computed while copying.

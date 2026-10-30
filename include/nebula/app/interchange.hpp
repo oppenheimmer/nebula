@@ -9,7 +9,6 @@ struct InterchangeResult {
 };
 // UI adapters select paths and present reports; this service routes operations
 // and owns the imported workspace until the caller gives it to a new window.
-InterchangeResult run_interchange(Workspace& workspace, InterchangeAction action,
-    const std::filesystem::path& source, const std::filesystem::path& destination,
-    const std::string& database = {});
+InterchangeResult run_interchange(Workspace& workspace, InterchangeAction action, const std::filesystem::path& source,
+                                  const std::filesystem::path& destination, const std::string& database = {});
 } // namespace nebula

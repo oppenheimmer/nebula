@@ -1,6 +1,6 @@
-#include "nebula/qt/utf8.hpp"
 #include "nebula/app/pasted_link_preview.hpp"
 #include "nebula/editor/page_editor.hpp"
+#include "nebula/qt/utf8.hpp"
 #include <QApplication>
 #include <QEvent>
 #include <QHBoxLayout>
@@ -157,12 +157,15 @@ void PastedLinkPreview::insert_ready()
         const auto id = QUuid::createUuid().toString(QUuid::Id128);
         Block preview{id.toStdString(), source->parent_id, BlockKind::Paragraph, {}};
         if (!ready_->title.isEmpty()) {
-            Run title; title.text = utf8::encode(ready_->title); title.bold = true;
+            Run title;
+            title.text = utf8::encode(ready_->title);
+            title.bold = true;
             preview.runs.push_back(std::move(title));
         }
         if (!ready_->excerpt.isEmpty() && ready_->excerpt != ready_->title) {
             const auto separator = preview.runs.empty() ? QString{} : QString(QChar::LineSeparator);
-            Run excerpt; excerpt.text = utf8::encode(separator + ready_->excerpt);
+            Run excerpt;
+            excerpt.text = utf8::encode(separator + ready_->excerpt);
             preview.runs.push_back(std::move(excerpt));
         }
         page.blocks.insert(after, std::move(preview));

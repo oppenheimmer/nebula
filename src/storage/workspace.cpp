@@ -1,16 +1,16 @@
 #include "nebula/storage/workspace.hpp"
 
-#include <sqlite3.h>
-#include <QDateTime>
-#include <functional>
-#include <stdexcept>
-#include <utility>
 #include "nebula/attachments/files.hpp"
 #include "nebula/format/codec.hpp"
 #include "nebula/storage/internals.hpp"
 #include "nebula/storage/sql.hpp"
 #include "records_internal.hpp"
 #include "schema.hpp"
+#include <QDateTime>
+#include <functional>
+#include <sqlite3.h>
+#include <stdexcept>
+#include <utility>
 
 namespace nebula {
 namespace {
@@ -104,7 +104,10 @@ void migrate_to_7(sqlite3* raw)
             image INTEGER NOT NULL CHECK(image IN(0,1)));
     )SQL");
 }
-void migrate_to_8(sqlite3* raw) { storage_detail::create_search(raw); }
+void migrate_to_8(sqlite3* raw)
+{
+    storage_detail::create_search(raw);
+}
 void migrate_to_9(sqlite3*) {}
 void migrate_to_10(sqlite3* raw)
 {
@@ -122,10 +125,13 @@ void migrate_to_10(sqlite3* raw)
     storage_detail::create_search(raw);
 }
 
-struct Migration { int to; void (*apply)(sqlite3*); };
-const Migration migrations[] = {
-    {2, migrate_to_2}, {3, migrate_to_3}, {4, migrate_to_4}, {5, migrate_to_5}, {6, migrate_to_6},
-    {7, migrate_to_7}, {8, migrate_to_8}, {9, migrate_to_9}, {10, migrate_to_10}};
+struct Migration {
+    int to;
+    void (*apply)(sqlite3*);
+};
+const Migration migrations[] = {{2, migrate_to_2}, {3, migrate_to_3}, {4, migrate_to_4},
+                                {5, migrate_to_5}, {6, migrate_to_6}, {7, migrate_to_7},
+                                {8, migrate_to_8}, {9, migrate_to_9}, {10, migrate_to_10}};
 static_assert(sizeof(migrations) / sizeof(migrations[0]) == schema::Current - schema::Minimum,
               "Every supported version needs one migration step");
 
@@ -138,12 +144,15 @@ std::vector<std::string> integrity_problems(sqlite3* raw)
             problems.push_back("SQLite integrity: " + check.text(0));
     sql::Statement relationships(raw, "PRAGMA foreign_key_check");
     while (relationships.row())
-        problems.push_back("Relationship from " + relationships.text(0) + " to " + relationships.text(2) + " is missing");
+        problems.push_back("Relationship from " + relationships.text(0) + " to " + relationships.text(2) +
+                           " is missing");
     return problems;
 }
 void record_check(sqlite3* raw)
 {
-    sql::Statement stamp(raw, "INSERT INTO maintenance(name,value) VALUES('integrity_checked_at',strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(name) DO UPDATE SET value=excluded.value");
+    sql::Statement stamp(
+        raw, "INSERT INTO maintenance(name,value) VALUES('integrity_checked_at',strftime('%Y-%m-%dT%H:%M:%fZ','now')) "
+             "ON CONFLICT(name) DO UPDATE SET value=excluded.value");
     stamp.done();
 }
 bool check_due(sqlite3* raw)
@@ -163,17 +172,24 @@ void DatabaseCloser::operator()(sqlite3* database) const noexcept
         sqlite3_close(database);
 }
 
-Workspace::Workspace(std::filesystem::path directory, std::string id,
-                     std::unique_ptr<sqlite3, DatabaseCloser> database)
-    : directory_(std::move(directory)), id_(std::move(id)), database_(std::move(database)) {}
+Workspace::Workspace(std::filesystem::path directory, std::string id, std::unique_ptr<sqlite3, DatabaseCloser> database)
+    : directory_(std::move(directory)), id_(std::move(id)), database_(std::move(database))
+{
+}
 
 int WorkspaceInternals::schema_version(sqlite3* database)
 {
     return std::stoi(sql::scalar(database, "PRAGMA user_version"));
 }
 
-int WorkspaceInternals::current_schema() { return schema::Current; }
-int WorkspaceInternals::interchange_contract() { return schema::InterchangeContract; }
+int WorkspaceInternals::current_schema()
+{
+    return schema::Current;
+}
+int WorkspaceInternals::interchange_contract()
+{
+    return schema::InterchangeContract;
+}
 
 void WorkspaceInternals::rebuild_recovery_members(sqlite3* database)
 {
@@ -195,9 +211,11 @@ Workspace Workspace::open(const std::filesystem::path& directory)
     const bool existed = fs::exists(filename) || fs::is_symlink(filename);
     // A backup or export changes meaning once edited; refuse it before writing.
     if (fs::exists(root / "backup-manifest.json"))
-        throw StorageError(ErrorKind::Unsupported, "This folder is a Nebula backup. Restore it into a new folder instead of opening it");
+        throw StorageError(ErrorKind::Unsupported,
+                           "This folder is a Nebula backup. Restore it into a new folder instead of opening it");
     if (!existed && (fs::exists(root / "workspace.json") || fs::exists(root / "CONVERSION.txt")))
-        throw StorageError(ErrorKind::Unsupported, "This folder is a Nebula export. Import it instead of opening it as a workspace");
+        throw StorageError(ErrorKind::Unsupported,
+                           "This folder is a Nebula export. Import it instead of opening it as a workspace");
     if (!fs::exists(root)) {
         fs::create_directories(root.parent_path());
         files::make_private_directory(root);
@@ -211,12 +229,21 @@ Workspace Workspace::open(const std::filesystem::path& directory)
         throw std::runtime_error("The database location must be a regular file");
     std::shared_ptr<files::SessionLock> session;
     bool created_file = false;
-    if (!existed) { files::create_private_file(filename); created_file = true; }
+    if (!existed) {
+        files::create_private_file(filename);
+        created_file = true;
+    }
     sqlite3* raw = nullptr;
-    const int opened = sqlite3_open_v2(filename.u8string().c_str(), &raw,
-                                       SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW, nullptr);
+    const int opened =
+        sqlite3_open_v2(filename.u8string().c_str(), &raw, SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOFOLLOW, nullptr);
     std::unique_ptr<sqlite3, DatabaseCloser> database(raw);
-    auto discard = [&] { if (created_file) { database.reset(); std::error_code ignored; fs::remove(filename, ignored); } };
+    auto discard = [&] {
+        if (created_file) {
+            database.reset();
+            std::error_code ignored;
+            fs::remove(filename, ignored);
+        }
+    };
     if (opened != SQLITE_OK) {
         const std::string message = raw ? sqlite3_errmsg(raw) : "allocation failed";
         discard();
@@ -234,10 +261,12 @@ Workspace Workspace::open(const std::filesystem::path& directory)
         execute(raw, "PRAGMA synchronous=FULL");
         schema::require_fts5(raw);
         // Identify the file before creating the session lock beside it.
-        const bool blank = sql::scalar(raw, "PRAGMA application_id") == "0" && sql::scalar(raw, "PRAGMA user_version") == "0"
-            && sql::scalar(raw, "SELECT count(*) FROM sqlite_schema") == "0";
+        const bool blank = sql::scalar(raw, "PRAGMA application_id") == "0" &&
+                           sql::scalar(raw, "PRAGMA user_version") == "0" &&
+                           sql::scalar(raw, "SELECT count(*) FROM sqlite_schema") == "0";
         if (!blank && sql::scalar(raw, "PRAGMA application_id") != std::to_string(schema::ApplicationId))
-            throw StorageError(ErrorKind::Unsupported, "This folder contains a database that is not a Nebula workspace");
+            throw StorageError(ErrorKind::Unsupported,
+                               "This folder contains a database that is not a Nebula workspace");
         session = files::acquire_session(root);
         execute(raw, "BEGIN IMMEDIATE");
         try {
@@ -251,9 +280,11 @@ Workspace Workspace::open(const std::filesystem::path& directory)
                 execute(raw, "INSERT INTO workspace_meta VALUES (1, lower(hex(randomblob(16))))");
                 version = "1";
             } else if (application != std::to_string(schema::ApplicationId)) {
-                throw StorageError(ErrorKind::Unsupported, "This folder contains a database that is not a Nebula workspace");
+                throw StorageError(ErrorKind::Unsupported,
+                                   "This folder contains a database that is not a Nebula workspace");
             } else if (!schema::supported(version)) {
-                throw StorageError(ErrorKind::Unsupported, "This workspace format is not supported by this version of Nebula");
+                throw StorageError(ErrorKind::Unsupported,
+                                   "This workspace format is not supported by this version of Nebula");
             }
             schema::check_objects(raw);
             id = sql::scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
@@ -290,11 +321,18 @@ Workspace Workspace::open(const std::filesystem::path& directory)
         if (!migrated && check_due(raw)) {
             execute(raw, "BEGIN");
             std::vector<std::string> problems;
-            try { problems = integrity_problems(raw); } catch (...) { sqlite3_exec(raw, "ROLLBACK", nullptr, nullptr, nullptr); throw; }
+            try {
+                problems = integrity_problems(raw);
+            } catch (...) {
+                sqlite3_exec(raw, "ROLLBACK", nullptr, nullptr, nullptr);
+                throw;
+            }
             execute(raw, "COMMIT");
             if (!problems.empty())
                 throw StorageError(ErrorKind::Corrupt, "Workspace integrity check failed: " + problems.front());
-            sql::Transaction stamp(raw); record_check(raw); stamp.commit();
+            sql::Transaction stamp(raw);
+            record_check(raw);
+            stamp.commit();
         }
     } catch (...) {
         discard();
@@ -310,13 +348,24 @@ IntegrityReport Workspace::check_integrity()
     IntegrityReport report;
     {
         sql::execute(database_.get(), "BEGIN");
-        try { report.problems = integrity_problems(database_.get()); }
-        catch (...) { sqlite3_exec(database_.get(), "ROLLBACK", nullptr, nullptr, nullptr); throw; }
+        try {
+            report.problems = integrity_problems(database_.get());
+        } catch (...) {
+            sqlite3_exec(database_.get(), "ROLLBACK", nullptr, nullptr, nullptr);
+            throw;
+        }
         sql::execute(database_.get(), "COMMIT");
     }
-    try { schema::check_objects(database_.get(), schema::current_objects()); }
-    catch (const std::exception& error) { report.problems.push_back(error.what()); }
-    if (report.ok()) { sql::Transaction stamp(database_.get()); record_check(database_.get()); stamp.commit(); }
+    try {
+        schema::check_objects(database_.get(), schema::current_objects());
+    } catch (const std::exception& error) {
+        report.problems.push_back(error.what());
+    }
+    if (report.ok()) {
+        sql::Transaction stamp(database_.get());
+        record_check(database_.get());
+        stamp.commit();
+    }
     return report;
 }
 

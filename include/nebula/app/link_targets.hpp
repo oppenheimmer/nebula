@@ -7,7 +7,11 @@ namespace nebula {
 class LinkTargets {
 public:
     explicit LinkTargets(const Workspace& workspace) : workspace_(workspace) {}
-    void invalidate() { loaded_ = false; rows_.clear(); }
+    void invalidate()
+    {
+        loaded_ = false;
+        rows_.clear();
+    }
     // Candidates with the current page replaced by its pending document/title.
     std::vector<LinkTargetRow> rows(const PageRecord* current = nullptr, const std::string& current_title = {},
                                     const std::string& current_database = {});

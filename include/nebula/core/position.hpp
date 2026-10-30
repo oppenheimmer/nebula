@@ -9,7 +9,7 @@ struct EditorPosition {
 };
 inline bool operator==(const EditorPosition& a, const EditorPosition& b)
 {
-    return a.block == b.block && a.offset == b.offset && a.anchor_block == b.anchor_block
-        && a.anchor_offset == b.anchor_offset && a.scroll == b.scroll;
+    return a.block == b.block && a.offset == b.offset && a.anchor_block == b.anchor_block &&
+           a.anchor_offset == b.anchor_offset && a.scroll == b.scroll;
 }
 } // namespace nebula

@@ -9,7 +9,8 @@ struct WorkspaceInternals {
     static sqlite3* connection(const Workspace& workspace) { return workspace.database_.get(); }
     static void set_identity(Workspace& workspace, std::string id) { workspace.id_ = std::move(id); }
     static PageRecord create_page_in_transaction(Workspace& workspace, const std::string& database,
-        const std::string& title, const std::vector<Block>& blocks, const std::string& identity)
+                                                 const std::string& title, const std::vector<Block>& blocks,
+                                                 const std::string& identity)
     {
         return workspace.create_page_in_transaction(database, title, {}, blocks, identity);
     }

@@ -61,7 +61,10 @@ int main(int argc, char** argv)
                 }
             };
             if (mode.find("pending") != std::string::npos)
-                workspace.transaction([&] { edit(); pause_at_boundary(); });
+                workspace.transaction([&] {
+                    edit();
+                    pause_at_boundary();
+                });
             else {
                 edit();
                 pause_at_boundary();

@@ -2,8 +2,8 @@
 #include "nebula/interchange/interchange.hpp"
 
 namespace nebula {
-InterchangeResult run_interchange(Workspace& workspace, InterchangeAction action,
-    const std::filesystem::path& source, const std::filesystem::path& destination, const std::string& database)
+InterchangeResult run_interchange(Workspace& workspace, InterchangeAction action, const std::filesystem::path& source,
+                                  const std::filesystem::path& destination, const std::string& database)
 {
     switch (action) {
     case InterchangeAction::ImportMarkdown:

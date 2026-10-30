@@ -7,7 +7,10 @@
 #include <string>
 
 namespace nebula::files {
-struct Digest { std::int64_t size = 0; std::string sha256; };
+struct Digest {
+    std::int64_t size = 0;
+    std::string sha256;
+};
 // Reports copied bytes; return false to cancel. Called from the copying thread.
 using Progress = std::function<bool(std::int64_t copied, std::int64_t total)>;
 // POSIX adapter; BSD validation is pending. Managed files are immutable and regular.
@@ -32,6 +35,7 @@ public:
     ~WorkspaceLock();
     WorkspaceLock(const WorkspaceLock&) = delete;
     WorkspaceLock& operator=(const WorkspaceLock&) = delete;
+
 private:
     int descriptor_ = -1;
 };

@@ -3,8 +3,8 @@
 #include "nebula/core/document.hpp"
 #include "nebula/core/position.hpp"
 
-#include <QTextEdit>
 #include <QElapsedTimer>
+#include <QTextEdit>
 #include <functional>
 #include <map>
 #include <unordered_set>
@@ -42,7 +42,8 @@ public:
     void set_block_kind(BlockKind kind);
     void toggle_checked();
     void insert_reference(const QString& label, ReferenceKind kind, const QString& target_id, bool custom_label = true);
-    void insert_unresolved_reference(const QString& label, const QString& name, const QString& database_scope, bool custom_label = true);
+    void insert_unresolved_reference(const QString& label, const QString& name, const QString& database_scope,
+                                     bool custom_label = true);
     void set_reference_label_resolver(std::function<std::optional<std::string>(const Reference&)> resolver);
     QString page_title() const;
     void set_page_title(const QString& title);
@@ -111,7 +112,7 @@ private:
     QString fallback_title_;
     std::function<std::optional<std::string>(const Reference&)> label_resolver_;
     std::function<std::optional<std::string>(const std::string&)> attachment_resolver_;
-    std::map<std::pair<int,std::string>,std::optional<std::string>> external_labels_;
+    std::map<std::pair<int, std::string>, std::optional<std::string>> external_labels_;
     std::unordered_set<std::string> default_targets_;
     std::unordered_set<std::string> absorbed_;
     QRectF painted_active_;

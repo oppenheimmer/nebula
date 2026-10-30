@@ -1,5 +1,5 @@
-#include "nebula/core/document.hpp"
 #include "nebula/core/database.hpp"
+#include "nebula/core/document.hpp"
 #include "nebula/core/wiki.hpp"
 
 #include <functional>
@@ -17,19 +17,23 @@ void check(bool condition, const std::string& description)
 
 void rejects(const std::function<void()>& action)
 {
-    try { action(); }
-    catch (const std::invalid_argument&) { return; }
+    try {
+        action();
+    } catch (const std::invalid_argument&) {
+        return;
+    }
     throw std::runtime_error("Expected invalid_argument");
 }
 
 Page tree()
 {
-    return {"page", {{"a", "", BlockKind::Paragraph, {{"A"}}},
-                     {"a1", "a", BlockKind::Paragraph, {{"child A"}}},
-                     {"a2", "a", BlockKind::Paragraph, {{"second child A"}}},
-                     {"b", "", BlockKind::Paragraph, {{"B"}}},
-                     {"b1", "b", BlockKind::Paragraph, {{"child B"}}},
-                     {"c", "", BlockKind::Paragraph, {{"C"}}}}};
+    return {"page",
+            {{"a", "", BlockKind::Paragraph, {{"A"}}},
+             {"a1", "a", BlockKind::Paragraph, {{"child A"}}},
+             {"a2", "a", BlockKind::Paragraph, {{"second child A"}}},
+             {"b", "", BlockKind::Paragraph, {{"B"}}},
+             {"b1", "b", BlockKind::Paragraph, {{"child B"}}},
+             {"c", "", BlockKind::Paragraph, {{"C"}}}}};
 }
 
 std::string ids(const Page& page)
@@ -44,189 +48,250 @@ std::string ids(const Page& page)
 int main()
 {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
-        {"sample and UTF-8 content", [] {
-            auto page = sample_page(); validate(page);
-            check(page.blocks[6].runs.front().text == u8"日本語のメモ · café · 🌙 · العربية", "UTF-8 changed");
-            check(depth(page, "child") == 1, "Incorrect nested depth");
-        }},
-        {"page and block identity requirements", [] {
-            rejects([] { validate({"", {}}); });
-            auto page = tree(); page.blocks[1].id = "a";
-            rejects([&] { validate(page); });
-            page = tree(); page.blocks[1].id.clear();
-            rejects([&] { validate(page); });
-        }},
-        {"missing parents, cycles and invalid preorder", [] {
-            auto page = tree(); page.blocks[1].parent_id = "missing";
-            rejects([&] { validate(page); });
-            page = tree(); page.blocks[0].parent_id = "a1";
-            rejects([&] { validate(page); });
-            page = tree(); page.blocks[5].parent_id = "a";
-            rejects([&] { validate(page); });
-        }},
-        {"paragraph and resolved reference invariants", [] {
-            auto page = tree(); page.blocks[0].runs[0].text = "two\nparagraphs";
-            rejects([&] { validate(page); });
-            page = tree(); page.blocks[0].runs[0].reference = Reference{ReferenceKind::Page, ""};
-            rejects([&] { validate(page); });
-            page = tree(); page.blocks[0].kind = BlockKind::Attachment;
-            rejects([&] { validate(page); });
-            page = tree(); page.blocks[0].runs[0].asset = Asset{true, ""};
-            rejects([&] { validate(page); });
-        }},
-        {"move whole subtrees down and up", [] {
-            auto page = tree();
-            check(move_subtree(page, "a", 1), "Move failed");
-            check(ids(page) == "b,b1,a,a1,a2,c,", "Child order lost");
-            check(move_subtree(page, "a", -1), "Reverse move failed");
-            check(ids(page) == ids(tree()), "Move failed to restore order");
-        }},
-        {"sibling move boundaries", [] {
-            auto page = tree();
-            check(!move_subtree(page, "a", -1), "Moved past beginning");
-            check(!move_subtree(page, "c", 1), "Moved past end");
-            check(!move_subtree(page, "a1", -1), "Moved outside parent");
-            check(!move_subtree(page, "a2", 1), "Moved outside parent");
-            rejects([&] { move_subtree(page, "a", 0); });
-            rejects([&] { move_subtree(page, "unknown", 1); });
-        }},
-        {"indent preserves descendants", [] {
-            auto page = tree();
-            check(indent(page, "b"), "Indent failed");
-            check(page.blocks[3].parent_id == "a", "Incorrect new parent");
-            check(page.blocks[4].parent_id == "b", "Descendant lost");
-            check(depth(page, "b1") == 2, "Incorrect descendant depth");
-            check(!indent(page, "a"), "Indented without a preceding sibling");
-        }},
-        {"outdent moves after former parent's remaining children", [] {
-            auto page = tree();
-            check(outdent(page, "a1"), "Outdent failed");
-            check(ids(page) == "a,a2,a1,b,b1,c,", "Outdented into wrong position");
-            check(page.blocks[2].parent_id.empty(), "New parent not root");
-            check(!outdent(page, "b"), "Outdented root");
-        }},
-        {"stable reference survives moves", [] {
-            auto page = tree();
-            page.blocks.back().runs[0].reference = Reference{ReferenceKind::Block, "a1"};
-            move_subtree(page, "a", 1);
-            indent(page, "a");
-            check(page.blocks.back().runs[0].reference->target_id == "a1", "Reference retargeted");
-        }},
-        {"cross-page transfer preserves subtree and reference identities", [] {
-            auto source=tree(); Page destination{"other",{{"target","",BlockKind::Paragraph,{}}}};
-            source.blocks[1].runs={{"Self",true,false,Reference{ReferenceKind::Block,"a1"}}};
-            transfer_subtree(source,destination,"a","unused");
-            check(ids(source)=="b,b1,c,","Source retained transferred blocks");
-            check(ids(destination)=="target,a,a1,a2,","Subtree order changed");
-            check(destination.blocks[2].parent_id=="a","Child detached");
-            check(destination.blocks[2].runs[0].reference->target_id=="a1","Internal reference retargeted");
-            transfer_subtree(source,destination,"b1","unused");
-            check(destination.blocks.back().parent_id.empty(),"Transferred nested root retained old parent");
-        }},
-        {"cross-page transfer leaves an editable source and rejects collisions atomically", [] {
-            Page source{"source",{{"only","",BlockKind::Paragraph,{{"Keep"}}}}};
-            Page destination{"destination",{{"there","",BlockKind::Paragraph,{}}}};
-            rejects([&]{transfer_subtree(source,destination,"only","there");});
-            check(ids(source)=="only," && ids(destination)=="there,","Invalid transfer changed pages");
-            rejects([&]{transfer_subtree(source,source,"only","fresh");});
-            auto duplicate=destination; duplicate.blocks[0].id="only";
-            rejects([&]{transfer_subtree(source,duplicate,"only","fresh");});
-            rejects([&]{transfer_subtree(source,destination,"missing","fresh");});
-            transfer_subtree(source,destination,"only","fresh");
-            check(ids(source)=="fresh," && source.blocks[0].runs.empty(),"Empty source lacks paragraph");
-            check(ids(destination)=="there,only,","Transferred identity lost");
-        }},
-        {"wiki links parse explicit targets, labels and escaping", [] {
-            auto link=parse_wiki_link(u8"[[日本語#会議|notes]]");
-            check(link && link->page==u8"日本語" && link->heading==u8"会議" && link->label=="notes" && link->custom_label,"Unicode heading/label changed");
-            link=parse_wiki_link("[[#^stable-id]]"); check(link && link->page.empty() && link->block=="stable-id","Current-page block target lost");
-            link=parse_wiki_link(R"([[A\#B\|C\\D\[E\]|a\|b]])");
-            check(link && link->page=="A#B|C\\D[E]" && link->label=="a|b","Escapes changed target or label");
-            link=parse_wiki_link("[[ Page title ]]"); check(link && link->page=="Page title" && !link->custom_label,"Page whitespace changed");
-        }},
-        {"invalid wiki input stays ordinary text", [] {
-            for (const auto* text:{"[[]]","[[Page|]]","[[Page#]]","[[Page#^]]","[[Page#A#B]]","[[Page|a|b]]","[[Page\\q]]","[[Page]","[[Page\nname]]","[[Page[part]]"})
-                check(!parse_wiki_link(text),std::string("Accepted invalid wiki link: ")+text);
-        }},
-        {"block reference titles avoid recursive default labels", [] {
-            Block heading{"heading","",BlockKind::Heading,{{"See "},{"cached self",false,false,Reference{ReferenceKind::Block,"heading","","",false}},
-                {" and custom",false,false,Reference{ReferenceKind::Block,"heading"}}}};
-            check(reference_title(heading)=="See [link] and custom","Default reference label expanded recursively");
-        }},
-        {"managed cards insert after a subtree with a following paragraph", [] {
-            auto page=tree(); insert_attachment(page,"a","file-id","notes.txt",false,"card","following");
-            check(ids(page)=="a,a1,a2,card,following,b,b1,c,","Card split the existing subtree");
-            check(page.blocks[3].attachment_id=="file-id" && page.blocks[3].kind==BlockKind::Attachment,"Managed file identity lost");
-            check(page.blocks[4].kind==BlockKind::Paragraph && page.blocks[4].attachment_id.empty(),"Following paragraph invalid");
-            const auto before=ids(page); rejects([&]{insert_attachment(page,"a","file","image.png",true,"card","other");});
-            check(ids(page)==before,"Invalid insertion changed the tree");
-            page.blocks[3].kind=BlockKind::Paragraph; rejects([&]{validate(page);});
-        }},
-        {"long-page fixture", [] {
-            const auto page = long_page(1000); validate(page);
-            check(page.blocks.size() == 1000, "Wrong fixture size");
-            check(page.blocks.back().id == "block-999", "Unstable fixture identity");
-            rejects([] { long_page(0); });
-        }},
-        {"calendar dates remain date-only values", [] {
-            check(valid_date("2024-02-29"),"Leap day rejected");
-            check(!valid_date("1900-02-29") && valid_date("2000-02-29"),"Gregorian leap rule incorrect");
-            check(!valid_date("2026-02-30") && !valid_date("0000-01-01"),"Invalid date accepted");
-            validate_value(PropertyKind::Date,Date{"2026-10-29"});
-            rejects([]{ validate_value(PropertyKind::Date,std::string("2026-10-29")); });
-        }},
-        {"properties enforce declared types", [] {
-            validate_value(PropertyKind::Number,2.0);
-            validate_value(PropertyKind::Checkbox,false);
-            rejects([]{ validate_value(PropertyKind::Number,std::string("2")); });
-            rejects([]{ validate_value(PropertyKind::Tags,std::vector<std::string>{"a","a"}); });
-            rejects([]{ validate_value(PropertyKind(99),{}); });
-        }},
-        {"views sort numbers and combine typed filters", [] {
-            PageRecord a{{"a",{}},"db","Ten",{{"score",10.0},{"done",true}},0,false};
-            PageRecord b{{"b",{}},"db","Two",{{"score",2.0},{"done",false}},0,false};
-            View view; view.sort_property="score";
-            auto sorted=apply_view({a,b},view); check(sorted[0].title=="Two","Numbers sorted as text");
-            view.filters={{"score",Comparison::Greater,1.0},{"done",Comparison::Equal,true}};
-            auto filtered=apply_view({a,b},view); check(filtered.size()==1 && filtered[0].title=="Ten","Filters did not combine");
-        }},
-        {"arbitrary subtree relocation preserves descendants", [] {
-            auto page=tree();
-            check(relocate_subtree(page,"a","b1","b"),"Move into another parent failed");
-            check(ids(page)=="b,a,a1,a2,b1,c,","Incorrect insertion position");
-            check(depth(page,"a2")==2,"Lost descendant nesting");
-            check(relocate_subtree(page,"a","",""),"Move back to root failed");
-            check(ids(page)=="b,b1,c,a,a1,a2,","Incorrect root append order");
-        }},
-        {"invalid drops leave the original tree unchanged", [] {
-            auto page=tree(); const auto before=ids(page);
-            rejects([&]{relocate_subtree(page,"a","","a1");});
-            rejects([&]{relocate_subtree(page,"b","a1","");});
-            rejects([&]{relocate_subtree(page,"a","a1","a");});
-            rejects([&]{relocate_subtree(page,"c","","missing");});
-            check(ids(page)==before,"Rejected drop changed the document");
-            check(!relocate_subtree(page,"a","b",""),"No-op move created a change");
-        }},
-        {"unresolved references preserve intent separately from identity", [] {
-            auto page=tree(); page.blocks[0].runs[0].reference=Reference{ReferenceKind::Page,"","Future page","database"}; validate(page);
-            move_subtree(page,"a",1);
-            const auto& ref=page.blocks[2].runs[0].reference;
-            check(ref && ref->target_id.empty() && ref->unresolved_name=="Future page","Unresolved intent changed");
-            page.blocks[2].runs[0].reference->target_id="ambiguous";
-            rejects([&]{validate(page);});
-        }},
+        {"sample and UTF-8 content",
+         [] {
+             auto page = sample_page();
+             validate(page);
+             check(page.blocks[6].runs.front().text == u8"日本語のメモ · café · 🌙 · العربية", "UTF-8 changed");
+             check(depth(page, "child") == 1, "Incorrect nested depth");
+         }},
+        {"page and block identity requirements",
+         [] {
+             rejects([] { validate({"", {}}); });
+             auto page = tree();
+             page.blocks[1].id = "a";
+             rejects([&] { validate(page); });
+             page = tree();
+             page.blocks[1].id.clear();
+             rejects([&] { validate(page); });
+         }},
+        {"missing parents, cycles and invalid preorder",
+         [] {
+             auto page = tree();
+             page.blocks[1].parent_id = "missing";
+             rejects([&] { validate(page); });
+             page = tree();
+             page.blocks[0].parent_id = "a1";
+             rejects([&] { validate(page); });
+             page = tree();
+             page.blocks[5].parent_id = "a";
+             rejects([&] { validate(page); });
+         }},
+        {"paragraph and resolved reference invariants",
+         [] {
+             auto page = tree();
+             page.blocks[0].runs[0].text = "two\nparagraphs";
+             rejects([&] { validate(page); });
+             page = tree();
+             page.blocks[0].runs[0].reference = Reference{ReferenceKind::Page, ""};
+             rejects([&] { validate(page); });
+             page = tree();
+             page.blocks[0].kind = BlockKind::Attachment;
+             rejects([&] { validate(page); });
+             page = tree();
+             page.blocks[0].runs[0].asset = Asset{true, ""};
+             rejects([&] { validate(page); });
+         }},
+        {"move whole subtrees down and up",
+         [] {
+             auto page = tree();
+             check(move_subtree(page, "a", 1), "Move failed");
+             check(ids(page) == "b,b1,a,a1,a2,c,", "Child order lost");
+             check(move_subtree(page, "a", -1), "Reverse move failed");
+             check(ids(page) == ids(tree()), "Move failed to restore order");
+         }},
+        {"sibling move boundaries",
+         [] {
+             auto page = tree();
+             check(!move_subtree(page, "a", -1), "Moved past beginning");
+             check(!move_subtree(page, "c", 1), "Moved past end");
+             check(!move_subtree(page, "a1", -1), "Moved outside parent");
+             check(!move_subtree(page, "a2", 1), "Moved outside parent");
+             rejects([&] { move_subtree(page, "a", 0); });
+             rejects([&] { move_subtree(page, "unknown", 1); });
+         }},
+        {"indent preserves descendants",
+         [] {
+             auto page = tree();
+             check(indent(page, "b"), "Indent failed");
+             check(page.blocks[3].parent_id == "a", "Incorrect new parent");
+             check(page.blocks[4].parent_id == "b", "Descendant lost");
+             check(depth(page, "b1") == 2, "Incorrect descendant depth");
+             check(!indent(page, "a"), "Indented without a preceding sibling");
+         }},
+        {"outdent moves after former parent's remaining children",
+         [] {
+             auto page = tree();
+             check(outdent(page, "a1"), "Outdent failed");
+             check(ids(page) == "a,a2,a1,b,b1,c,", "Outdented into wrong position");
+             check(page.blocks[2].parent_id.empty(), "New parent not root");
+             check(!outdent(page, "b"), "Outdented root");
+         }},
+        {"stable reference survives moves",
+         [] {
+             auto page = tree();
+             page.blocks.back().runs[0].reference = Reference{ReferenceKind::Block, "a1"};
+             move_subtree(page, "a", 1);
+             indent(page, "a");
+             check(page.blocks.back().runs[0].reference->target_id == "a1", "Reference retargeted");
+         }},
+        {"cross-page transfer preserves subtree and reference identities",
+         [] {
+             auto source = tree();
+             Page destination{"other", {{"target", "", BlockKind::Paragraph, {}}}};
+             source.blocks[1].runs = {{"Self", true, false, Reference{ReferenceKind::Block, "a1"}}};
+             transfer_subtree(source, destination, "a", "unused");
+             check(ids(source) == "b,b1,c,", "Source retained transferred blocks");
+             check(ids(destination) == "target,a,a1,a2,", "Subtree order changed");
+             check(destination.blocks[2].parent_id == "a", "Child detached");
+             check(destination.blocks[2].runs[0].reference->target_id == "a1", "Internal reference retargeted");
+             transfer_subtree(source, destination, "b1", "unused");
+             check(destination.blocks.back().parent_id.empty(), "Transferred nested root retained old parent");
+         }},
+        {"cross-page transfer leaves an editable source and rejects collisions atomically",
+         [] {
+             Page source{"source", {{"only", "", BlockKind::Paragraph, {{"Keep"}}}}};
+             Page destination{"destination", {{"there", "", BlockKind::Paragraph, {}}}};
+             rejects([&] { transfer_subtree(source, destination, "only", "there"); });
+             check(ids(source) == "only," && ids(destination) == "there,", "Invalid transfer changed pages");
+             rejects([&] { transfer_subtree(source, source, "only", "fresh"); });
+             auto duplicate = destination;
+             duplicate.blocks[0].id = "only";
+             rejects([&] { transfer_subtree(source, duplicate, "only", "fresh"); });
+             rejects([&] { transfer_subtree(source, destination, "missing", "fresh"); });
+             transfer_subtree(source, destination, "only", "fresh");
+             check(ids(source) == "fresh," && source.blocks[0].runs.empty(), "Empty source lacks paragraph");
+             check(ids(destination) == "there,only,", "Transferred identity lost");
+         }},
+        {"wiki links parse explicit targets, labels and escaping",
+         [] {
+             auto link = parse_wiki_link(u8"[[日本語#会議|notes]]");
+             check(link && link->page == u8"日本語" && link->heading == u8"会議" && link->label == "notes" &&
+                       link->custom_label,
+                   "Unicode heading/label changed");
+             link = parse_wiki_link("[[#^stable-id]]");
+             check(link && link->page.empty() && link->block == "stable-id", "Current-page block target lost");
+             link = parse_wiki_link(R"([[A\#B\|C\\D\[E\]|a\|b]])");
+             check(link && link->page == "A#B|C\\D[E]" && link->label == "a|b", "Escapes changed target or label");
+             link = parse_wiki_link("[[ Page title ]]");
+             check(link && link->page == "Page title" && !link->custom_label, "Page whitespace changed");
+         }},
+        {"invalid wiki input stays ordinary text",
+         [] {
+             for (const auto* text : {"[[]]", "[[Page|]]", "[[Page#]]", "[[Page#^]]", "[[Page#A#B]]", "[[Page|a|b]]",
+                                      "[[Page\\q]]", "[[Page]", "[[Page\nname]]", "[[Page[part]]"})
+                 check(!parse_wiki_link(text), std::string("Accepted invalid wiki link: ") + text);
+         }},
+        {"block reference titles avoid recursive default labels",
+         [] {
+             Block heading{"heading",
+                           "",
+                           BlockKind::Heading,
+                           {{"See "},
+                            {"cached self", false, false, Reference{ReferenceKind::Block, "heading", "", "", false}},
+                            {" and custom", false, false, Reference{ReferenceKind::Block, "heading"}}}};
+             check(reference_title(heading) == "See [link] and custom", "Default reference label expanded recursively");
+         }},
+        {"managed cards insert after a subtree with a following paragraph",
+         [] {
+             auto page = tree();
+             insert_attachment(page, "a", "file-id", "notes.txt", false, "card", "following");
+             check(ids(page) == "a,a1,a2,card,following,b,b1,c,", "Card split the existing subtree");
+             check(page.blocks[3].attachment_id == "file-id" && page.blocks[3].kind == BlockKind::Attachment,
+                   "Managed file identity lost");
+             check(page.blocks[4].kind == BlockKind::Paragraph && page.blocks[4].attachment_id.empty(),
+                   "Following paragraph invalid");
+             const auto before = ids(page);
+             rejects([&] { insert_attachment(page, "a", "file", "image.png", true, "card", "other"); });
+             check(ids(page) == before, "Invalid insertion changed the tree");
+             page.blocks[3].kind = BlockKind::Paragraph;
+             rejects([&] { validate(page); });
+         }},
+        {"long-page fixture",
+         [] {
+             const auto page = long_page(1000);
+             validate(page);
+             check(page.blocks.size() == 1000, "Wrong fixture size");
+             check(page.blocks.back().id == "block-999", "Unstable fixture identity");
+             rejects([] { long_page(0); });
+         }},
+        {"calendar dates remain date-only values",
+         [] {
+             check(valid_date("2024-02-29"), "Leap day rejected");
+             check(!valid_date("1900-02-29") && valid_date("2000-02-29"), "Gregorian leap rule incorrect");
+             check(!valid_date("2026-02-30") && !valid_date("0000-01-01"), "Invalid date accepted");
+             validate_value(PropertyKind::Date, Date{"2026-10-29"});
+             rejects([] { validate_value(PropertyKind::Date, std::string("2026-10-29")); });
+         }},
+        {"properties enforce declared types",
+         [] {
+             validate_value(PropertyKind::Number, 2.0);
+             validate_value(PropertyKind::Checkbox, false);
+             rejects([] { validate_value(PropertyKind::Number, std::string("2")); });
+             rejects([] { validate_value(PropertyKind::Tags, std::vector<std::string>{"a", "a"}); });
+             rejects([] { validate_value(PropertyKind(99), {}); });
+         }},
+        {"views sort numbers and combine typed filters",
+         [] {
+             PageRecord a{{"a", {}}, "db", "Ten", {{"score", 10.0}, {"done", true}}, 0, false};
+             PageRecord b{{"b", {}}, "db", "Two", {{"score", 2.0}, {"done", false}}, 0, false};
+             View view;
+             view.sort_property = "score";
+             auto sorted = apply_view({a, b}, view);
+             check(sorted[0].title == "Two", "Numbers sorted as text");
+             view.filters = {{"score", Comparison::Greater, 1.0}, {"done", Comparison::Equal, true}};
+             auto filtered = apply_view({a, b}, view);
+             check(filtered.size() == 1 && filtered[0].title == "Ten", "Filters did not combine");
+         }},
+        {"arbitrary subtree relocation preserves descendants",
+         [] {
+             auto page = tree();
+             check(relocate_subtree(page, "a", "b1", "b"), "Move into another parent failed");
+             check(ids(page) == "b,a,a1,a2,b1,c,", "Incorrect insertion position");
+             check(depth(page, "a2") == 2, "Lost descendant nesting");
+             check(relocate_subtree(page, "a", "", ""), "Move back to root failed");
+             check(ids(page) == "b,b1,c,a,a1,a2,", "Incorrect root append order");
+         }},
+        {"invalid drops leave the original tree unchanged",
+         [] {
+             auto page = tree();
+             const auto before = ids(page);
+             rejects([&] { relocate_subtree(page, "a", "", "a1"); });
+             rejects([&] { relocate_subtree(page, "b", "a1", ""); });
+             rejects([&] { relocate_subtree(page, "a", "a1", "a"); });
+             rejects([&] { relocate_subtree(page, "c", "", "missing"); });
+             check(ids(page) == before, "Rejected drop changed the document");
+             check(!relocate_subtree(page, "a", "b", ""), "No-op move created a change");
+         }},
+        {"unresolved references preserve intent separately from identity",
+         [] {
+             auto page = tree();
+             page.blocks[0].runs[0].reference = Reference{ReferenceKind::Page, "", "Future page", "database"};
+             validate(page);
+             move_subtree(page, "a", 1);
+             const auto& ref = page.blocks[2].runs[0].reference;
+             check(ref && ref->target_id.empty() && ref->unresolved_name == "Future page", "Unresolved intent changed");
+             page.blocks[2].runs[0].reference->target_id = "ambiguous";
+             rejects([&] { validate(page); });
+         }},
         {"dividers retain identity and reject hidden text", [] {
-            auto page=tree(); page.blocks[0].kind=BlockKind::Divider; page.blocks[0].runs.clear(); validate(page);
-            check(move_subtree(page,"a",1),"Divider subtree did not move");
-            check(page.blocks[2].id=="a" && page.blocks[2].kind==BlockKind::Divider,"Divider identity changed");
-            page.blocks[2].runs={{"Hidden text"}}; rejects([&]{validate(page);});
-        }}
-    };
+             auto page = tree();
+             page.blocks[0].kind = BlockKind::Divider;
+             page.blocks[0].runs.clear();
+             validate(page);
+             check(move_subtree(page, "a", 1), "Divider subtree did not move");
+             check(page.blocks[2].id == "a" && page.blocks[2].kind == BlockKind::Divider, "Divider identity changed");
+             page.blocks[2].runs = {{"Hidden text"}};
+             rejects([&] { validate(page); });
+         }}};
     int failures = 0;
     for (const auto& [name, test] : tests) {
-        try { test(); std::cout << "PASS " << name << '\n'; }
-        catch (const std::exception& error) {
-            ++failures; std::cerr << "FAIL " << name << ": " << error.what() << '\n';
+        try {
+            test();
+            std::cout << "PASS " << name << '\n';
+        } catch (const std::exception& error) {
+            ++failures;
+            std::cerr << "FAIL " << name << ": " << error.what() << '\n';
         }
     }
     std::cout << tests.size() << " cases, " << failures << " failures\n";

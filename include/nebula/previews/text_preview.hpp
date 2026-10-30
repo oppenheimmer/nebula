@@ -35,6 +35,7 @@ public:
     void cancel();
 signals:
     void finished(const nebula::TextPreview& preview, const QString& error);
+
 private:
     PreviewLimits limits_;
     QNetworkAccessManager manager_;

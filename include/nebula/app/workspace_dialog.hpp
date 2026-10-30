@@ -20,8 +20,8 @@ class WorkspaceDialog : public QDialog {
 public:
     using DirectoryPicker = std::function<QString(const QString&)>;
     using Confirmer = std::function<bool(const QString& directory)>;
-    explicit WorkspaceDialog(const QString& user_home, QWidget* parent = nullptr,
-                             DirectoryPicker picker = {}, Confirmer confirm_other = {});
+    explicit WorkspaceDialog(const QString& user_home, QWidget* parent = nullptr, DirectoryPicker picker = {},
+                             Confirmer confirm_other = {});
     QString directory() const;
     void set_directory(const QString& directory);
     void show_error(const QString& message);

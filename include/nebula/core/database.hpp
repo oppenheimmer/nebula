@@ -8,10 +8,18 @@
 namespace nebula {
 
 enum class PropertyKind { Text, Number, Date, Checkbox, Tags };
-struct Date { std::string iso; };
+struct Date {
+    std::string iso;
+};
 using PropertyValue = std::variant<std::monostate, std::string, double, Date, bool, std::vector<std::string>>;
-struct PropertyDefinition { std::string id, database_id, name; PropertyKind kind = PropertyKind::Text; };
-struct Database { std::string id, name; bool trashed = false; };
+struct PropertyDefinition {
+    std::string id, database_id, name;
+    PropertyKind kind = PropertyKind::Text;
+};
+struct Database {
+    std::string id, name;
+    bool trashed = false;
+};
 struct PageRecord {
     Page document;
     std::string database_id, title;
@@ -20,9 +28,16 @@ struct PageRecord {
     bool trashed = false;
 };
 enum class Comparison { Equal, Contains, Less, Greater, Empty, NotEmpty };
-struct Filter { std::string property_id; Comparison comparison = Comparison::Equal; PropertyValue value; };
+struct Filter {
+    std::string property_id;
+    Comparison comparison = Comparison::Equal;
+    PropertyValue value;
+};
 enum class LinkRelation { ReferencesPage, ReferencedByPage };
-struct LinkFilter { LinkRelation relation=LinkRelation::ReferencesPage; std::string page_id; };
+struct LinkFilter {
+    LinkRelation relation = LinkRelation::ReferencesPage;
+    std::string page_id;
+};
 struct View {
     std::string id, database_id, name;
     std::vector<std::string> visible_properties;

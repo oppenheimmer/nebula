@@ -38,22 +38,42 @@ inline void harden(sqlite3* db)
 inline void require_fts5(sqlite3* db)
 {
     try {
-        sql::execute(db, "CREATE VIRTUAL TABLE temp.nebula_fts5_probe USING fts5(probe); DROP TABLE temp.nebula_fts5_probe");
+        sql::execute(
+            db, "CREATE VIRTUAL TABLE temp.nebula_fts5_probe USING fts5(probe); DROP TABLE temp.nebula_fts5_probe");
     } catch (const std::exception&) {
-        throw StorageError(ErrorKind::Unsupported,
-                           "This SQLite library lacks FTS5, which Nebula search requires; use an SQLite build with FTS5 enabled");
+        throw StorageError(
+            ErrorKind::Unsupported,
+            "This SQLite library lacks FTS5, which Nebula search requires; use an SQLite build with FTS5 enabled");
     }
 }
 
 // Every table/index any supported version creates, plus FTS5 shadow tables.
 inline const std::set<std::string>& known_objects()
 {
-    static const std::set<std::string> names{
-        "workspace_meta", "databases", "pages", "blocks", "property_definitions", "property_values",
-        "saved_views", "links", "deleted_blocks", "attachments", "deleted_block_members", "maintenance",
-        "page_search", "page_search_data", "page_search_idx", "page_search_content", "page_search_docsize",
-        "page_search_config", "page_search_rows", "pages_database", "links_target", "links_source",
-        "deleted_blocks_page", "deleted_block_members_block"};
+    static const std::set<std::string> names{"workspace_meta",
+                                             "databases",
+                                             "pages",
+                                             "blocks",
+                                             "property_definitions",
+                                             "property_values",
+                                             "saved_views",
+                                             "links",
+                                             "deleted_blocks",
+                                             "attachments",
+                                             "deleted_block_members",
+                                             "maintenance",
+                                             "page_search",
+                                             "page_search_data",
+                                             "page_search_idx",
+                                             "page_search_content",
+                                             "page_search_docsize",
+                                             "page_search_config",
+                                             "page_search_rows",
+                                             "pages_database",
+                                             "links_target",
+                                             "links_source",
+                                             "deleted_blocks_page",
+                                             "deleted_block_members_block"};
     return names;
 }
 
@@ -66,10 +86,12 @@ inline void check_objects(sqlite3* db, const std::vector<std::string>& required 
     while (objects.row()) {
         const auto type = objects.text(0), name = objects.text(1);
         if (type == "trigger" || type == "view")
-            throw StorageError(ErrorKind::Corrupt, "This workspace contains an unexpected " + type + " (" + name + "); it was not opened");
+            throw StorageError(ErrorKind::Corrupt,
+                               "This workspace contains an unexpected " + type + " (" + name + "); it was not opened");
         const bool internal = name.rfind("sqlite_autoindex_", 0) == 0 || name.rfind("sqlite_stat", 0) == 0;
         if (!internal && !known_objects().count(name))
-            throw StorageError(ErrorKind::Corrupt, "This workspace contains an unexpected " + type + " (" + name + "); it was not opened");
+            throw StorageError(ErrorKind::Corrupt,
+                               "This workspace contains an unexpected " + type + " (" + name + "); it was not opened");
         present.insert(name);
     }
     for (const auto& name : required)
@@ -79,10 +101,24 @@ inline void check_objects(sqlite3* db, const std::vector<std::string>& required 
 
 inline const std::vector<std::string>& current_objects()
 {
-    static const std::vector<std::string> names{
-        "workspace_meta", "databases", "pages", "blocks", "property_definitions", "property_values",
-        "saved_views", "links", "deleted_blocks", "attachments", "deleted_block_members", "maintenance",
-        "page_search", "page_search_rows", "pages_database", "links_target", "links_source", "deleted_blocks_page"};
+    static const std::vector<std::string> names{"workspace_meta",
+                                                "databases",
+                                                "pages",
+                                                "blocks",
+                                                "property_definitions",
+                                                "property_values",
+                                                "saved_views",
+                                                "links",
+                                                "deleted_blocks",
+                                                "attachments",
+                                                "deleted_block_members",
+                                                "maintenance",
+                                                "page_search",
+                                                "page_search_rows",
+                                                "pages_database",
+                                                "links_target",
+                                                "links_source",
+                                                "deleted_blocks_page"};
     return names;
 }
 } // namespace nebula::schema

@@ -15,8 +15,8 @@
 
 namespace nebula {
 
-PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
-                                 bool show_comparison, QWidget* parent) : QMainWindow(parent)
+PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace, bool show_comparison, QWidget* parent)
+    : QMainWindow(parent)
 {
     setWindowTitle("Nebula — editor prototype");
     resize(1100, 850);
@@ -72,8 +72,10 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
     formatting->addSeparator();
     add_action(formatting, "Bold", "bold", [this] { editor_->toggle_bold(); })->setShortcut(QKeySequence::Bold);
     add_action(formatting, "Italic", "italic", [this] { editor_->toggle_italic(); })->setShortcut(QKeySequence::Italic);
-    for (const auto& entry : {std::pair{"Paragraph", BlockKind::Paragraph}, {"Heading", BlockKind::Heading},
-                              {"Bullet", BlockKind::Bullet}, {"To-do", BlockKind::Todo}}) {
+    for (const auto& entry : {std::pair{"Paragraph", BlockKind::Paragraph},
+                              {"Heading", BlockKind::Heading},
+                              {"Bullet", BlockKind::Bullet},
+                              {"To-do", BlockKind::Todo}}) {
         const auto kind = entry.second;
         add_action(formatting, entry.first, entry.first, [this, kind] { editor_->set_block_kind(kind); });
     }
@@ -92,9 +94,8 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
     outdent_ = add_action(blocks, "Outdent", "outdent", [this] { editor_->outdent_current(); });
     outdent_->setToolTip("Move out of the current parent (Shift+Tab).");
     blocks->addSeparator();
-    add_action(blocks, "Link to heading", "link", [this] {
-        editor_->insert_reference("the heading", ReferenceKind::Block, "heading");
-    });
+    add_action(blocks, "Link to heading", "link",
+               [this] { editor_->insert_reference("the heading", ReferenceKind::Block, "heading"); });
     add_action(blocks, "Image card", "image", [this] { editor_->insert_card(true, "Sample image representation"); });
     add_action(blocks, "File card", "attachment", [this] { editor_->insert_card(false, "example.txt"); });
     auto* fixtures = menuBar()->addMenu("Sample");
@@ -121,14 +122,16 @@ PrototypeWindow::PrototypeWindow(const Page& page, const QString& workspace,
     }
     connect(editor_, &PageEditor::cursorPositionChanged, this, &PrototypeWindow::queue_refresh);
     connect(editor_, &PageEditor::textChanged, this, &PrototypeWindow::queue_refresh);
-    connect(editor_,&PageEditor::paste_rejected,this,[this](const QString& reason) { statusBar()->showMessage("Paste failed: "+reason,8000); });
+    connect(editor_, &PageEditor::paste_rejected, this,
+            [this](const QString& reason) { statusBar()->showMessage("Paste failed: " + reason, 8000); });
     connect(editor_, &PageEditor::reference_activated, this, [this](int kind, const QString& id) {
         if (kind == static_cast<int>(ReferenceKind::Block) && editor_->go_to_block(id))
             statusBar()->showMessage("Followed reference", 4000);
         else
             statusBar()->showMessage("This reference target is outside the sample page", 4000);
     });
-    statusBar()->showMessage("Click a block, then drag its grip dots · Alt+↑/↓: move · Tab/Shift+Tab: nest · Enter: new block");
+    statusBar()->showMessage(
+        "Click a block, then drag its grip dots · Alt+↑/↓: move · Tab/Shift+Tab: nest · Enter: new block");
     refresh_selection();
     editor_->setFocus();
 }
@@ -138,7 +141,10 @@ void PrototypeWindow::queue_refresh()
     if (refresh_pending_)
         return;
     refresh_pending_ = true;
-    QTimer::singleShot(0, this, [this] { refresh_pending_ = false; refresh_selection(); });
+    QTimer::singleShot(0, this, [this] {
+        refresh_pending_ = false;
+        refresh_selection();
+    });
 }
 
 void PrototypeWindow::refresh_selection()
@@ -148,10 +154,13 @@ void PrototypeWindow::refresh_selection()
     if (state.id.empty())
         return;
     if (comparison_active_) {
-        selection_->setText("Comparison mode: each text widget has its own selection and undo. Use the Block editor tab to move or nest blocks.");
+        selection_->setText("Comparison mode: each text widget has its own selection and undo. Use the Block editor "
+                            "tab to move or nest blocks.");
     } else {
         selection_->setText(QString("Block %1 of %2 · Nesting level %3 · Select a later sibling to indent it.")
-            .arg(state.index).arg(state.count).arg(state.depth));
+                                .arg(state.index)
+                                .arg(state.count)
+                                .arg(state.depth));
     }
     move_up_->setEnabled(!comparison_active_ && state.up);
     move_down_->setEnabled(!comparison_active_ && state.down);
