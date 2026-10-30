@@ -19,6 +19,8 @@
 #include <QScrollBar>
 #include <QTimer>
 #include <QApplication>
+#include <QCompleter>
+#include <QAbstractItemView>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -236,6 +238,7 @@ void PageEditor::paintEvent(QPaintEvent* event)
 
 void PageEditor::set_page(const Page& page)
 {
+    if (wiki_completer_) wiki_completer_->popup()->hide();
     cancel_drag();
     validate(page);
     page_id_ = page.id;
@@ -422,6 +425,13 @@ void PageEditor::split_block(QTextCursor& cursor, bool exit_empty_list)
 
 void PageEditor::keyPressEvent(QKeyEvent* event)
 {
+    if (wiki_completer_ && wiki_completer_->popup()->isVisible()) {
+        switch (event->key()) {
+        case Qt::Key_Enter: case Qt::Key_Return: case Qt::Key_Escape:
+        case Qt::Key_Tab: case Qt::Key_Backtab: event->ignore(); return;
+        default: break;
+        }
+    }
     if (grip_pressed_) {
         if (event->key()==Qt::Key_Escape) cancel_drag();
         event->accept(); return;
@@ -480,11 +490,59 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
         }
     },join);
     if (typing) { typing_position_=textCursor().position(); typing_revision_=document()->revision(); typing_clock_.restart(); }
+    if (typing || event->key()==Qt::Key_Backspace || event->key()==Qt::Key_Delete) process_wiki_input();
 }
 
 void PageEditor::inputMethodEvent(QInputMethodEvent* event)
 {
     mutate([&] { QTextEdit::inputMethodEvent(event); });
+    if (!event->commitString().isEmpty()) process_wiki_input();
+}
+
+void PageEditor::set_wiki_completer(QCompleter* completer)
+{
+    wiki_completer_=completer;
+    if (completer) completer->setWidget(this);
+}
+int PageEditor::wiki_start() const
+{
+    const auto cursor=textCursor();
+    if (cursor.hasSelection() || cursor.charFormat().hasProperty(RefTarget)) return -1;
+    const auto text=cursor.block().text().left(cursor.positionInBlock());
+    const auto start=text.lastIndexOf("[[");
+    if (start<0) return -1;
+    int escapes=0; for (auto i=start;i>0 && text[i-1]=='\\';--i) ++escapes;
+    if (escapes%2 || text.mid(start+2).contains("]]")) return -1;
+    return cursor.block().position()+int(start);
+}
+std::optional<QString> PageEditor::wiki_prefix() const
+{
+    const auto start=wiki_start();
+    if (start<0) return {};
+    auto cursor=textCursor(); cursor.setPosition(start+2,QTextCursor::KeepAnchor);
+    return cursor.selectedText();
+}
+bool PageEditor::select_wiki_link()
+{
+    const auto start=wiki_start(); if (start<0) return false;
+    auto cursor=textCursor(); const auto end=cursor.position(); cursor.setPosition(start);
+    cursor.setPosition(end,QTextCursor::KeepAnchor); setTextCursor(cursor); return true;
+}
+void PageEditor::process_wiki_input()
+{
+    const auto cursor=textCursor();
+    const auto text=cursor.block().text().left(cursor.positionInBlock());
+    if (!cursor.hasSelection() && text.endsWith("]]")) {
+        const auto start=text.lastIndexOf("[[");
+        int escapes=0; for (auto i=start;i>0 && text[i-1]=='\\';--i) ++escapes;
+        if (start>=0 && !(escapes%2) && receivers(SIGNAL(wiki_link_requested(QString)))) {
+            if (wiki_completer_) wiki_completer_->popup()->hide();
+            auto selected=cursor; selected.setPosition(cursor.block().position()+int(start));
+            selected.setPosition(cursor.position(),QTextCursor::KeepAnchor);
+            setTextCursor(selected); emit wiki_link_requested(selected.selectedText()); return;
+        }
+    }
+    const auto prefix=wiki_prefix(); emit wiki_query_changed(prefix?*prefix:QString{},bool(prefix));
 }
 
 void PageEditor::insertFromMimeData(const QMimeData* source)

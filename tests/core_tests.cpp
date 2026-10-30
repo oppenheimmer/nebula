@@ -1,5 +1,6 @@
 #include "nebula/core/document.hpp"
 #include "nebula/core/database.hpp"
+#include "nebula/core/wiki.hpp"
 
 #include <functional>
 #include <iostream>
@@ -134,6 +135,18 @@ int main()
             transfer_subtree(source,destination,"only","fresh");
             check(ids(source)=="fresh," && source.blocks[0].runs.empty(),"Empty source lacks paragraph");
             check(ids(destination)=="there,only,","Transferred identity lost");
+        }},
+        {"wiki links parse explicit targets, labels and escaping", [] {
+            auto link=parse_wiki_link(u8"[[日本語#会議|notes]]");
+            check(link && link->page==u8"日本語" && link->heading==u8"会議" && link->label=="notes" && link->custom_label,"Unicode heading/label changed");
+            link=parse_wiki_link("[[#^stable-id]]"); check(link && link->page.empty() && link->block=="stable-id","Current-page block target lost");
+            link=parse_wiki_link(R"([[A\#B\|C\\D\[E\]|a\|b]])");
+            check(link && link->page=="A#B|C\\D[E]" && link->label=="a|b","Escapes changed target or label");
+            link=parse_wiki_link("[[ Page title ]]"); check(link && link->page=="Page title" && !link->custom_label,"Page whitespace changed");
+        }},
+        {"invalid wiki input stays ordinary text", [] {
+            for (const auto* text:{"[[]]","[[Page|]]","[[Page#]]","[[Page#^]]","[[Page#A#B]]","[[Page|a|b]]","[[Page\\q]]","[[Page]","[[Page\nname]]","[[Page[part]]"})
+                check(!parse_wiki_link(text),std::string("Accepted invalid wiki link: ")+text);
         }},
         {"long-page fixture", [] {
             const auto page = long_page(1000); validate(page);

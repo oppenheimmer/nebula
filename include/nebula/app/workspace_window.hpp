@@ -8,6 +8,8 @@ class QListWidget;
 class QTableWidget;
 class QTimer;
 class QCloseEvent;
+class QCompleter;
+class QStandardItemModel;
 
 namespace nebula {
 class WorkspaceWindow : public PrototypeWindow {
@@ -39,13 +41,25 @@ private:
     bool pending_ = false;
     std::optional<BlockTransfer> last_transfer_;
     std::string transferred_block_;
+    struct LinkCandidate {
+        ReferenceKind kind;
+        std::string id, label, page, title, database;
+        bool heading = false;
+    };
+    QCompleter* link_completer_;
+    QStandardItemModel* completion_model_;
+    std::vector<LinkCandidate> completion_targets_;
+    bool completing_ = false;
+    std::vector<LinkCandidate> link_candidates() const;
+    void complete_wiki(const QString& prefix, bool active);
+    void enter_wiki_link(const QString& syntax);
     void switch_database();
     void mark_pending();
     void update_links();
     void add_property();
     void edit_view(bool create);
     void show_trash();
-    void insert_link();
+    void insert_link(const QString& query = {}, const QString& label = {});
     void follow_reference(ReferenceKind kind, const std::string& id);
     void move_page();
     void move_block();

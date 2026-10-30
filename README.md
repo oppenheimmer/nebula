@@ -139,8 +139,12 @@ Use Link… to select a page, heading, or block across databases. Ctrl+click fol
 it; the backlinks list opens the referring page/block. Targets retain their IDs
 through renaming and trash/restore. The link picker disambiguates page names by
 database. The picker can insert an unresolved page name without creating it;
-creating another page with that title does not silently bind the link. Wiki syntax
-and the complete unresolved-target workflow are tracked in the roadmap.
+creating another page with that title does not silently bind the link. Type
+`[[Page]]`, `[[Page#Heading]]`, or `[[Page#^block-id]]` for wiki entry; append
+`|label` for a custom label. Completion shows database/target context, and duplicate
+matches require choosing a specific target. Link… also searches page/heading/block
+text and IDs. Labels currently remain as inserted through renames. Escaping,
+completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
 
 ## Backup and restore
 

@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
 option(NEBULA_BUILD_EDITOR "Build the Qt editor feasibility prototype" ON)
 
-add_library(nebula_core src/core/document.cpp src/core/database.cpp)
+add_library(nebula_core src/core/document.cpp src/core/database.cpp src/core/wiki.cpp)
 target_include_directories(nebula_core PUBLIC include)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(nebula_core PRIVATE -Wall -Wextra -Wpedantic)

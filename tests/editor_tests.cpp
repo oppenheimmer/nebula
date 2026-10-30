@@ -103,6 +103,8 @@ private slots:
     void empty_list_enter_exits_without_an_extra_block();
     void pasted_divider_does_not_consume_surrounding_text();
     void modifier_keys_do_not_change_document_or_undo_history();
+    void wiki_typing_selects_only_the_token_and_conversion_undoes();
+    void wiki_composition_and_escaped_opening();
 };
 
 void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
@@ -118,6 +120,30 @@ void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
     QTest::keyClick(&editor,Qt::Key_Home,Qt::ControlModifier);
     QCOMPARE(changes.count(),0); QVERIFY(!editor.document()->isUndoAvailable());
     QCOMPARE(ids(editor.snapshot()),ids(before));
+}
+void EditorTests::wiki_typing_selects_only_the_token_and_conversion_undoes()
+{
+    PageEditor editor; ready(editor); at(editor,0);
+    QSignalSpy queries(&editor,&PageEditor::wiki_query_changed);
+    connect(&editor,&PageEditor::wiki_link_requested,&editor,[&](const QString& syntax){
+        QCOMPARE(syntax,QString("[[Target|label]]")); QCOMPARE(editor.textCursor().selectedText(),syntax);
+        editor.insert_reference("label",ReferenceKind::Page,"target-id");
+    });
+    QTest::keyClicks(&editor,"Before [[Target|label]]");
+    QCOMPARE(text(editor.snapshot().blocks[0]),QString("Before labelalpha"));
+    QCOMPARE(editor.snapshot().blocks[0].runs[1].reference->target_id,std::string("target-id"));
+    QVERIFY(!queries.empty()); editor.undo(); QCOMPARE(text(editor.snapshot().blocks[0]),QString("Before [[Target|label]]alpha"));
+    editor.redo(); QCOMPARE(text(editor.snapshot().blocks[0]),QString("Before labelalpha"));
+    QTest::keyClicks(&editor," after"); QVERIFY(!editor.snapshot().blocks[0].runs.back().reference);
+}
+void EditorTests::wiki_composition_and_escaped_opening()
+{
+    PageEditor editor; ready(editor); at(editor,0); QSignalSpy requests(&editor,&PageEditor::wiki_link_requested);
+    QTest::keyClicks(&editor,R"(\[[literal]])"); QVERIFY(requests.empty()); QVERIFY(!editor.textCursor().hasSelection());
+    QInputMethodEvent commit; commit.setCommitString(QString::fromUtf8(u8" [[日本語]]")); QApplication::sendEvent(&editor,&commit);
+    QCOMPARE(requests.size(),1); QCOMPARE(requests[0][0].toString(),QString::fromUtf8(u8"[[日本語]]"));
+    QCOMPARE(editor.textCursor().selectedText(),QString::fromUtf8(u8"[[日本語]]"));
+    QCOMPARE(editor.snapshot().blocks.size(),std::size_t(3));
 }
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
 {

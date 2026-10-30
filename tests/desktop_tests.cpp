@@ -7,6 +7,8 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCompleter>
+#include <QAbstractItemView>
 #include <QDir>
 #include <QDialogButtonBox>
 #include <QFile>
@@ -27,6 +29,7 @@
 #include <QTest>
 #include <QToolBar>
 #include <QTimer>
+#include <QTreeWidget>
 #include <sqlite3.h>
 #include <algorithm>
 
@@ -119,6 +122,9 @@ private slots:
     void page_move_control_preserves_properties_and_focus();
     void unavailable_references_preserve_current_page_and_identity();
     void failed_save_blocks_workspace_moves();
+    void typed_wiki_links_persist_page_heading_block_and_unresolved_targets();
+    void wiki_completion_selects_a_specific_duplicate_target();
+    void ambiguous_wiki_links_require_explicit_choice_or_preserve_text();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -695,6 +701,75 @@ void DesktopTests::failed_save_blocks_workspace_moves()
     QCOMPARE(w.load_page(source.document.id).revision,source.revision);
     QCOMPARE(w.load_page(source.document.id).database_id,a.id);
     sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_save;"); QVERIFY(window.flush());
+}
+void DesktopTests::typed_wiki_links_persist_page_heading_block_and_unresolved_targets()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto target=w.create_page(db.id,"Target",{},{{"target-heading","",BlockKind::Heading,{{"Meeting"}}},
+        {"target-body","",BlockKind::Paragraph,{{"Body"}}}});
+    const auto literal=w.create_page(db.id,"A#B|C");
+    const auto source=w.create_page(db.id,"Source"); WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    auto* editor=window.page_editor();
+    QTest::keyClicks(editor,R"([[Target|project]] [[Target#Meeting|notes]] [[Target#^target-body|body]] [[A\#B\|C|literal]] [[Future|later]])");
+    QVERIFY(window.flush()); const auto saved=w.load_page(source.document.id);
+    std::vector<Reference> references;
+    std::string text; for (const auto& run:saved.document.blocks[0].runs) { text+=run.text; if (run.reference) references.push_back(*run.reference); }
+    QCOMPARE(text,std::string("project notes body literal later")); QCOMPARE(references.size(),std::size_t(5));
+    QCOMPARE(references[0].target_id,target.document.id); QCOMPARE(references[1].target_id,std::string("target-heading"));
+    QCOMPARE(references[2].target_id,std::string("target-body")); QCOMPARE(references[3].target_id,literal.document.id); QVERIFY(references[4].target_id.empty());
+    QCOMPARE(references[4].unresolved_name,std::string("Future")); QCOMPARE(w.pages(db.id).size(),std::size_t(3));
+    QCOMPARE(w.backlinks(ReferenceKind::Page,target.document.id).size(),std::size_t(3));
+    editor->undo(); QVERIFY(window.flush()); QVERIFY(editor->toPlainText().endsWith("[[Future|later]]"));
+    editor->redo(); QVERIFY(window.flush()); QVERIFY(editor->toPlainText().endsWith("later"));
+    QTest::keyClicks(editor," [[Target#Missing]]"); QVERIFY(editor->toPlainText().endsWith("[[Target#Missing]]"));
+    QVERIFY(!editor->textCursor().hasSelection()); QVERIFY(window.flush());
+    auto reopened=Workspace::open(path(folder.path())); QCOMPARE(reopened.backlinks(ReferenceKind::Block,"target-heading").size(),std::size_t(1));
+}
+void DesktopTests::wiki_completion_selects_a_specific_duplicate_target()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("First"), b=w.create_database("Second");
+    w.create_page(a.id,"Duplicate"); const auto desired=w.create_page(b.id,"Duplicate"); const auto source=w.create_page(a.id,"Source");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id)); auto* editor=window.page_editor();
+    QTest::keyClicks(editor,"[[Dup"); auto* completer=window.findChild<QCompleter*>("wikiCompleter"); QVERIFY(completer);
+    auto* popup=completer->popup(); QTRY_VERIFY(popup->isVisible());
+    QModelIndex desired_index;
+    for (int row=0;row<popup->model()->rowCount();++row) {
+        const auto index=popup->model()->index(row,0);
+        if (index.data(Qt::UserRole+1).toString()==QString::fromStdString(desired.document.id)) desired_index=index;
+    }
+    QVERIFY(desired_index.isValid()); QVERIFY(desired_index.data().toString().contains("Second / Duplicate"));
+    popup->setCurrentIndex(desired_index); QTest::keyClick(popup,Qt::Key_Return);
+    QVERIFY(window.flush()); QCOMPARE(w.load_page(source.document.id).document.blocks[0].runs[0].reference->target_id,desired.document.id);
+    QCOMPARE(editor->toPlainText(),QString("Duplicate"));
+    editor->undo(); QVERIFY(editor->toPlainText().contains("[[Dup")); editor->redo();
+}
+void DesktopTests::ambiguous_wiki_links_require_explicit_choice_or_preserve_text()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("First"), b=w.create_database("Second");
+    w.create_page(a.id,"Duplicate"); const auto desired=w.create_page(b.id,"Duplicate"); const auto source=w.create_page(a.id,"Source");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id)); auto* editor=window.page_editor();
+    QTimer choose; bool saw_dialog=false; bool cancel=true;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); if (!dialog) return;
+        saw_dialog=true;
+        if (cancel) { dialog->reject(); return; }
+        auto* tree=dialog->findChild<QTreeWidget*>("linkTargets"); QVERIFY(tree);
+        QVERIFY(!dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->isEnabled());
+        dialog->findChild<QLineEdit*>("linkSearch")->setText("Second / Duplicate");
+        for (int row=0;row<tree->topLevelItemCount();++row) {
+            auto* item=tree->topLevelItem(row);
+            if (item->data(0,Qt::UserRole).toString()==QString::fromStdString(desired.document.id)) { QVERIFY(!item->isHidden()); tree->setCurrentItem(item); }
+        }
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    });
+    choose.start(0); QTest::keyClicks(editor,"[[Duplicate]]"); choose.stop(); QVERIFY(saw_dialog);
+    QCOMPARE(editor->toPlainText(),QString("[[Duplicate]]")); QVERIFY(window.flush());
+    QVERIFY(!w.load_page(source.document.id).document.blocks[0].runs[0].reference);
+    auto cursor=editor->textCursor(); cursor.select(QTextCursor::Document); editor->setTextCursor(cursor); QTest::keyClick(editor,Qt::Key_Backspace);
+    cancel=false; saw_dialog=false; choose.start(0); QTest::keyClicks(editor,"[[Duplicate|chosen]]"); choose.stop(); QVERIFY(saw_dialog);
+    QVERIFY(window.flush()); const auto saved=w.load_page(source.document.id).document.blocks[0].runs[0];
+    QCOMPARE(saved.text,std::string("chosen")); QCOMPARE(saved.reference->target_id,desired.document.id);
+    QCOMPARE(w.pages(a.id).size()+w.pages(b.id).size(),std::size_t(3));
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

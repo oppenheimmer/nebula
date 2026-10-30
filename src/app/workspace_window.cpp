@@ -1,6 +1,9 @@
 #include "nebula/app/workspace_window.hpp"
 #include "nebula/editor/page_editor.hpp"
+#include "nebula/core/wiki.hpp"
 #include <QAction>
+#include <QAbstractItemView>
+#include <QCompleter>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -19,6 +22,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QStandardItemModel>
 #include <QTableWidget>
 #include <QTimer>
 #include <QToolBar>
@@ -62,12 +66,6 @@ PropertyValue parse_value(PropertyKind kind, const QString& text) {
     validate_value(kind,value); return value;
 }
 void error(QWidget* parent, const std::exception& e) { QMessageBox::warning(parent,"Nebula",q(e.what())); }
-QString block_text(const Block& block) {
-    QString result;
-    for (const auto& run:block.runs) result+=q(run.text);
-    if (result.isEmpty()) result=q(block.asset_label);
-    return result.isEmpty() ? "Empty block" : result.left(70);
-}
 } // namespace
 
 WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_path, QWidget* parent)
@@ -178,6 +176,21 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         } catch (const std::exception& e) { error(this,e); refresh_table(); }
     });
     connect(page_editor(),&PageEditor::reference_activated,this,[this](int kind,const QString& id){ follow_reference(ReferenceKind(kind),s(id)); });
+    link_completer_=new QCompleter(this); link_completer_->setObjectName("wikiCompleter");
+    completion_model_=new QStandardItemModel(this); link_completer_->setModel(completion_model_);
+    link_completer_->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
+    link_completer_->setMaxVisibleItems(12); link_completer_->popup()->setObjectName("wikiCompletion");
+    link_completer_->popup()->setAccessibleName("Wiki link targets"); page_editor()->set_wiki_completer(link_completer_);
+    connect(page_editor(),&PageEditor::wiki_query_changed,this,&WorkspaceWindow::complete_wiki);
+    connect(page_editor(),&PageEditor::wiki_link_requested,this,&WorkspaceWindow::enter_wiki_link);
+    connect(link_completer_,QOverload<const QModelIndex&>::of(&QCompleter::activated),this,[this](const QModelIndex& index){
+        const auto prefix=page_editor()->wiki_prefix(); if (!prefix) return;
+        const auto syntax=parse_wiki_link(s("[["+*prefix+"]]"));
+        if (!page_editor()->select_wiki_link()) return;
+        page_editor()->insert_reference(syntax && syntax->custom_label?q(syntax->label):index.data(Qt::UserRole+2).toString(),
+            ReferenceKind(index.data(Qt::UserRole).toInt()),index.data(Qt::UserRole+1).toString());
+        completing_=false;
+    });
     connect(page_editor(),&PageEditor::unresolved_reference_activated,this,[this](const QString& name,const QString&){
         statusBar()->showMessage("Unresolved link: "+name+". Select its text and use Link… to choose a target.",8000);
     });
@@ -270,6 +283,7 @@ bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
         if (database_index<0) throw std::runtime_error("This page's database is in trash");
         if (target.database_id!=database_id_) { databases_->setCurrentIndex(database_index); }
         session_.open(id); loading_=true;
+        completing_=false;
         title_->setText(q(session_.record().title)); title_->setEnabled(true); page_editor()->set_page(session_.record().document); page_editor()->setEnabled(true);
         for (auto* bar:findChildren<QToolBar*>()) bar->setEnabled(true);
         loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
@@ -367,15 +381,89 @@ void WorkspaceWindow::show_trash()
     });
     auto* close=new QDialogButtonBox(QDialogButtonBox::Close,&dialog); layout->addWidget(close); connect(close,&QDialogButtonBox::rejected,&dialog,&QDialog::accept); dialog.exec(); refresh_databases();
 }
-void WorkspaceWindow::insert_link()
+std::vector<WorkspaceWindow::LinkCandidate> WorkspaceWindow::link_candidates() const
+{
+    std::vector<LinkCandidate> result;
+    for (const auto& db:workspace_.databases()) for (auto page:workspace_.pages(db.id)) {
+        if (session_.has_page() && page.document.id==session_.record().document.id) {
+            page.document=page_editor()->snapshot(); page.title=s(title_->text());
+        }
+        result.push_back({ReferenceKind::Page,page.document.id,page.title,page.document.id,page.title,db.name,false});
+        for (const auto& block:page.document.blocks) {
+            std::string text; for (const auto& run:block.runs) text+=run.text;
+            if (text.empty()) text=block.asset_label.empty()?"Empty block":block.asset_label;
+            result.push_back({ReferenceKind::Block,block.id,text,page.document.id,page.title,db.name,block.kind==BlockKind::Heading});
+        }
+    }
+    return result;
+}
+void WorkspaceWindow::complete_wiki(const QString& prefix, bool active)
+{
+    if (!active || !session_.has_page()) {
+        link_completer_->popup()->hide(); completing_=false; return;
+    }
+    if (!completing_) { completion_targets_=link_candidates(); completing_=true; }
+    completion_model_->clear();
+    const auto parsed=parse_wiki_link(s("[["+prefix+"]]"));
+    auto query=parsed?q(parsed->page)+" "+q(parsed->heading)+" "+q(parsed->block):prefix.section('|',0,0);
+    if (!parsed) { query.replace('#',' '); query.remove('^'); }
+    const auto words=query.split(' ',Qt::SkipEmptyParts);
+    for (const auto& candidate:completion_targets_) {
+        const auto text=q(candidate.database)+" / "+q(candidate.title)
+            +(candidate.kind==ReferenceKind::Page?QString{}:(candidate.heading?" / Heading: ":" / Block: ")+q(candidate.label).left(100))
+            +" ["+q(candidate.id)+"]";
+        if (!std::all_of(words.begin(),words.end(),[&](const auto& word){return text.contains(word,Qt::CaseInsensitive);})) continue;
+        auto* item=new QStandardItem(text); item->setData(int(candidate.kind),Qt::UserRole);
+        item->setData(q(candidate.id),Qt::UserRole+1); item->setData(q(candidate.label),Qt::UserRole+2);
+        completion_model_->appendRow(item);
+        if (completion_model_->rowCount()>=100) break;
+    }
+    if (!completion_model_->rowCount()) { link_completer_->popup()->hide(); return; }
+    link_completer_->setCompletionPrefix({});
+    link_completer_->popup()->setCurrentIndex(link_completer_->completionModel()->index(0,0));
+    auto rect=page_editor()->cursorRect(); rect.setWidth(std::min(800,std::max(400,link_completer_->popup()->sizeHintForColumn(0)+30)));
+    link_completer_->complete(rect);
+}
+void WorkspaceWindow::enter_wiki_link(const QString& syntax)
+{
+    completing_=false; const auto link=parse_wiki_link(s(syntax));
+    auto leave_text=[this] { auto cursor=page_editor()->textCursor(); cursor.clearSelection(); page_editor()->setTextCursor(cursor); };
+    if (!link) { leave_text(); return; }
+    std::vector<LinkCandidate> matches;
+    for (const auto& candidate:link_candidates()) {
+        const bool page=link->page.empty()?candidate.page==session_.record().document.id:candidate.title==link->page;
+        if (!page) continue;
+        if (!link->heading.empty() && candidate.kind==ReferenceKind::Block && candidate.heading && candidate.label==link->heading) matches.push_back(candidate);
+        else if (!link->block.empty() && candidate.kind==ReferenceKind::Block && candidate.id==link->block) matches.push_back(candidate);
+        else if (link->heading.empty() && link->block.empty() && candidate.kind==ReferenceKind::Page) matches.push_back(candidate);
+    }
+    if (matches.size()==1) {
+        const auto& target=matches.front(); page_editor()->insert_reference(q(link->custom_label?link->label:target.label),target.kind,q(target.id));
+    } else if (matches.empty() && link->heading.empty() && link->block.empty()) {
+        page_editor()->insert_unresolved_reference(q(link->custom_label?link->label:link->page),q(link->page),q(database_id_));
+    } else if (matches.empty()) {
+        leave_text(); statusBar()->showMessage("No matching heading or block. Use Link… to choose its target.",8000);
+    } else {
+        insert_link(q(link->page)+" "+q(link->heading)+" "+q(link->block),link->custom_label?q(link->label):QString{});
+        leave_text();
+    }
+}
+void WorkspaceWindow::insert_link(const QString& query, const QString& custom_label)
 {
     if (!session_.has_page()) return;
-    QDialog dialog(this); dialog.setWindowTitle("Link to a page or block"); auto* layout=new QVBoxLayout(&dialog); auto* tree=new QTreeWidget(&dialog); tree->setHeaderLabel("Choose a target"); layout->addWidget(tree);
-    for (const auto& db:workspace_.databases()) for (const auto& page:workspace_.pages(db.id)) {
-        auto* item=new QTreeWidgetItem(tree,{q(db.name)+" / "+q(page.title)}); item->setData(0,Qt::UserRole,q(page.document.id)); item->setData(0,Qt::UserRole+1,int(ReferenceKind::Page)); item->setData(0,Qt::UserRole+2,q(page.title));
-        for (const auto& block:page.document.blocks) { auto* child=new QTreeWidgetItem(item,{block_text(block)}); child->setData(0,Qt::UserRole,q(block.id)); child->setData(0,Qt::UserRole+1,int(ReferenceKind::Block)); child->setData(0,Qt::UserRole+2,block_text(block)); }
+    QDialog dialog(this); dialog.setWindowTitle("Link to a page, heading or block"); auto* layout=new QVBoxLayout(&dialog);
+    auto* search=new QLineEdit(&dialog); search->setObjectName("linkSearch"); search->setPlaceholderText("Search database, page, heading, block text or ID"); search->setAccessibleName("Find link target"); layout->addWidget(search);
+    auto* tree=new QTreeWidget(&dialog); tree->setObjectName("linkTargets"); tree->setHeaderLabel("Choose a specific target"); layout->addWidget(tree);
+    std::map<std::string,QTreeWidgetItem*> pages;
+    for (const auto& target:link_candidates()) {
+        const auto label=target.kind==ReferenceKind::Page?q(target.database)+" / "+q(target.title)
+            :(target.heading?"Heading: ":"Block: ")+q(target.label).left(100);
+        auto* item=target.kind==ReferenceKind::Page?new QTreeWidgetItem(tree):new QTreeWidgetItem(pages.at(target.page));
+        item->setText(0,label+" ["+q(target.id)+"]"); item->setData(0,Qt::UserRole,q(target.id));
+        item->setData(0,Qt::UserRole+1,int(target.kind)); item->setData(0,Qt::UserRole+2,q(target.label));
+        if (target.kind==ReferenceKind::Page) pages.emplace(target.id,item);
     }
-    auto* label=new QLineEdit(&dialog); label->setPlaceholderText("Optional custom label"); layout->addWidget(label);
+    auto* label=new QLineEdit(&dialog); label->setObjectName("linkLabel"); label->setText(custom_label); label->setPlaceholderText("Optional custom label"); layout->addWidget(label);
     auto* unresolved=new QLineEdit(&dialog); unresolved->setObjectName("unresolvedName"); unresolved->setPlaceholderText("Name of an unresolved page (does not create it)"); layout->addWidget(unresolved);
     auto* keep_unresolved=new QPushButton("Insert unresolved link",&dialog); keep_unresolved->setObjectName("insertUnresolved"); layout->addWidget(keep_unresolved);
     connect(keep_unresolved,&QPushButton::clicked,&dialog,[&]{
@@ -384,7 +472,24 @@ void WorkspaceWindow::insert_link()
         }
     });
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
-    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem()) { page_editor()->insert_reference(label->text().isEmpty()?item->data(0,Qt::UserRole+2).toString():label->text(),ReferenceKind(item->data(0,Qt::UserRole+1).toInt()),item->data(0,Qt::UserRole).toString()); dialog.accept(); } }); dialog.exec();
+    buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
+    connect(tree,&QTreeWidget::currentItemChanged,&dialog,[&](QTreeWidgetItem* item){ buttons->button(QDialogButtonBox::Ok)->setEnabled(item && !item->isHidden()); });
+    connect(search,&QLineEdit::textChanged,&dialog,[&](const QString& text){
+        tree->setCurrentItem(nullptr);
+        for (int p=0;p<tree->topLevelItemCount();++p) {
+            auto* page=tree->topLevelItem(p); bool visible=page->text(0).contains(text,Qt::CaseInsensitive);
+            for (int b=0;b<page->childCount();++b) {
+                auto* block=page->child(b); const auto combined=page->text(0)+" "+block->text(0);
+                const auto terms=text.split(' ',Qt::SkipEmptyParts);
+                const bool match=std::all_of(terms.begin(),terms.end(),[&](const auto& term){return combined.contains(term,Qt::CaseInsensitive);});
+                block->setHidden(!match); visible=visible||match;
+            }
+            page->setHidden(!visible); page->setExpanded(!text.isEmpty());
+        }
+    });
+    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem(); item && !item->isHidden()) { page_editor()->insert_reference(label->text().isEmpty()?item->data(0,Qt::UserRole+2).toString():label->text(),ReferenceKind(item->data(0,Qt::UserRole+1).toInt()),item->data(0,Qt::UserRole).toString()); dialog.accept(); } });
+    connect(tree,&QTreeWidget::itemDoubleClicked,&dialog,[&]{ buttons->button(QDialogButtonBox::Ok)->click(); });
+    search->setText(query.trimmed()); dialog.resize(760,550); dialog.exec(); activateWindow(); page_editor()->setFocus();
 }
 void WorkspaceWindow::follow_reference(ReferenceKind kind, const std::string& id)
 {

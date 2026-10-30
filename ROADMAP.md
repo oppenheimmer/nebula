@@ -49,8 +49,9 @@ The following remain implementation decisions rather than settled facts:
 - Linux packaging format and the eventual macOS distribution method.
 - Benchmark thresholds and supported search languages/tokenization behavior.
 - Exact rich-text payload schema and supported Markdown import/export subset.
-- Exact wiki-link escaping rules and interchange syntax for duplicate page titles,
-  custom labels, heading/block targets, and unresolved references.
+- Markdown interchange mapping for duplicate titles, custom labels, precise
+  targets and unresolved references; interactive wiki syntax is defined in
+  [LINKS.md](docs/LINKS.md).
 
 ### Options considered
 
@@ -442,7 +443,7 @@ Deliverables: the production block editor implementing the approach chosen in M0
   renames, database moves, heading edits, and block moves between pages.
 - [x] M05.7 Recheck Unicode, synthetic composition, accessible text, and the
   long-document scenarios from M01 against the production editor.
-- [ ] M05.8 Add wiki-style link entry, completion and a target picker for pages,
+- [x] M05.8 Add wiki-style link entry, completion and a target picker for pages,
   headings, and blocks, with duplicate-title disambiguation and custom labels.
 - [ ] M05.9 Add backlinks/outgoing-link navigation with source context and exact
   block destinations; provide keyboard access and back/forward position history.
@@ -465,7 +466,9 @@ values without linking the editor to SQLite. [CLIPBOARD_FORMAT.md](docs/CLIPBOAR
 defines copied identities, reference remapping, and the supported HTML subset.
 Direct ID resolution, page moves with typed property preservation, and atomic
 cross-page subtree transfers have storage/full-window lifecycle and undo tests.
-Wiki entry, default labels, and navigation history remain open.
+Wiki entry/completion and searchable explicit target selection cover page,
+heading/block, duplicate-title, custom-label, escaping, Unicode, and undo cases.
+Default labels and navigation history remain open.
 
 ### M06 — Attachments and diary workflow
 
@@ -1090,6 +1093,37 @@ begin as part of this shutdown.
   source context and back/forward position history, and M05.10 default/custom
   labels and explicit unresolved create/select-target actions. M05 stays In
   progress; M06 managed attachments and later milestones remain unfinished.
+
+### Wiki entry and completion checkpoint — 2026-10-30
+
+- Committed and pushed the verified M05.6 checkpoint as `2f162c3` on `main` using
+  the configured author and a single-line message without trailers.
+- Completed M05.8 with a Qt-independent wiki parser, `[[Page]]`, heading/block
+  targets, current-page anchors, custom labels, escaping, Unicode, and invalid
+  input preservation. Typed/IME-committed expressions resolve unique matches by
+  ID; duplicate names open explicit selection. Unknown page names remain unresolved
+  without creating pages; missing precise targets remain text. Conversion undo
+  restores the original expression, and redo retains the chosen identities.
+- Added completion using Qt's documented custom-completer pattern and a searchable
+  target picker. Suggestions/picker rows include database/page/type/ID context;
+  same-database duplicate titles are distinguishable by ID. Completion lists up to
+  100 matches; the full picker remains available. Existing pending headings on
+  the current page participate in target selection. No dependency was added.
+- [LINKS.md](docs/LINKS.md) defines the input/escaping and completion contract.
+  Pasted wiki syntax remains text. Inserted labels remain fixed pending M05.10;
+  this task does not complete default-label or unresolved create/select behavior.
+- **Verification:** GCC and Clang passed all six CTest entries: 21 core, 30
+  storage, 45 editor, and 41 desktop cases plus launcher/smoke. Core-only passed
+  without Qt/SQLite. Xwayland passed all 45 editor and 41 desktop cases, including
+  actual typed entry, keyboard popup selection, duplicate-target choice/cancel,
+  escaped names, persistence/backlinks, composition commit, and undo/redo. The
+  environment is unchanged from the preceding checkpoint. A newly unused helper
+  produced a compiler warning during the initial build; it was removed and final
+  GCC/Clang builds are clean. Whitespace, ordered-task, Markdown-link and fence
+  checks passed. Actual OS IME, reader, and macOS acceptance remain unperformed.
+- **Next:** execute M05.9 outgoing/source-context navigation, keyboard following,
+  and back/forward position history, followed by M05.10 and the managed-attachment
+  milestones. M05 remains In progress.
 
 ## Technical references discussed
 

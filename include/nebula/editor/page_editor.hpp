@@ -7,6 +7,7 @@
 #include <functional>
 
 class QTimer;
+class QCompleter;
 
 namespace nebula {
 
@@ -35,11 +36,16 @@ public:
     void toggle_italic();
     void cut();
     void paste();
+    void set_wiki_completer(QCompleter* completer);
+    std::optional<QString> wiki_prefix() const;
+    bool select_wiki_link();
 
 signals:
     void reference_activated(int kind, const QString& target_id);
     void unresolved_reference_activated(const QString& name, const QString& database_scope);
     void paste_rejected(const QString& reason);
+    void wiki_query_changed(const QString& query, bool active);
+    void wiki_link_requested(const QString& syntax);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -66,6 +72,9 @@ private:
     QElapsedTimer typing_clock_;
     int typing_position_ = -1;
     int typing_revision_ = -1;
+    QCompleter* wiki_completer_ = nullptr;
+    int wiki_start() const;
+    void process_wiki_input();
     QRectF block_rect(const QTextBlock& block) const;
     void update_drop();
     void cancel_drag();
