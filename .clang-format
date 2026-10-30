@@ -1,5 +1,4 @@
-# Adopted 2026-10-30 (SUG-38). New files follow this style. Existing dense files
-# keep their local style until each is reformatted in a formatting-only commit.
+# Adopted 2026-10-30 (SUG-38). The C++ tree was normalized in M08.11.
 BasedOnStyle: LLVM
 Language: Cpp
 Standard: c++17

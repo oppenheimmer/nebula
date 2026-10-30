@@ -137,3 +137,16 @@ remain open platform decisions. Both BSD targets are amd64 only. Compiling on
 Linux does not validate either BSD, and checking one BSD does not validate the other.
 The Linux Docker workflow cannot supply native BSD validation: use separate
 isolated amd64 machines, VMs or runners with environment-scoped dependencies.
+
+## Native BSD validation tooling
+
+`.github/workflows/bsd.yml` uses development-only MIT-licensed
+[vmactions/freebsd-vm](https://github.com/vmactions/freebsd-vm) and
+[vmactions/openbsd-vm](https://github.com/vmactions/openbsd-vm), pinned to immutable
+revisions. Each job boots its own amd64 BSD guest and installs dependencies there,
+then runs `scripts/bsd-check.sh` as an unprivileged user. No host package install
+or runtime service is introduced. Linux is still validated separately through
+Docker. Guest package versions are recorded by their build/test logs; the selected
+FreeBSD 14.3/OpenBSD 7.8 versions are preflight environments rather than supported
+release baselines. Native desktop/IME/accessibility, cross-system transfer and
+package validation remain separate M10 requirements.

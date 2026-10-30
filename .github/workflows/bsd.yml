@@ -1,0 +1,49 @@
+# Native OS preflight only; these jobs do not establish desktop/package support.
+name: BSD native checks
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  freebsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build and test inside FreeBSD amd64
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1
+        with:
+          release: '14.3'
+          arch: x86_64
+          mem: 6144
+          cpu: 2
+          copyback: false
+          prepare: |
+            pkg install -y cmake ninja qt6-base sqlite3 bash
+            pw useradd nebula -m -s /bin/sh
+          run: |
+            chown -R nebula "$GITHUB_WORKSPACE"
+            su -m nebula -c 'sh scripts/bsd-check.sh'
+  openbsd:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build and test inside OpenBSD amd64
+        uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1
+        with:
+          release: '7.8'
+          arch: x86_64
+          mem: 6144
+          cpu: 2
+          copyback: false
+          prepare: |
+            pkg_add -I cmake ninja qt6-qtbase sqlite3 bash
+            useradd -m -s /bin/sh nebula
+          run: |
+            chown -R nebula "$GITHUB_WORKSPACE"
+            su -m nebula -c 'sh scripts/bsd-check.sh'

@@ -284,7 +284,7 @@ including material data-handling limitations, rather than a running progress log
 | M07 | Search and portable interchange | M04, M06 | Complete |
 | M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
 | M09 | Linux release | M08 | Not started |
-| M10 | FreeBSD and OpenBSD releases (amd64) | M09 | Not started |
+| M10 | FreeBSD and OpenBSD releases (amd64) | M09 | In progress |
 
 ### M00 — Project definition and working conventions
 
@@ -583,10 +583,10 @@ and a release candidate with known limitations documented.
   `WorkspaceWindow` into Qt-free application services with focused tests (SUG-34).
 - [x] M08.10 Share one set of Qt UTF-8 conversion helpers across storage, format,
   interchange and desktop modules (SUG-36).
-- [ ] M08.11 Rebuild the development image with `clang-format` and the Clang
+- [x] M08.11 Rebuild the development image with `clang-format` and the Clang
   libFuzzer runtime, run the coverage-guided libFuzzer targets and record results,
   then reformat existing dense files in formatting-only commits (SUG-38/SUG-40).
-- [ ] M08.12 Confirm the GitHub CI workflow passes on a real runner and record
+- [x] M08.12 Confirm the GitHub CI workflow passes on a real runner and record
   which source revision it verified (SUG-40).
 - [x] M08.13 Measure GUI autosaves against concurrent headless backups/exports
   of a large workspace; record whether chunked backup steps avoid save failures
@@ -2505,6 +2505,40 @@ begin as part of this shutdown.
   No host dependencies were installed. No power-loss, actual OS IME/reader or
   native FreeBSD/OpenBSD result is claimed. Checkpoint commit/push and subsequent
   formatting/CI outcomes are recorded in the next entry.
+
+### Formatting, CI and native BSD preflight — 2026-10-30
+
+- Pushed reliability/services checkpoint `06cf7aa` and formatting-only commit
+  `d6aac43` to `origin/main`, using the configured author and subject-only messages.
+  The formatter changed 65 C++ files with no manual semantic edits. Final formatted
+  GCC, Clang and ASan/UBSan suites each passed all 15 CTest groups. `format --check`
+  passed. A further six-second fuzz run per parser passed: wiki 565,083, codec
+  42,481, manifest 37,223, JSON 28,033 and Markdown 799 executions. No sanitizer
+  finding was reported; leak detection remains off. M08.11 is complete.
+- Completed M08.12: the real Linux runner passed `06cf7aac16662ca717b8c31e08b10b3644adb44b`
+  ([run 41029359108](https://github.com/oppenheimmer/nebula/actions/runs/41029359108)),
+  covering GCC, Clang, core-only, ASan/UBSan and ten interaction-suite repetitions.
+  The formatting revision has a separate run in progress. The workflow now adds
+  formatting and coverage-guided parser checks; the earlier successful run does
+  not certify these newly added steps.
+- Began M10.1/M10.2 native **preflight** ahead of M09 to discover portability
+  defects while release/IME work remains open. This is an explicit ordering
+  exception for independent validation infrastructure; Linux and BSD releases
+  retain their original dependencies and exit criteria. M10 is In progress with
+  no native task marked complete yet.
+- Added manually dispatched, separate FreeBSD 14.3 amd64 and OpenBSD 7.8 amd64
+  QEMU VM jobs, using immutable VM-action revisions, read-only repository token
+  permissions, checkout without persisted credentials and unprivileged test users.
+  Dependencies install only in each ephemeral VM. `scripts/bsd-check.sh` refuses
+  other OSes, records environment/tool versions, then builds/tests the core-only
+  and full application separately with warnings-as-errors and offscreen Qt.
+- The VM actions are development-only MIT dependencies; they add no application
+  runtime service. Their [FreeBSD](https://github.com/vmactions/freebsd-vm) and
+  [OpenBSD](https://github.com/vmactions/openbsd-vm) documentation describes native
+  guest execution. Package preparation uses each guest's packages; the OpenBSD
+  Qt port's [module/package definition](https://github.com/openbsd/ports/blob/master/x11/qt6/qtbase/Makefile)
+  supplies Widgets, Network and Test. Selected OS versions are investigation
+  environments, not supported minimums or package-release claims. Results follow.
 
 ## Technical references discussed
 
