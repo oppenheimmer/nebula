@@ -275,7 +275,7 @@ including material data-handling limitations, rather than a running progress log
 | M05 | Complete first-release block editing | M01, M04 | Complete |
 | M06 | Attachments and diary workflow | M03, M05 | Complete |
 | M07 | Search and portable interchange | M04, M06 | In progress |
-| M08 | Reliability, accessibility, and performance | M04–M07 | Not started |
+| M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
 | M09 | Linux release | M08 | Not started |
 | M10 | macOS release | M09 | Not started |
 
@@ -563,6 +563,13 @@ and a release candidate with known limitations documented.
 - [ ] M08.6 Verify references/backlinks through duplicate titles, renames, moves,
   heading changes, target trash/restore, reuse of deleted titles, undo/redo, backup
   restore, import identity remapping, and derived-index rebuilding.
+- [x] M08.7 Clarify recoverable trash at block/subtree, page and whole-database
+  scope. Give each scope its own small red trash-icon button with an accessible
+  name and clear confirmation; require an unchecked acknowledgement checkbox
+  before confirming database trash. Default to Cancel, preserve pending edits on
+  failure, retain attachments, and verify cancel/Escape, restore, block undo/redo
+  and restart behavior. These buttons must never invoke permanent purge. Rename
+  the visible reference lists to “Referenced by:” and “References”.
 
 Exit criteria: required checks have recorded outcomes; supported saved data
 survives the documented recovery scenarios; no unresolved release-blocking defect
@@ -867,6 +874,24 @@ problems remain in the risk register until reproduced.
 - **Latest verification:** a second captured native run, with the explicit
   activation/focus preconditions, passed all 52 editor and 60 desktop cases.
   Stress verification of the intermittent failure remains pending.
+
+### BUG-015 — Block restoration fell through to page restoration
+
+- **Milestone/state:** M08.7; Fixed in the concurrent integration, with an
+  automated restore regression. The last committed implementation was unaffected.
+- **Environment/reproduction:** Debian 13 Docker, Qt 6.8.2/GCC 14.2.0,
+  offscreen Linux. In the combined uncommitted snapshot, remove a block, open
+  Restore, select its block group and choose Restore selected.
+- **Expected/actual:** restore the blocks once and remove the recovery row from
+  the list. The blocks restored, but an unexpected error dialog then stalled both
+  desktop and trash-safety CTest entries until their 60-second timeouts.
+- **Diagnosis/resolution:** the new reparenting notification used a separate
+  `if` whose `else` also tried to restore the block-group ID as a page. Keep the
+  notification inside the block-group branch so scope dispatch stays exclusive.
+- **Verification:** the same captured source with that correction passed the
+  desktop and trash-safety entries, including ordinary block recovery,
+  undo/redo and three-scope recovery after reopening. The new dialog driver
+  reports unexpected error dialogs directly instead of hanging on them.
 
 For each future defect, record:
 
@@ -1501,6 +1526,54 @@ begin as part of this shutdown.
   code/dependency was introduced in this checkpoint. M08–M10 remain Not started.
   Resume with M07.8, then reliability/accessibility/performance and release work;
   actual OS IME, screen-reader and macOS verification remain unperformed.
+
+### Concurrent integration and trash-safety scope — 2026-10-30
+
+- The user resumed roadmap execution and requested professional reference-list
+  wording plus distinct, safer trash controls for blocks, pages and databases.
+  Added M08.7. This independent safety/UI task is being executed ahead of the
+  remaining preview work (M07.8), as explicitly prioritized by the user; the rest
+  of M08 still depends on the complete M07 workflow.
+- Another agent is implementing the Suggestions section. Its existing edits are
+  preserved, including the storage/schema hardening and editor refactor. This
+  task owns the app trash controls, dedicated UI tests and focused usage/work-log
+  updates; it does not take over the Suggestions implementation.
+- Captured an isolated source snapshot before changes at
+  `/tmp/nebula-manual-audit-v148xw8p`. Its GCC build succeeded; seven of eight
+  CTest entries passed, including storage, new storage hardening, interchange and
+  desktop. The editor entry failed
+  `block_kind_conversion_preserves_content_and_references`: after undo, the
+  cursor identified heading instead of reference (tests/editor_tests.cpp:587).
+  The live editor source changed during this check, so this is evidence about
+  the captured snapshot, not a claim that the other agent's current work still
+  has that failure. The full output is retained in the adjacent ignored /tmp log.
+- Completed M08.7: separate red icons beside the database selector and page
+  title, and in the block toolbar; scope-specific plain-text confirmations,
+  default Cancel and an initially unchecked database acknowledgement. Page and
+  database trash stop on save failure. Failed block trash restores the editor;
+  successful block/subtree trash preserves a single undo group and saved recovery
+  records. These controls never call permanent purge. Renamed visible/accessibility
+  reference labels to **Referenced by:** and **References**. Usage and recovery
+  details are in [TRASH.md](docs/TRASH.md).
+- **Verification:** an isolated HEAD-plus-feature snapshot passed all eight
+  CTest entries with GCC 14.2.0 and Clang 19.1.7, without the Suggestions changes.
+  Native Xwayland passed 52 editor, 60 desktop and eight trash-safety cases.
+  New checks click the real icon buttons and exercise Enter/Escape cancellation,
+  disabled database confirmation without acknowledgement, duplicate names,
+  pending-save failures at page/database scope, failed block-save rollback,
+  nested subtree undo/redo, valid replacement of the last subtree, attachment
+  retention, unavailable actions and restoring all three scopes after closing and
+  reopening the workspace. Retained attachment bytes survive removal of the source.
+- The combined snapshot passed core, launcher, storage, storage hardening,
+  interchange, editor and smoke entries; after fixing BUG-015 its desktop and
+  trash-safety entries also passed. This verifies captured integration points,
+  rather than every subsequent edit by the concurrent agent. The initial copied
+  GCC build cache needed a clean rebuild after switching back to HEAD APIs;
+  that clean standalone build passed. No host dependencies were installed.
+- All 71 milestone task IDs are unique. Local documentation links, Markdown
+  fences and `git diff --check` passed. Actual OS IME, screen-reader and macOS
+  checks remain unperformed. M07/M08 remain In progress; next is M07.8, followed
+  by the remaining reliability, accessibility, performance and release work.
 
 ## Technical references discussed
 

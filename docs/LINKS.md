@@ -52,9 +52,9 @@ the binding keeps the explicitly created page and restores the intended name/sco
 redo restores the same target ID. Selecting an existing target changes only the
 activated occurrence and preserves a custom label's rich formatting.
 
-Ctrl+click or Ctrl+Enter at the editor cursor follows a reference. Incoming links
-show the referring page and source excerpt, including the exact target block ID
-where applicable. Outgoing links include their label, destination/state and source
+Ctrl+click or Ctrl+Enter at the editor cursor follows a reference. **Referenced by:**
+shows the referring page and source excerpt, including the exact target block ID
+where applicable. **References** includes each outgoing label, destination/state and source
 excerpt; unresolved links remain visible. Both lists support keyboard selection
 and Enter to activate. Incoming activation opens the referring block; outgoing
 activation opens the exact target or explains its unresolved/unavailable state.

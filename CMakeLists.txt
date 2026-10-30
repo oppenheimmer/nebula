@@ -56,6 +56,7 @@ if(NEBULA_BUILD_EDITOR)
     endif()
 
     add_library(nebula_desktop
+        src/app/trash_controls.cpp src/app/workspace_trash.cpp
         src/app/workspace_dialog.cpp src/app/prototype_window.cpp
         src/app/workspace_window.cpp include/nebula/app/workspace_window.hpp
         include/nebula/app/workspace_dialog.hpp include/nebula/app/prototype_window.hpp)
@@ -95,6 +96,11 @@ if(NEBULA_BUILD_EDITOR)
         add_dependencies(desktop_tests nebula_prototype)
         add_test(NAME desktop COMMAND desktop_tests)
         set_tests_properties(desktop PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+        add_executable(trash_safety_tests tests/trash_safety_tests.cpp)
+        set_target_properties(trash_safety_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(trash_safety_tests PRIVATE nebula_desktop Qt6::Test SQLite::SQLite3)
+        add_test(NAME trash_safety COMMAND trash_safety_tests)
+        set_tests_properties(trash_safety PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
         add_test(NAME prototype_smoke COMMAND nebula_prototype --smoke-test)
         set_tests_properties(prototype_smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
     endif()

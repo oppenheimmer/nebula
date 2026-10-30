@@ -79,6 +79,10 @@ private:
     void add_property();
     void edit_view(bool create);
     void show_trash();
+    void trash_current_database();
+    void trash_current_page();
+    void trash_current_block();
+    void update_trash_actions();
     void insert_link(const QString& query = {}, const QString& label = {});
     void follow_reference(ReferenceKind kind, const std::string& id);
     void move_page();

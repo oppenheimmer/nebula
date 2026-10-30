@@ -54,6 +54,14 @@ Restore also lists deleted block fragments after restart. Restore a trashed page
 database, or missing parent first; restoring a fragment preserves edits to blocks
 that are already present.
 
+The small red trash icons act on three different scopes: beside the database
+selector for the whole database, beside the page title for that page, and in the
+block toolbar for the active block and its nested blocks. Each opens a
+confirmation with Cancel as the default. Database trash also requires an
+acknowledgement checkbox. These controls retain content and attachments for
+Restore; block trash can also be undone while the page stays open.
+See [TRASH.md](docs/TRASH.md) for scope, recovery and permanent-deletion behavior.
+
 Edits save after a 500 ms pause, before navigating to another page, and when closing
 the window. The status distinguishes pending edits, successful saves, and failures.
 Ctrl+S saves immediately. On failure, edits remain visible and closing asks whether

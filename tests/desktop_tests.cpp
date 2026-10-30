@@ -7,6 +7,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCompleter>
 #include <QAbstractItemView>
 #include <QDir>
@@ -508,12 +509,15 @@ void DesktopTests::database_and_trash_actions_preserve_records()
     enter_name("renameDatabase","Renamed notebook");
     const auto dbs=w.databases(); QVERIFY(std::any_of(dbs.begin(),dbs.end(),[&](const auto& db){return db.id==db_id && db.name=="Renamed notebook";}));
     window.create_page("Restore me"); const auto id=window.page_editor()->snapshot().id;
+    QTimer::singleShot(0,&window,[]{auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->findChild<QPushButton*>("confirmTrash")->click();});
     window.findChild<QAction*>("trashPage")->trigger(); QVERIFY(w.load_page(id).trashed);
     auto restore_first=[&]{
         QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); auto* list=dialog->findChild<QListWidget*>("trashItems"); QVERIFY(list->count()>0); list->setCurrentRow(0); dialog->findChild<QPushButton*>("restoreSelected")->click(); dialog->accept(); });
         window.findChild<QAction*>("restoreTrash")->trigger();
     };
     restore_first(); QVERIFY(!w.load_page(id).trashed); QCOMPARE(w.pages(db_id).size(),std::size_t(1));
+    QTimer::singleShot(0,&window,[]{auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+        dialog->findChild<QCheckBox*>("confirmDatabaseTrash")->setChecked(true); dialog->findChild<QPushButton*>("confirmTrash")->click();});
     window.findChild<QAction*>("trashDatabase")->trigger(); QCOMPARE(w.databases().size(),std::size_t(1));
     restore_first(); QCOMPARE(w.databases().size(),std::size_t(2)); QCOMPARE(w.load_page(id).document.id,id);
 }

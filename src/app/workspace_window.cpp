@@ -1,4 +1,5 @@
 #include "nebula/app/workspace_window.hpp"
+#include "nebula/app/trash_controls.hpp"
 #include "nebula/editor/page_editor.hpp"
 #include "nebula/core/wiki.hpp"
 #include <QAction>
@@ -20,6 +21,7 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QHeaderView>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -35,6 +37,7 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <algorithm>
@@ -133,18 +136,26 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     title_=new QLineEdit(page_panel); title_->setObjectName("pageTitle"); title_->setPlaceholderText("Page title");
     title_->setAccessibleName("Page title"); title_->setStyleSheet("font-size: 20px; padding: 6px;");
     save_state_=new QLabel("Select an entry or create a page.",page_panel); save_state_->setObjectName("saveState");
-    page_layout->insertWidget(1,title_); page_layout->insertWidget(2,save_state_);
+    auto* page_header=new QWidget(page_panel); auto* page_header_layout=new QHBoxLayout(page_header); page_header_layout->setContentsMargins(0,0,0,0);
+    auto* page_trash=new QToolButton(page_header); page_trash->setObjectName("trashPageButton");
+    page_header_layout->addWidget(title_,1); page_header_layout->addWidget(page_trash);
+    page_layout->insertWidget(1,page_header); page_layout->insertWidget(2,save_state_);
     backlinks_=new QListWidget(page_panel); backlinks_->setObjectName("backlinks"); backlinks_->setMaximumHeight(90);
-    backlinks_->setAccessibleName("Incoming references with source context");
-    page_layout->addWidget(new QLabel("Backlinks — pages that link here",page_panel)); page_layout->addWidget(backlinks_);
+    backlinks_->setAccessibleName("Referenced by:"); backlinks_->setAccessibleDescription("Pages referencing this page or its blocks, with source context.");
+    auto* incoming_heading=new QLabel("Referenced by:",page_panel); incoming_heading->setObjectName("referencedByHeading");
+    page_layout->addWidget(incoming_heading); page_layout->addWidget(backlinks_);
     outgoing_=new QListWidget(page_panel); outgoing_->setObjectName("outgoingLinks"); outgoing_->setMaximumHeight(90);
-    outgoing_->setAccessibleName("Outgoing references");
-    page_layout->addWidget(new QLabel("Outgoing links",page_panel)); page_layout->addWidget(outgoing_);
+    outgoing_->setAccessibleName("References"); outgoing_->setAccessibleDescription("References from this page.");
+    auto* outgoing_heading=new QLabel("References",page_panel); outgoing_heading->setObjectName("referencesHeading");
+    page_layout->addWidget(outgoing_heading); page_layout->addWidget(outgoing_);
     auto* navigation=new QWidget;
     auto* navigation_layout=new QVBoxLayout(navigation);
     databases_=new QComboBox(navigation); databases_->setObjectName("databases"); databases_->setAccessibleName("Database");
     views_=new QComboBox(navigation); views_->setObjectName("savedViews"); views_->setAccessibleName("Saved view");
-    navigation_layout->addWidget(databases_); navigation_layout->addWidget(views_);
+    auto* database_row=new QHBoxLayout;
+    auto* database_trash=new QToolButton(navigation); database_trash->setObjectName("trashDatabaseButton");
+    database_row->addWidget(databases_,1); database_row->addWidget(database_trash);
+    navigation_layout->addLayout(database_row); navigation_layout->addWidget(views_);
     table_=new QTableWidget(navigation); table_->setObjectName("databaseTable"); table_->setAccessibleName("Database entries");
     table_->setSelectionBehavior(QAbstractItemView::SelectRows); table_->setSelectionMode(QAbstractItemView::SingleSelection);
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
@@ -237,16 +248,20 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     add("New view","newView",[this]{ edit_view(true); });
     add("Edit view","editView",[this]{ edit_view(false); });
     add("Link…","insertLink",[this]{ insert_link(); });
-    add("Trash page","trashPage",[this]{
-        if (!session_.has_page() || !flush()) return;
-        const auto id=session_.record().document.id; workspace_.trash_page(id,true); session_.close(); switch_database();
-    });
-    add("Trash database","trashDatabase",[this]{ if (flush() && !database_id_.empty()) { workspace_.trash_database(database_id_,true); session_.close(); refresh_databases(); } });
+    auto* block_trash_action=operation("Move block to Trash…","trashBlock",[this]{ trash_current_block(); });
+    auto* page_trash_action=operation("Move page to Trash…","trashPage",[this]{ trash_current_page(); });
+    auto* database_trash_action=operation("Move database to Trash…","trashDatabase",[this]{ trash_current_database(); });
+    configure_trash_button(page_trash,page_trash_action,TrashScope::Page);
+    configure_trash_button(database_trash,database_trash_action,TrashScope::Database);
+    auto* block_bar=findChild<QToolBar*>("blockControls"); block_bar->addSeparator();
+    auto* block_trash=new QToolButton(block_bar); block_trash->setObjectName("trashBlockButton");
+    configure_trash_button(block_trash,block_trash_action,TrashScope::Block); block_bar->addWidget(block_trash);
     add("Restore…","restoreTrash",[this]{ show_trash(); });
     autosave_=new QTimer(this); autosave_->setSingleShot(true); autosave_->setInterval(500);
     connect(autosave_,&QTimer::timeout,this,[this]{ flush(); });
     connect(page_editor(),&QTextEdit::textChanged,this,&WorkspaceWindow::mark_pending);
     connect(page_editor(),&QTextEdit::cursorPositionChanged,this,&WorkspaceWindow::update_attachment_actions);
+    connect(page_editor(),&QTextEdit::cursorPositionChanged,this,&WorkspaceWindow::update_trash_actions);
     connect(title_,&QLineEdit::textEdited,this,[this](const QString& title){
         if (!loading_) { page_editor()->set_page_title(title); mark_pending(); }
     });
@@ -743,6 +758,7 @@ void WorkspaceWindow::update_transfer_actions()
     findChild<QAction*>("undoBlockTransfer")->setEnabled(last_transfer_ && last_transfer_->applied);
     findChild<QAction*>("redoBlockTransfer")->setEnabled(last_transfer_ && !last_transfer_->applied);
     update_attachment_actions();
+    update_trash_actions();
 }
 void WorkspaceWindow::update_attachment_actions()
 {
