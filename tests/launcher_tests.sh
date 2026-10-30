@@ -126,3 +126,17 @@ has_argument /output/backup || fail 'backup destination was lost'
 reset_calls
 if bash "$launcher" backup "$fixture/source" "$fixture/source/inside" 2>/dev/null; then fail 'nested backup must fail'; fi
 printf 'PASS: launcher rebuild, cancel, selection, quoting, mounts, demo, and failures\n'
+reset_calls
+bash "$launcher" export-md "$fixture/source" "$fixture/markdown"
+count_calls 2
+load_call 1
+has_argument export-md || fail 'Markdown export command lost'
+has_argument /output/markdown || fail 'Markdown export destination lost'
+reset_calls
+bash "$launcher" import-md "$import_folder" "$fixture/import-workspace" 'database-id'
+count_calls 2
+load_call 1
+has_argument "type=bind,\"source=$escaped_import\",\"target=/source\",readonly" || fail 'Markdown source must be read-only'
+has_argument "type=bind,\"source=$fixture/import-workspace\",\"target=/data\"" || fail 'Markdown destination workspace must be explicit'
+has_argument database-id || fail 'destination database ID lost'
+printf 'PASS: Markdown import/export commands and mount scopes\n'

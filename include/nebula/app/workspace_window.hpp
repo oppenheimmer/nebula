@@ -69,6 +69,7 @@ private:
     void show_attachment_audit();
     void update_attachment_actions();
     void show_search();
+    void markdown_interchange(bool importing);
     QString last_search_;
     void switch_database();
     void mark_pending();

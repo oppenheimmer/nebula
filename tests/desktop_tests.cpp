@@ -88,6 +88,7 @@ class DesktopTests : public QObject {
 private slots:
     void search_shortcut_opens_matching_block_and_preserves_history();
     void search_scope_cancel_and_rebuild_with_pending_edits();
+    void markdown_controls_report_conversion_and_keep_existing_pages();
     void default_location_is_suggested_without_creating_it();
     void cancel_does_not_create_a_workspace();
     void accepting_expands_home_and_normalizes_path();
@@ -1072,6 +1073,26 @@ void DesktopTests::search_scope_cancel_and_rebuild_with_pending_edits()
     sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search"); QTest::keyClicks(window.page_editor(),"retainedpending");
     window.findChild<QAction*>("rebuildSearch")->trigger(); QCOMPARE(w.search("retainedpending").size(),std::size_t(1));
     QCOMPARE(w.pages(first.id).size(),std::size_t(1)); QCOMPARE(w.pages(second.id).size(),std::size_t(1));
+}
+void DesktopTests::markdown_controls_report_conversion_and_keep_existing_pages()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); const auto original=w.create_page(db.id,"Original");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(original.document.id)); QTest::keyClicks(window.page_editor(),"pending export");
+    const auto exported=folder.filePath("export"); QTimer choose; bool report=false; QString error_text,selected;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        if (auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {if (box->icon()!=QMessageBox::Information) error_text=box->text(); report=true; box->accept();}
+        else if (auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            dialog->selectFile(exported); if (auto* name=dialog->findChild<QLineEdit*>("fileNameEdit")) name->setText(exported);
+            selected=dialog->selectedFiles().value(0); QMetaObject::invokeMethod(dialog,"accept");
+        }
+    });
+    choose.start(10); window.findChild<QAction*>("exportMarkdown")->trigger(); choose.stop(); QVERIFY(report); QVERIFY2(error_text.isEmpty(),qPrintable(error_text));
+    QCOMPARE(selected,exported); QVERIFY(QFile::exists(exported+"/CONVERSION.txt")); QCOMPARE(w.load_page(original.document.id).document.blocks[0].runs[0].text,std::string("pending export"));
+    report=false; choose.start(10); window.findChild<QAction*>("importMarkdown")->trigger(); choose.stop(); QVERIFY(report);
+    QCOMPARE(w.pages(db.id).size(),std::size_t(2)); QVERIFY(window.page_editor()->snapshot().id!=original.document.id);
+    QCOMPARE(window.page_editor()->snapshot().blocks[0].runs[0].text,std::string("pending export"));
+    QTimer::singleShot(0,&window,[]{auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->reject();});
+    window.findChild<QAction*>("importMarkdown")->trigger(); QCOMPARE(w.pages(db.id).size(),std::size_t(2));
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

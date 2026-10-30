@@ -66,6 +66,12 @@ Words are AND-combined; a trailing * requests a prefix. Search → Rebuild searc
 index repairs derived search data. Language behavior and limits are documented in
 [SEARCH.md](docs/SEARCH.md).
 
+Import / Export provides Markdown folder conversion with a visible report.
+Imports create new pages in the selected database and remap links within the
+folder. Exports include active pages and referenced managed files. Markdown
+omits properties, views, trash and recovery history; see the supported subset and
+conversion limits in [MARKDOWN.md](docs/MARKDOWN.md).
+
 The folder chooser sees your home directory read-only. The editor receives only
 the selected workspace as a writable data mount at `/data`. To select a location
 directly, including a location outside your home:

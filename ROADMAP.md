@@ -513,7 +513,7 @@ Deliverables: searchable notes and documented export/import formats.
   consistent with edits and trash changes and provide a rebuild path.
 - [x] M07.2 Define and test search/tokenization behavior for supported languages;
   search results should navigate to the relevant page or block.
-- [ ] M07.3 Implement a documented Markdown import/export subset with explicit
+- [x] M07.3 Implement a documented Markdown import/export subset with explicit
   handling of unsupported formatting, attachment references, internal link paths/
   anchors, and targets outside the exported set.
 - [ ] M07.4 Implement versioned JSON export/import that preserves the supported
@@ -1340,6 +1340,45 @@ begin as part of this shutdown.
   task IDs, local documentation links/fences and `git diff --check` passed.
 - **Next:** M07.3 Markdown subset, M07.4–M07.6 lossless portable interchange and
   validation, then M07.7 reference filters. M08–M10 remain Not started.
+
+### Markdown conversion checkpoint — 2026-10-30
+
+- Pushed search commit `a679af4` to `origin/main`. Completed M07.3 with a
+  separate `nebula_interchange` target using existing Qt Core/SQLite/file adapters.
+  The documented subset supports paragraph/heading/list/to-do/divider blocks,
+  asterisk emphasis, soft breaks, empty blocks, explicit page/block links and
+  copied managed image/file assets. Export uses safe stable-ID filenames/anchors;
+  import allocates new page/block/file IDs before resolving forward references.
+  Duplicate titles remain distinct, missing targets remain unresolved, and
+  pre-existing pages are never overwritten.
+- Added GUI folder controls with conversion reports and headless Docker
+  `export-md`/`import-md` commands. Exports also write CONVERSION.txt. Markdown
+  drops properties/views/timestamps/trash/recovery/identities, flattens nesting,
+  fixes default labels and turns out-of-set/unresolved destinations into label
+  text with warnings. Remote/unsupported links become reported text without
+  fetching. See [MARKDOWN.md](docs/MARKDOWN.md) for the exact application subset;
+  general CommonMark compatibility is not claimed.
+- Imports save new pages, links, managed-file metadata and search indexes in one
+  transaction. Malformed UTF-8/NUL text, duplicate anchors, traversal/symlink/
+  missing attachments and SQL failures preserve existing data and clean copied
+  uncommitted files. Export refuses existing destinations and managed attachment
+  locations; missing managed bytes remove partial output.
+- **Verification:** GCC/Clang passed all seven CTest entries, including six
+  interchange, 48 storage, 57 desktop, 52 editor and 23 core cases plus launcher/
+  smoke. Tests cover rich text/soft breaks, duplicate titles, precise block
+  remapping, forward/missing links, non-ASCII unsafe block IDs, images/inline assets,
+  actual file bytes, explicit loss reports, remote resource refusal, invalid input,
+  transaction rollback and partial-export cleanup. Native Xwayland passed all 52
+  editor and 57 desktop cases including the import/export dialogs, visible report,
+  pending-edit flush and cancel. The dialog test fills the visible filename entry
+  because changing a preselected filename through selectFile alone did not update
+  the shown save entry. Real Docker GUI workspace creation followed by headless
+  Markdown import/export passed with Unicode/comma/quote folder names and unchanged
+  original attachment bytes at `/tmp/nebula-m07.BQJ8dY`. All 69 task IDs,
+  prose documentation links/fences, Bash syntax and `git diff --check` passed.
+- **Next:** implement lossless JSON and complete M07.4–M07.6 validation/round trips,
+  then M07.7 reference filters. M07 remains In progress; M08–M10 remain Not started.
+  The Linux environment is unchanged; OS IME/reader and macOS remain unverified.
 
 ## Technical references discussed
 

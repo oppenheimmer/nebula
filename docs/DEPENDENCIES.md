@@ -95,6 +95,11 @@ Search normalization uses existing Qt Core Unicode operations in the storage
 adapter; the document core still builds without Qt/SQLite. See
 [SEARCH.md](SEARCH.md) for tokenization and rebuild behavior.
 
+The separate interchange target uses existing Qt Core, SQLite and managed-file
+adapters. Its Markdown subset has an application-owned parser; no Markdown runtime
+or HTML resource loader is added. Linux/macOS portability follows those existing
+dependencies, with actual macOS verification still required.
+
 - [Qt licensing](https://doc.qt.io/qt-6/licensing.html)
 - [Qt Widgets](https://doc.qt.io/qt-6/qtwidgets-index.html)
 - [Qt Test](https://doc.qt.io/qt-6/qttest-index.html)

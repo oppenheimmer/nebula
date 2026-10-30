@@ -14,6 +14,8 @@ Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh test-native
        ./scripts/dev.sh backup SOURCE_FOLDER NEW_BACKUP_FOLDER
        ./scripts/dev.sh restore BACKUP_FOLDER NEW_WORKSPACE_FOLDER
+       ./scripts/dev.sh export-md WORKSPACE_FOLDER NEW_MARKDOWN_FOLDER
+       ./scripts/dev.sh import-md MARKDOWN_FOLDER WORKSPACE_FOLDER DATABASE_ID
        ./scripts/dev.sh run [--import-root HOST_FOLDER] [prototype options]
        ./scripts/dev.sh shell
 
@@ -59,7 +61,7 @@ case "$command_name" in
         [[ "$mode" == single || "$mode" == separate ]] || { usage >&2; exit 2; }
         compiler=gcc
         ;;
-    run|test-native|shell|backup|restore) compiler=gcc ;;
+    run|test-native|shell|backup|restore|export-md|import-md) compiler=gcc ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -92,7 +94,7 @@ case "$command_name" in
     shell)
         exec "${run[@]}" -it "$image" /bin/bash
         ;;
-    backup|restore)
+    backup|restore|export-md)
         if (( $# != 3 )); then usage >&2; exit 2; fi
         source_folder=$(CDPATH= cd -- "$2" && pwd -P)
         destination_parent=$(dirname -- "$3")
@@ -109,6 +111,16 @@ case "$command_name" in
         exec "${run[@]}" --mount "$(mount_spec "$source_folder" /source readonly)" \
             --mount "$(mount_spec "$destination_parent" /output)" "$image" \
             /build/nebula_workspace "$command_name" /source "/output/$destination_name"
+        ;;
+    import-md)
+        if (( $# != 4 )); then usage >&2; exit 2; fi
+        source_folder=$(CDPATH= cd -- "$2" && pwd -P)
+        workspace_folder=$(CDPATH= cd -- "$3" && pwd -P)
+        "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON && cmake --build /build --parallel 4'
+        exec "${run[@]}" --mount "$(mount_spec "$source_folder" /source readonly)" \
+            --mount "$(mount_spec "$workspace_folder" /data)" "$image" \
+            /build/nebula_workspace import-md /source /data "$4"
         ;;
     run|test-native)
         auth_file=${XAUTHORITY:-${HOME}/.Xauthority}

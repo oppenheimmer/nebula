@@ -43,6 +43,7 @@ struct AttachmentIssue {
     bool removable = false, prevents_backup = false;
 };
 struct SearchResult { std::string page_id, block_id, title, database_name, context; };
+struct InterchangeReport { std::vector<std::string> pages, warnings; };
 
 class Workspace {
 public:
@@ -89,6 +90,8 @@ public:
     void rebuild_links();
     std::vector<SearchResult> search(const std::string& text, const std::string& database = {}) const;
     void rebuild_search();
+    InterchangeReport export_markdown(const std::filesystem::path& destination) const;
+    InterchangeReport import_markdown(const std::filesystem::path& source, const std::string& database);
     void backup_to(const std::filesystem::path& destination) const;
     static Workspace restore(const std::filesystem::path& backup, const std::filesystem::path& destination);
 
@@ -101,7 +104,8 @@ private:
     void replace_transfer_documents(const Page& source, std::int64_t source_revision,
                                     const Page& destination, std::int64_t destination_revision);
     PageRecord create_page_in_transaction(const std::string& database, const std::string& title,
-        const std::map<std::string,PropertyValue>& properties, const std::vector<Block>& blocks);
+        const std::map<std::string,PropertyValue>& properties, const std::vector<Block>& blocks,
+        const std::string& identity = {});
     void save_page_in_transaction(PageRecord& page);
     std::vector<AttachmentIssue> audit_attachments_unlocked() const;
 };

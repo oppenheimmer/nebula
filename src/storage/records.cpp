@@ -121,9 +121,10 @@ PageRecord Workspace::create_page(const std::string& database, const std::string
     transaction.commit(); return page;
 }
 PageRecord Workspace::create_page_in_transaction(const std::string& database, const std::string& title,
-    const std::map<std::string,PropertyValue>& values, const std::vector<Block>& initial_blocks)
+    const std::map<std::string,PropertyValue>& values, const std::vector<Block>& initial_blocks,
+    const std::string& identity)
 {
-    const auto page_id = sql::id(database_.get());
+    const auto page_id = identity.empty()?sql::id(database_.get()):identity;
     PageRecord page{{page_id, {{sql::id(database_.get()), "", BlockKind::Paragraph, {}}}}, database, title, values, 1, false};
     if (!initial_blocks.empty()) page.document.blocks=initial_blocks;
     validate(page.document);

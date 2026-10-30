@@ -143,6 +143,12 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     attachment_action("Save a copy…","exportAttachment",[this]{ export_attachment(); });
     attachment_action("Check managed files…","auditAttachments",[this]{ show_attachment_audit(); });
     auto* search_menu=menuBar()->addMenu("&Search");
+    auto* interchange_menu=menuBar()->addMenu("&Import / Export");
+    for (const bool importing:{true,false}) {
+        auto* action=interchange_menu->addAction(importing?"Import Markdown folder…":"Export Markdown folder…");
+        action->setObjectName(importing?"importMarkdown":"exportMarkdown");
+        connect(action,&QAction::triggered,this,[this,importing] {try {markdown_interchange(importing);} catch(const std::exception& e){error(this,e);}});
+    }
     auto* search=search_menu->addAction("Find in workspace…"); search->setObjectName("searchWorkspace"); search->setShortcut(QKeySequence("Ctrl+Shift+F"));
     connect(search,&QAction::triggered,this,[this]{ try { show_search(); } catch(const std::exception& e){error(this,e);} });
     auto* rebuild=search_menu->addAction("Rebuild search index"); rebuild->setObjectName("rebuildSearch");
@@ -730,6 +736,24 @@ void WorkspaceWindow::show_search()
     connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     run(); query->selectAll(); query->setFocus(); dialog.resize(900,500); dialog.exec(); last_search_=query->text();
     activateWindow(); page_editor()->setFocus(); if (!page.empty()) open_page(page,block);
+}
+void WorkspaceWindow::markdown_interchange(bool importing)
+{
+    if (!flush()) return;
+    if (importing && database_id_.empty()) throw std::invalid_argument("Select a destination database first");
+    QFileDialog dialog(this,importing?"Import Markdown folder":"New Markdown export folder",q(workspace_.directory().u8string()));
+    dialog.setObjectName(importing?"markdownImport":"markdownExport"); dialog.setOption(QFileDialog::DontUseNativeDialog);
+    dialog.setFileMode(importing?QFileDialog::Directory:QFileDialog::AnyFile);
+    if (!importing) {dialog.setAcceptMode(QFileDialog::AcceptSave); dialog.selectFile("markdown-export");}
+    const auto accepted=dialog.exec()==QDialog::Accepted; activateWindow(); page_editor()->setFocus();
+    if (!accepted || dialog.selectedFiles().isEmpty()) return;
+    const auto folder=std::filesystem::u8path(s(dialog.selectedFiles()[0]));
+    const auto report=importing?workspace_.import_markdown(folder,database_id_):workspace_.export_markdown(folder);
+    if (importing) {refresh_table(); if (!report.pages.empty()) open_page(report.pages.front());}
+    QString message=QString::number(report.pages.size())+(importing?" pages imported.":" pages exported.");
+    for (const auto& warning:report.warnings) message+="\n\n"+q(warning);
+    QMessageBox::information(this,importing?"Markdown import report":"Markdown export report",message);
+    activateWindow(); page_editor()->setFocus();
 }
 void WorkspaceWindow::import_attachment(bool image)
 {
