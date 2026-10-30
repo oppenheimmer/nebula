@@ -2,15 +2,26 @@
 #include "nebula/format/codec.hpp"
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QTest>
 #include <sqlite3.h>
+#include <functional>
 using namespace nebula;
 namespace {
 std::filesystem::path path(const QString& value){return std::filesystem::u8path(value.toUtf8().constData());}
 void put(const QString& file,const QByteArray& bytes){QFile out(file); if(!out.open(QIODevice::WriteOnly)||out.write(bytes)!=bytes.size()) throw std::runtime_error("test write failed");}
 QByteArray read(const QString& file){QFile in(file); if(!in.open(QIODevice::ReadOnly)) throw std::runtime_error("test read failed"); return in.readAll();}
 std::string text(const Block& block){std::string result; for(const auto& run:block.runs) result+=run.text; return result;}
+QJsonObject object(const QString& file){return QJsonDocument::fromJson(read(file)).object();}
+void put(const QString& file,const QJsonObject& value){put(file,QJsonDocument(value).toJson());}
+void sql(const QString& file,const char* command){
+    sqlite3* raw=nullptr; if(sqlite3_open(file.toUtf8().constData(),&raw)!=SQLITE_OK) throw std::runtime_error("test database open failed");
+    std::unique_ptr<sqlite3,DatabaseCloser> connection(raw);
+    if(sqlite3_exec(raw,command,nullptr,nullptr,nullptr)!=SQLITE_OK) throw std::runtime_error(sqlite3_errmsg(raw));
+}
 }
 class InterchangeTests:public QObject{
     Q_OBJECT
@@ -21,6 +32,10 @@ private slots:
     void markdown_forward_missing_and_duplicate_anchors();
     void markdown_sql_failure_and_missing_export_file_leave_no_partial_data();
     void markdown_image_inline_asset_and_unsafe_identity_roundtrip();
+    void json_roundtrip_preserves_the_full_model_and_retained_files();
+    void json_rejects_unsupported_malformed_and_colliding_rows();
+    void json_rejects_missing_changed_unsafe_and_unlisted_files();
+    void json_rejects_duplicate_keys_including_escaped_names();
 };
 void InterchangeTests::markdown_subset_remaps_pages_blocks_and_files()
 {
@@ -117,6 +132,120 @@ void InterchangeTests::markdown_image_inline_asset_and_unsafe_identity_roundtrip
     QCOMPARE(copy.document.blocks.back().runs[1].asset->attachment_id,copy.document.blocks[1].attachment_id);
     QCOMPARE(copy.document.blocks.back().runs.back().reference->target_id,copy.document.blocks[0].id);
     QCOMPARE(read(QString::fromStdString(w.attachment_path(copy.document.blocks[1].attachment_id).u8string())),read(folder.filePath("image.png")));
+}
+void InterchangeTests::json_roundtrip_preserves_the_full_model_and_retained_files()
+{
+    QTemporaryDir folder; const auto root=folder.filePath("workspace"); auto w=Workspace::open(path(root));
+    const auto db=w.create_database("Notes"), journal=w.create_database("Journal");
+    const auto title=w.add_property(db.id,"Text",PropertyKind::Text), score=w.add_property(db.id,"Score",PropertyKind::Number),
+        date=w.add_property(db.id,"Entry date",PropertyKind::Date), done=w.add_property(db.id,"Done",PropertyKind::Checkbox),
+        tags=w.add_property(db.id,"Tags",PropertyKind::Tags), unset=w.add_property(db.id,"Unset",PropertyKind::Text);
+    auto target=w.create_page(db.id,"Duplicate",{},{{"heading",{},BlockKind::Heading,{{u8"見出し",true,true}}},
+        {"child","heading",BlockKind::Paragraph,{{"deleted child"}}}});
+    auto source=w.create_page(db.id,"Duplicate",{{title.id,std::string("text\0after",10)},{score.id,42.5},{date.id,Date{"2024-02-29"}},
+        {done.id,false},{tags.id,std::vector<std::string>{"comma,tag",u8"日本語"}},{unset.id,{}}},
+        {{"source",{},BlockKind::Paragraph,{{"default",false,false,Reference{ReferenceKind::Page,target.document.id,{},{},false}},
+            {" rich ",true,true},{"custom",true,false,Reference{ReferenceKind::Block,"heading"}},
+            {"future",false,false,Reference{ReferenceKind::Page,{},"Future",journal.id,false}},
+            {"unavailable",false,true,Reference{ReferenceKind::Block,"missing-stable-target"}}}},
+        {"bullet",{},BlockKind::Bullet,{{u8"Unicode 😀\u2028soft"}}},{"todo",{},BlockKind::Todo,{{"completed"}},{},true},
+        {"divider",{},BlockKind::Divider}});
+    put(folder.filePath("file.txt"),"retained bytes"); const auto file=w.import_attachment(source,"divider",path(folder.filePath("file.txt")),false);
+    for(auto& block:source.document.blocks) if(block.id==file.card) block.attachment_id.clear();
+    w.save_page(source); // Keep registered bytes even when no current object references them.
+    put(folder.filePath("image.png"),"image bytes"); const auto image=w.import_attachment(source,file.following,path(folder.filePath("image.png")),true);
+    source.document.blocks[0].runs.push_back({"",false,true,{},Asset{true,"inline image",image.file.id}}); w.save_page(source);
+    target.document.blocks.pop_back(); w.save_page(target);
+    target.document.blocks.push_back({"restored",{},BlockKind::Paragraph,{{"restored fragment"}}}); w.save_page(target);
+    target.document.blocks.pop_back(); w.save_page(target);
+    for(const auto& group:w.deleted_blocks()) if(group.label=="restored fragment") target=w.restore_deleted_blocks(group.id);
+    View view; view.database_id=db.id; view.name="Filtered"; view.visible_properties={date.id,title.id,tags.id,done.id};
+    view.filters={{score.id,Comparison::Greater,1.0},{tags.id,Comparison::Contains,std::string("comma,tag")}};
+    view.sort_property=score.id; view.ascending=false; w.save_view(view);
+    const auto trashed=w.create_page(journal.id,"Trashed",{},{{"trashed",{},BlockKind::Paragraph,{{"keep trash",false,false,Reference{ReferenceKind::Page,source.document.id}}}}});
+    w.trash_page(trashed.document.id,true); w.trash_database(journal.id,true);
+    QDir(root).mkpath("attachments/legacy"); put(root+"/attachments/legacy/old.txt","legacy bytes");
+    sql(root+"/nebula.sqlite3","UPDATE pages SET revision=9007199254740993 WHERE title='Duplicate'; DELETE FROM page_search; DELETE FROM links");
+    w.export_json(path(folder.filePath("export"))); const auto before=object(folder.filePath("export/workspace.json"));
+    auto imported=Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("imported")));
+    QCOMPARE(imported.id(),w.id()); QCOMPARE(imported.load_page(source.document.id).revision,std::int64_t(9007199254740993LL));
+    QCOMPARE(encode_document(imported.load_page(source.document.id).document),encode_document(w.load_page(source.document.id).document));
+    QCOMPARE(std::get<Date>(imported.load_page(source.document.id).properties.at(date.id)).iso,std::string("2024-02-29"));
+    QCOMPARE(imported.views(db.id)[0].visible_properties,view.visible_properties);
+    QCOMPARE(imported.backlinks(ReferenceKind::Page,target.document.id).size(),std::size_t(2)); QCOMPARE(imported.search("Unicode").size(),std::size_t(1));
+    QCOMPARE(imported.databases(true).size(),std::size_t(2)); QCOMPARE(imported.databases().size(),std::size_t(1));
+    QCOMPARE(imported.deleted_blocks().size(),std::size_t(1)); QCOMPARE(imported.deleted_blocks()[0].label,std::string("deleted child"));
+    QCOMPARE(read(QString::fromStdString(imported.attachment_path(file.file.id).u8string())),QByteArray("retained bytes"));
+    imported.export_json(path(folder.filePath("again"))); QCOMPARE(object(folder.filePath("again/workspace.json")),before);
+    const auto original=read(root+"/nebula.sqlite3");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(root)));
+    QCOMPARE(read(root+"/nebula.sqlite3"),original);
+    imported.backup_to(path(folder.filePath("backup"))); auto restored=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
+    QCOMPARE(restored.load_page(source.document.id).revision,std::int64_t(9007199254740993LL));
+}
+void InterchangeTests::json_rejects_unsupported_malformed_and_colliding_rows()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes");
+    const auto property=w.add_property(db.id,"Text",PropertyKind::Text); auto page=w.create_page(db.id,"Keep",{{property.id,std::string("valid")}});
+    View view; view.database_id=db.id; view.name="All"; view.visible_properties={property.id}; w.save_view(view);
+    page.document.blocks.push_back({"removed",{},BlockKind::Paragraph,{{"archive"}}}); w.save_page(page); page.document.blocks.pop_back(); w.save_page(page);
+    w.export_json(path(folder.filePath("export"))); const auto file=folder.filePath("export/workspace.json"); const auto valid=object(file);
+    const auto rows=valid["tables"].toObject();
+    std::vector<QJsonObject> bad;
+    auto modified=valid; modified["version"]=99; bad.push_back(modified);
+    modified=valid; modified["new_feature"]=true; bad.push_back(modified);
+    modified=valid; modified.remove("tables"); bad.push_back(modified);
+    auto add=[&](const char* table,const std::function<void(QJsonObject&)>& mutate) {
+        auto data=rows; auto list=data[table].toArray(); auto row=list[0].toObject(); mutate(row); list[0]=row; data[table]=list;
+        auto value=valid; value["tables"]=data; bad.push_back(value);
+    };
+    add("pages",[](auto& row){row["revision"]=9007199254740992.0;});
+    add("pages",[](auto& row){row["revision"]="9223372036854775808";});
+    add("pages",[](auto& row){row["trashed"]="false";});
+    add("pages",[](auto& row){row["database_id"]="missing";});
+    add("pages",[](auto& row){row["created_at"]="not a timestamp";});
+    add("blocks",[](auto& row){row["parent_id"]="missing";});
+    add("blocks",[](auto& row){row["position"]="8";});
+    add("blocks",[](auto& row){auto payload=row["payload"].toObject(); payload["version"]=99; row["payload"]=payload;});
+    add("blocks",[](auto& row){auto payload=row["payload"].toObject(); payload["new_formatting"]=true; row["payload"]=payload;});
+    add("databases",[](auto& row){row["id"]="";});
+    add("property_values",[](auto& row){row["value_json"]=QJsonObject{{"version",1},{"type",2},{"value",5.0}};});
+    add("saved_views",[](auto& row){auto settings=row["settings"].toObject(); settings["visible"]=QJsonArray{"unknown-column"}; row["settings"]=settings;});
+    add("deleted_blocks",[](auto& row){auto fragment=row["fragment"].toObject(); fragment["id"]="wrong-page"; row["fragment"]=fragment;});
+    {auto data=rows; auto list=data["pages"].toArray(); list.append(list[0]); data["pages"]=list; modified=valid; modified["tables"]=data; bad.push_back(modified);}
+    for(std::size_t i=0;i<bad.size();++i) {
+        put(file,bad[i]); const auto output=folder.filePath("reject-"+QString::number(i));
+        QVERIFY_THROWS_EXCEPTION(std::exception,Workspace::import_json(path(folder.filePath("export")),path(output)));
+        QVERIFY(!QFile::exists(output)); QCOMPARE(w.pages(db.id).size(),std::size_t(1));
+    }
+    put(file,valid); put(file,QByteArray(1,char(0xff)));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("invalid-utf8"))));
+}
+void InterchangeTests::json_rejects_missing_changed_unsafe_and_unlisted_files()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); auto page=w.create_page(db.id,"Keep");
+    put(folder.filePath("file"),"bytes"); const auto imported=w.import_attachment(page,page.document.blocks[0].id,path(folder.filePath("file")),false);
+    w.export_json(path(folder.filePath("export"))); const auto file=folder.filePath("export/workspace.json"); const auto valid=object(file);
+    const auto attachment=folder.filePath("export/attachments/"+QString::fromStdString(imported.file.id));
+    put(attachment,"changed"); QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("changed"))));
+    QVERIFY(!QFile::exists(folder.filePath("changed"))); put(attachment,"bytes");
+    auto files=valid["files"].toArray(); auto entry=files[0].toObject(); entry["path"]="../outside"; files[0]=entry;
+    auto modified=valid; modified["files"]=files; put(file,modified);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("unsafe"))));
+    put(file,valid); put(folder.filePath("export/attachments/unlisted"),"extra");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("extra"))));
+    QVERIFY(QFile::remove(folder.filePath("export/attachments/unlisted"))); QVERIFY(QFile::remove(attachment));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("missing"))));
+    QVERIFY(!QFile::exists(folder.filePath("missing")));
+}
+void InterchangeTests::json_rejects_duplicate_keys_including_escaped_names()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); w.create_page(db.id,"Keep");
+    w.export_json(path(folder.filePath("export"))); const auto file=folder.filePath("export/workspace.json"); const auto original=read(file);
+    auto duplicate=original; duplicate.insert(1,"\"version\":1,"); put(file,duplicate);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("duplicate"))));
+    duplicate=original; duplicate.replace("\"checked\": false","\"checked\":false,\"check\\u0065d\":false"); QVERIFY(duplicate!=original); put(file,duplicate);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::import_json(path(folder.filePath("export")),path(folder.filePath("escaped"))));
 }
 QTEST_GUILESS_MAIN(InterchangeTests)
 #include "interchange_tests.moc"

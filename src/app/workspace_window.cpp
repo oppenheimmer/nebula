@@ -2,6 +2,7 @@
 #include "nebula/editor/page_editor.hpp"
 #include "nebula/core/wiki.hpp"
 #include <QAction>
+#include <QApplication>
 #include <QAbstractItemView>
 #include <QCompleter>
 #include <QCheckBox>
@@ -148,6 +149,9 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
         auto* action=interchange_menu->addAction(importing?"Import Markdown folder…":"Export Markdown folder…");
         action->setObjectName(importing?"importMarkdown":"exportMarkdown");
         connect(action,&QAction::triggered,this,[this,importing] {try {markdown_interchange(importing);} catch(const std::exception& e){error(this,e);}});
+        auto* json=interchange_menu->addAction(importing?"Import lossless JSON into new workspace…":"Export lossless JSON folder…");
+        json->setObjectName(importing?"importJson":"exportJson");
+        connect(json,&QAction::triggered,this,[this,importing] {try {json_interchange(importing);} catch(const std::exception& e){error(this,e);}});
     }
     auto* search=search_menu->addAction("Find in workspace…"); search->setObjectName("searchWorkspace"); search->setShortcut(QKeySequence("Ctrl+Shift+F"));
     connect(search,&QAction::triggered,this,[this]{ try { show_search(); } catch(const std::exception& e){error(this,e);} });
@@ -754,6 +758,33 @@ void WorkspaceWindow::markdown_interchange(bool importing)
     for (const auto& warning:report.warnings) message+="\n\n"+q(warning);
     QMessageBox::information(this,importing?"Markdown import report":"Markdown export report",message);
     activateWindow(); page_editor()->setFocus();
+}
+void WorkspaceWindow::json_interchange(bool importing)
+{
+    if (!flush()) return;
+    QString source;
+    if (importing) {
+        QFileDialog dialog(this,"Import lossless JSON folder",QDir("/imports").exists()?"/imports":q(workspace_.directory().u8string()));
+        dialog.setObjectName("jsonImportSource"); dialog.setOption(QFileDialog::DontUseNativeDialog); dialog.setFileMode(QFileDialog::Directory);
+        if (dialog.exec()!=QDialog::Accepted || dialog.selectedFiles().isEmpty()) return;
+        source=dialog.selectedFiles()[0];
+    }
+    QFileDialog dialog(this,importing?"New imported workspace folder":"New lossless JSON export folder",q(workspace_.directory().u8string()));
+    dialog.setObjectName(importing?"jsonImportDestination":"jsonExport"); dialog.setOption(QFileDialog::DontUseNativeDialog);
+    dialog.setAcceptMode(QFileDialog::AcceptSave); dialog.setFileMode(QFileDialog::AnyFile); dialog.selectFile(importing?"imported-workspace":"json-export");
+    const auto accepted=dialog.exec()==QDialog::Accepted; activateWindow(); page_editor()->setFocus();
+    if (!accepted || dialog.selectedFiles().isEmpty()) return;
+    const auto destination=std::filesystem::u8path(s(dialog.selectedFiles()[0]));
+    if (importing) {
+        auto workspace=std::make_shared<Workspace>(Workspace::import_json(std::filesystem::u8path(s(source)),destination));
+        auto* window=new WorkspaceWindow(*workspace); window->setAttribute(Qt::WA_DeleteOnClose);
+        // Keep the imported workspace alive through destruction of its window.
+        connect(window,&QObject::destroyed,qApp,[workspace]{(void)workspace;}); window->show();
+    } else {
+        workspace_.export_json(destination);
+        QMessageBox::information(this,"Lossless JSON export","Exported notes, properties, views, trash, recovery history and retained attachment files to:\n"+q(destination.u8string()));
+        activateWindow(); page_editor()->setFocus();
+    }
 }
 void WorkspaceWindow::import_attachment(bool image)
 {

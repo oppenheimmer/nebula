@@ -21,6 +21,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QProcess>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSignalSpy>
@@ -89,6 +90,7 @@ private slots:
     void search_shortcut_opens_matching_block_and_preserves_history();
     void search_scope_cancel_and_rebuild_with_pending_edits();
     void markdown_controls_report_conversion_and_keep_existing_pages();
+    void json_controls_open_an_owned_fresh_workspace_and_preserve_the_original();
     void default_location_is_suggested_without_creating_it();
     void cancel_does_not_create_a_workspace();
     void accepting_expands_home_and_normalizes_path();
@@ -1093,6 +1095,30 @@ void DesktopTests::markdown_controls_report_conversion_and_keep_existing_pages()
     QCOMPARE(window.page_editor()->snapshot().blocks[0].runs[0].text,std::string("pending export"));
     QTimer::singleShot(0,&window,[]{auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->reject();});
     window.findChild<QAction*>("importMarkdown")->trigger(); QCOMPARE(w.pages(db.id).size(),std::size_t(2));
+}
+void DesktopTests::json_controls_open_an_owned_fresh_workspace_and_preserve_the_original()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes"); const auto original=w.create_page(db.id,"Original");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(original.document.id)); QTest::keyClicks(window.page_editor(),"saved export");
+    const auto exported=folder.filePath("json"), imported=folder.filePath("imported"); QTimer choose; bool report=false; QString error;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        if (auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {if (box->icon()!=QMessageBox::Information) error=box->text(); report=true; box->accept();}
+        else if (auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+            const auto selected=dialog->objectName()=="jsonImportDestination"?imported:exported;
+            dialog->selectFile(selected); if (auto* name=dialog->findChild<QLineEdit*>("fileNameEdit")) name->setText(selected);
+            QMetaObject::invokeMethod(dialog,"accept");
+        }
+    });
+    choose.start(10); window.findChild<QAction*>("exportJson")->trigger(); choose.stop(); QVERIFY2(error.isEmpty(),qPrintable(error)); QVERIFY(report);
+    QVERIFY(QFile::exists(exported+"/workspace.json")); choose.start(10); window.findChild<QAction*>("importJson")->trigger(); choose.stop(); QVERIFY2(error.isEmpty(),qPrintable(error));
+    WorkspaceWindow* copy=nullptr;
+    for(auto* top:QApplication::topLevelWidgets()) if(auto* candidate=qobject_cast<WorkspaceWindow*>(top); candidate && candidate!=&window) copy=candidate;
+    QVERIFY(copy); QVERIFY(copy->open_page(original.document.id)); QCOMPARE(copy->page_editor()->snapshot().blocks[0].runs[0].text,std::string("saved export"));
+    show_window(*copy); QTest::keyClicks(copy->page_editor()," new"); QVERIFY(copy->flush());
+    auto persisted=Workspace::open(path(imported)); QVERIFY(persisted.load_page(original.document.id).document.blocks[0].runs[0].text.find("new")!=std::string::npos);
+    QCOMPARE(w.load_page(original.document.id).document.blocks[0].runs[0].text,std::string("saved export"));
+    QPointer<WorkspaceWindow> pointer(copy); copy->close(); QTRY_VERIFY(pointer.isNull());
+    QVERIFY(window.open_page(original.document.id)); QCOMPARE(w.pages(db.id).size(),std::size_t(1));
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

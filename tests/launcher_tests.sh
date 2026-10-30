@@ -140,3 +140,13 @@ has_argument "type=bind,\"source=$escaped_import\",\"target=/source\",readonly" 
 has_argument "type=bind,\"source=$fixture/import-workspace\",\"target=/data\"" || fail 'Markdown destination workspace must be explicit'
 has_argument database-id || fail 'destination database ID lost'
 printf 'PASS: Markdown import/export commands and mount scopes\n'
+for command in export-json import-json; do
+    reset_calls
+    bash "$launcher" "$command" "$import_folder" "$fixture/$command"
+    count_calls 2
+    load_call 1
+    has_argument "$command" || fail 'JSON command lost'
+    has_argument "type=bind,\"source=$escaped_import\",\"target=/source\",readonly" || fail 'JSON source must be read-only'
+    has_argument "/output/$command" || fail 'JSON destination lost'
+done
+printf 'PASS: lossless JSON command routing and mount scopes\n'

@@ -72,6 +72,12 @@ folder. Exports include active pages and referenced managed files. Markdown
 omits properties, views, trash and recovery history; see the supported subset and
 conversion limits in [MARKDOWN.md](docs/MARKDOWN.md).
 
+Lossless JSON folder export preserves IDs, properties, views, reference states,
+trash, recovery records and retained attachment bytes. JSON import validates into
+a new workspace and opens it in a separate window; existing destinations are
+refused. See [INTERCHANGE.md](docs/INTERCHANGE.md) for the versioned format,
+validation rules, size limit and headless Docker commands.
+
 The folder chooser sees your home directory read-only. The editor receives only
 the selected workspace as a writable data mount at `/data`. To select a location
 directly, including a location outside your home:

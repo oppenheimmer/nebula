@@ -92,6 +92,8 @@ public:
     void rebuild_search();
     InterchangeReport export_markdown(const std::filesystem::path& destination) const;
     InterchangeReport import_markdown(const std::filesystem::path& source, const std::string& database);
+    void export_json(const std::filesystem::path& destination) const;
+    static Workspace import_json(const std::filesystem::path& source, const std::filesystem::path& destination);
     void backup_to(const std::filesystem::path& destination) const;
     static Workspace restore(const std::filesystem::path& backup, const std::filesystem::path& destination);
 

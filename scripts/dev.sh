@@ -16,6 +16,8 @@ Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh restore BACKUP_FOLDER NEW_WORKSPACE_FOLDER
        ./scripts/dev.sh export-md WORKSPACE_FOLDER NEW_MARKDOWN_FOLDER
        ./scripts/dev.sh import-md MARKDOWN_FOLDER WORKSPACE_FOLDER DATABASE_ID
+       ./scripts/dev.sh export-json WORKSPACE_FOLDER NEW_EXPORT_FOLDER
+       ./scripts/dev.sh import-json EXPORT_FOLDER NEW_WORKSPACE_FOLDER
        ./scripts/dev.sh run [--import-root HOST_FOLDER] [prototype options]
        ./scripts/dev.sh shell
 
@@ -61,7 +63,7 @@ case "$command_name" in
         [[ "$mode" == single || "$mode" == separate ]] || { usage >&2; exit 2; }
         compiler=gcc
         ;;
-    run|test-native|shell|backup|restore|export-md|import-md) compiler=gcc ;;
+    run|test-native|shell|backup|restore|export-md|import-md|export-json|import-json) compiler=gcc ;;
     *) usage >&2; exit 2 ;;
 esac
 
@@ -94,7 +96,7 @@ case "$command_name" in
     shell)
         exec "${run[@]}" -it "$image" /bin/bash
         ;;
-    backup|restore|export-md)
+    backup|restore|export-md|export-json|import-json)
         if (( $# != 3 )); then usage >&2; exit 2; fi
         source_folder=$(CDPATH= cd -- "$2" && pwd -P)
         destination_parent=$(dirname -- "$3")

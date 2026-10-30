@@ -63,7 +63,8 @@ reports it. Default reference labels become fixed labels after import.
 Unresolved, unavailable, trashed or out-of-set destinations export as visible label
 text, with a warning. Legacy cards lacking managed bytes also become label text.
 Embedded NUL text becomes a replacement character and is reported. This format
-does not preserve the full Nebula model; use lossless JSON when available.
+does not preserve the full Nebula model; use
+[lossless JSON](INTERCHANGE.md) for preservation.
 
 Title line breaks become spaces, and bold/italic presentation on inline assets is
 omitted, with warnings. Managed image bytes are copied without a decoder pass;

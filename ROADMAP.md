@@ -49,11 +49,10 @@ The following remain implementation decisions rather than settled facts:
 - Linux packaging format and the eventual macOS distribution method.
 - Benchmark thresholds; supported search behavior is defined in
   [SEARCH.md](docs/SEARCH.md).
-- Lossless interchange schema and supported Markdown import/export subset; current
-  rich-text/asset payloads are documented in [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
-- Markdown interchange mapping for duplicate titles, custom labels, precise
-  targets and unresolved references; interactive wiki syntax is defined in
-  [LINKS.md](docs/LINKS.md).
+- Cross-platform verification of the defined lossless interchange and Markdown
+  subset; contracts are in [INTERCHANGE.md](docs/INTERCHANGE.md),
+  [MARKDOWN.md](docs/MARKDOWN.md) and
+  [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
 ### Options considered
 
@@ -516,13 +515,13 @@ Deliverables: searchable notes and documented export/import formats.
 - [x] M07.3 Implement a documented Markdown import/export subset with explicit
   handling of unsupported formatting, attachment references, internal link paths/
   anchors, and targets outside the exported set.
-- [ ] M07.4 Implement versioned JSON export/import that preserves the supported
+- [x] M07.4 Implement versioned JSON export/import that preserves the supported
   model, including IDs, properties, blocks, views, internal reference targets/
   labels/unresolved states, and attachment references/files.
-- [ ] M07.5 Define import validation and identity-collision behavior; malformed or
+- [x] M07.5 Define import validation and identity-collision behavior; malformed or
   partially supported input must not silently overwrite existing data. Remap
   internal references consistently if imported identities must change.
-- [ ] M07.6 Verify semantic round trips through the lossless format and test the
+- [x] M07.6 Verify semantic round trips through the lossless format and test the
   documented Markdown limitations with representative fixtures.
 - [ ] M07.7 Add incoming/outgoing link filters to search and saved database views,
   including references to blocks on a selected page; verify structured link queries
@@ -1379,6 +1378,49 @@ begin as part of this shutdown.
 - **Next:** implement lossless JSON and complete M07.4–M07.6 validation/round trips,
   then M07.7 reference filters. M07 remains In progress; M08–M10 remain Not started.
   The Linux environment is unchanged; OS IME/reader and macOS remain unverified.
+
+### Lossless interchange checkpoint — 2026-10-30
+
+- Pushed Markdown commit `a262563` to `origin/main`. Completed M07.4–M07.6.
+  Version 1 JSON exports structured canonical records and a verified attachment
+  file manifest. It preserves all nine canonical tables, explicit order, IDs,
+  rich text, typed/unset properties, views, timestamps/revisions, trash, recovery,
+  reference label/unresolved states and retained/legacy file bytes. Decimal int64
+  strings protect large revisions from other JSON readers' number limits.
+- JSON import requires a fresh directory, rejects existing destinations and
+  unsupported/unknown/duplicate fields, validates trees, relationships, property
+  ownership/types, view settings, recovery records, timestamps and file paths/
+  sizes/hashes, then rebuilds links and search from canonical content. Original
+  exports remain unchanged. Failure removes partial new output. No merge or
+  overwrite mode is implied. Markdown imports instead remap new identities into
+  an existing database; both strategies are documented in
+  [INTERCHANGE.md](docs/INTERCHANGE.md).
+- Added GUI JSON export and import into a separately owned workspace/window,
+  plus headless Docker commands with read-only source mounts. Imported windows
+  keep their workspace alive through close/save/destruction. Editing the imported
+  window does not change original notes. Export manifests are limited to 64 MiB;
+  filesystem permissions/empty directories are outside the document model.
+- **Verification:** GCC and Clang passed all seven CTest entries: 10 interchange,
+  48 storage, 58 desktop, 52 editor and 23 core cases plus launcher/smoke. Full-model
+  export/import/re-export JSON objects compare equal, including all table rows,
+  unknown/unresolved targets, duplicate titles, rich/typed/NUL content, large
+  revisions, restored/unrestored recovery, trashed databases/pages, views,
+  images/inline assets and unused registered/legacy bytes. Tests reject malformed
+  versions, unknown fields, numeric revision coercion/overflow, invalid flags,
+  duplicate IDs/escaped duplicate keys, invalid trees/order, mistyped values,
+  unknown view columns, recovery mismatch, invalid timestamps and missing/
+  modified/unsafe/unlisted files without changing existing notes.
+- Native Xwayland passed all 52 editor and 58 desktop cases, including the actual
+  JSON dialogs and editing/saving/closing a fresh imported window after the import
+  function returns. Real Docker JSON export/import through Unicode/comma/quote
+  paths preserved every canonical row and file byte in the M07 disposable fixture.
+  Clang identified a C++20 structured-binding capture extension; the code now uses
+  ordinary C++17 references. OS IME/reader, crash-kill boundaries and actual macOS
+  transfer remain separately required. GitHub access is available for a real
+  macOS runner when its milestone is reached; no macOS verification is claimed.
+  All 69 task IDs, prose links/fences, Bash syntax and `git diff --check` passed.
+- **Next:** M07.7 structured incoming/outgoing reference filters in search and
+  saved views. M07 remains In progress; M08–M10 remain Not started.
 
 ## Technical references discussed
 

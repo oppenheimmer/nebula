@@ -30,6 +30,11 @@ public:
         if (sqlite3_bind_int64(stmt_.get(), index, value) != SQLITE_OK) throw std::runtime_error(sqlite3_errmsg(db_));
         return *this;
     }
+    Statement& bind_null(int index) {
+        if (sqlite3_bind_null(stmt_.get(),index)!=SQLITE_OK) throw std::runtime_error(sqlite3_errmsg(db_));
+        return *this;
+    }
+    int type(int column) const { return sqlite3_column_type(stmt_.get(),column); }
     bool row() {
         const int status = sqlite3_step(stmt_.get());
         if (status == SQLITE_ROW) return true;
