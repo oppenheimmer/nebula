@@ -1333,6 +1333,10 @@ milestone, evidence, and the resulting action.
   timed out although the requested focus speech appeared in the file on exit.
   Its private test-user customization sets line buffering for that log only;
   speech generation and the installed reader remain unchanged.
+- **G34 — New CMake deprecates the older SQLite target alias (2026-10-30,
+  M10.3):** native OpenBSD CMake 4.3.5 warns that `SQLite::SQLite3` should become
+  `SQLite3::SQLite3`. The build/tests pass. Any target-name cleanup must retain
+  the agreed CMake 3.22 baseline; resolve that compatibility choice in M10.3.
 
 ## Suggestions
 
@@ -3011,6 +3015,41 @@ begin as part of this shutdown.
   that full OS profile with focused native regressions. Existing performance
   budgets remain recorded; no new performance claim is made. M09.4 and
   M10.3–M10.5/M10.7 remain open; M11 waits for all preceding milestones.
+
+### Implementation checkpoint verified on real runners — 2026-10-30
+
+- Committed/pushed implementation `894ecb04975a019d9362e63269788495f304371e`
+  with a subject-only message and configured authorship. Both jobs passed in
+  [Linux/desktop run 41058351228](https://github.com/oppenheimmer/nebula/actions/runs/41058351228).
+  GCC, Clang and ASan/UBSan each passed 15/15 CTest groups; core-only passed 2/2.
+  Formatting, five coverage-guided parsers, installed-package checks and ten
+  interaction-suite repetitions passed. Leak detection remains off.
+- The new real-OS desktop job passed on that final source, including BUG-025:
+  59 editor/62 desktop behavior cases, 20 focus repetitions and separately run
+  real IBus/Anthy and Orca speech/selection/focus/persistence checks. This supplies
+  real-runner evidence for the new optional image and scripts, beyond local
+  acceptance. The reader test observed actual generated speech with its log
+  flushed live.
+- All six jobs passed in [native run 41058746415](https://github.com/oppenheimmer/nebula/actions/runs/41058746415)
+  at the same implementation revision. Each BSD independently passed core-only
+  2/2 and full 15/15 groups with warnings-as-errors and offscreen Qt; each skipped
+  the container-specific font fixture and the two Linux-only OS-desktop cases.
+
+| Native guest | Recorded environment | TLS provider |
+| --- | --- | --- |
+| FreeBSD amd64 | 14.5-RELEASE GENERIC; Clang 21.1.8; CMake 3.31.12; SQLite 3.53.4; Qt package 6.11.2_1 | OpenSSL 3.0.21 |
+| OpenBSD amd64 | 8.0 GENERIC.MP#2; Clang 22.1.6; CMake 4.3.5; SQLite 3.53.2; Qt package 6.11.2p1 | LibreSSL 4.4.0 |
+
+- Linux and both BSD consumers again verified backup/JSON bundles from all three
+  origins, covering all six directed cross-OS paths and three same-OS controls.
+  Fresh restores/imports matched canonical records/IDs and managed bytes exactly.
+  No user workspace was uploaded. OpenBSD's CMake target-alias warning is retained
+  as G34 for M10.3; no compiler warning was disabled.
+- Native BSD desktop/IME/reader acceptance and BSD packages remain unverified.
+  M09.4 and M10.3–M10.5/M10.7
+  remain open. M11 remains Not started until all preceding milestones finish.
+  This follow-up changes roadmap evidence only; application tests were not
+  repeated for its prose. Local documentation/status/whitespace checks pass.
 
 ## Technical references discussed
 
