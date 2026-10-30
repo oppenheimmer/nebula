@@ -437,7 +437,7 @@ Deliverables: the production block editor implementing the approach chosen in M0
   verify dragging a subtree, nesting, canceled drops, undo, and keyboard access.
 - [x] M05.5 Integrate consistent undo/redo for text and structural edits with
   autosave; document undo boundaries and whether history survives restart.
-- [ ] M05.6 Implement page/block link resolution using permanent IDs and predictable
+- [x] M05.6 Implement page/block link resolution using permanent IDs and predictable
   behavior when a target is in trash or unavailable. Preserve targets across page
   renames, database moves, heading edits, and block moves between pages.
 - [x] M05.7 Recheck Unicode, synthetic composition, accessible text, and the
@@ -463,7 +463,9 @@ rich clipboard, structural movement, typing groups, and undo after autosave pass
 GCC/Clang and native window tests. The shared format module preserves canonical
 values without linking the editor to SQLite. [CLIPBOARD_FORMAT.md](docs/CLIPBOARD_FORMAT.md)
 defines copied identities, reference remapping, and the supported HTML subset.
-Reference lifecycle, wiki entry, default labels, and navigation history remain open.
+Direct ID resolution, page moves with typed property preservation, and atomic
+cross-page subtree transfers have storage/full-window lifecycle and undo tests.
+Wiki entry, default labels, and navigation history remain open.
 
 ### M06 — Attachments and diary workflow
 
@@ -746,6 +748,43 @@ problems remain in the risk register until reproduced.
 - **Verification:** `empty_list_enter_exits_without_an_extra_block` failed before
   the fix and passes with GCC, Clang, and Xwayland, including undo of checked state.
 
+### BUG-010 — Move dialogs left keyboard shortcuts without an active window
+
+- **Milestone/state/impact:** M05.6; fixed during implementation. After canceling
+  the block-transfer dialog, the next workspace shortcut did not run. Accepting a
+  page move likewise left editor focus null.
+- **Environment/reproduction:** Debian 13 Docker image, Qt 6.8.2, Linux offscreen
+  backend; open/cancel Move block to page…, then press Ctrl+Shift+M. The full-window
+  test observed no active window even after waiting for activation.
+- **Expected:** returning from either move dialog restores the workspace window
+  and editor focus, including the cancel path.
+- **Cause/resolution:** the dialog's modal event loop did not restore parent
+  activation. Both move commands now explicitly activate the workspace window and
+  focus its editor after the dialog returns; tests wait for toolkit activation.
+- **Verification:** the cancel/shortcut and page-move focus tests failed before
+  the change and pass in the GCC suite. Final compiler/native checks are recorded
+  in the execution checkpoint below.
+
+### BUG-011 — Shortcut modifiers and cursor movement triggered false autosaves
+
+- **Milestone/state/impact:** M05; fixed during implementation. Workspace transfer
+  undo rejected an unchanged pair of pages as stale because its own modifier
+  keystrokes triggered a save.
+- **Environment/reproduction:** Debian 13 Docker image, Qt 6.8.2; transfer a block,
+  follow its reference, and press Ctrl+Alt+Z. A focused editor test also presses
+  Control/Alt without entering text: it observed two `textChanged` emissions.
+- **Expected:** modifier keys, ordinary navigation, selection, and copy leave the
+  saved content/revision and edit history unchanged; structural Alt+arrows remain
+  undoable edits.
+- **Cause:** every ordinary key entered `mutate`; even an empty QTextCursor edit
+  group emitted `textChanged`, causing the desktop to mark the page pending.
+- **Resolution:** dispatch modifiers, cursor/selection navigation, copy, and
+  select-all directly to QTextEdit without an edit group. Preserve typing-group
+  boundaries and the existing structural shortcuts.
+- **Verification:** the focused no-edit test failed before the fix (two signals)
+  and passes afterward. The full-window transfer/undo/redo shortcut case also
+  passes; final compiler/native results are recorded below.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -823,6 +862,11 @@ milestone, evidence, and the resulting action.
   Use versioned semantic JSON alongside external text/HTML formats. A copy uses
   fresh inserted identities and remaps references within the copied selection;
   identity-preserving cross-page movement remains a separate application operation.
+- **G21 — Empty editor groups can signal changes (2026-10-30, M05):** Qt 6.8.2
+  emits `textChanged` for empty cursor edit groups around shortcut modifiers.
+  BUG-011 reproduced unnecessary autosaves and revision conflicts. Keep read-only
+  keyboard actions outside mutation groups; exercise shortcuts in the full window
+  in addition to triggering their QAction directly.
 
 ## Work log
 
@@ -1001,6 +1045,51 @@ begin as part of this shutdown.
   stable-ID reference lifecycle and transactional block transfer before layering
   on wiki completion and navigation history. Preserve the local-only scope,
   isolated toolchain, clean ordered roadmap lists, and trailer-free Git messages.
+
+### Stable reference lifecycle and workspace moves checkpoint — 2026-10-30
+
+- Completed M05.6. References resolve directly by permanent page/block ID and
+  current block owner, distinguishing trashed pages/databases and unavailable
+  targets. Following flushes pending edits first; duplicate or reused titles never
+  redirect references. Default/custom display-label updates remain M05.10.
+- Added Workspace menu commands for moving a page between databases and moving
+  the active block subtree to another page. Page moves preserve stored typed
+  values by matching property name/type and adding missing definitions; conflicts
+  roll back the membership, values, revision, and any new definitions. Views retain
+  their settings over the same page identities.
+- Block transfers preserve IDs, descendants, rich content, and internal/external
+  targets while changing both trees, both revisions, and outgoing edges in one
+  transaction. An emptied source gets a fresh paragraph. No deleted fragments
+  are created for transferred blocks. References and aggregated backlinks follow
+  the current owner across reopen, index rebuild, and backup/restore.
+- Workspace moves flush edits and reset the open page's text undo. The latest
+  block transfer has separate window-lifetime undo/redo across navigation; both
+  pages must remain active with matching revisions. It refuses later changes
+  instead of overwriting them and preserves unrelated pages' text undo. This
+  boundary is documented in the README and workspace format; it does not add
+  persistent workspace history. Workspace schema remains version 5.
+- Fixed BUG-010 (move-dialog focus/activation) and BUG-011 (false autosaves from
+  shortcut modifiers and navigation), with failing-before/passing-after checks.
+  Initial GCC runs exposed those failures, including a timeout when the unexpected
+  stale-revision dialog blocked the shortcut test. The final tests also check
+  failed-save move prevention, cancel, keyboard shortcuts, focus, exact moved-block
+  navigation, and refusal to undo over later edits.
+- **Verification:** `./scripts/dev.sh test gcc` and `test clang` passed all six
+  CTest entries: 19 core, 30 storage, 43 editor, and 38 desktop cases, plus launcher
+  and smoke checks. `test core` passed core/launcher without Qt or SQLite.
+  `test-native` passed all 43 editor and 38 desktop cases on Xwayland (counts
+  exclude setup/cleanup). Storage cases inject failures during transfer/undo and
+  property remapping and verify rollback, revisions, links, reopen, and backup
+  restore into a fresh workspace. Checks used the existing Debian 13 image
+  `sha256:d96a2a1a0a4e223d4df47f2088b052961673eb5cc2f3a0e74fe4a0a0893a6f6e`,
+  Qt 6.8.2, SQLite 3.46.1, GCC 14.2.0, and Clang 19.1.7 on the RHEL 9.8 x86_64
+  host. No host dependencies were installed. Documentation/task/link/whitespace
+  checks passed. Real OS IME, screen-reader, and macOS checks remain unperformed;
+  no new performance claim is made by this change.
+- **Next:** M05.8 wiki entry/completion and picker polish, M05.9 outgoing links/
+  source context and back/forward position history, and M05.10 default/custom
+  labels and explicit unresolved create/select-target actions. M05 stays In
+  progress; M06 managed attachments and later milestones remain unfinished.
 
 ## Technical references discussed
 

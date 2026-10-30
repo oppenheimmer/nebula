@@ -66,6 +66,11 @@ bool move_subtree(Page& page, const std::string& block_id, int direction);
 // Reject cycles/invalid destinations without changing the input page.
 bool relocate_subtree(Page& page, const std::string& block_id,
                       const std::string& before_id, const std::string& parent_id);
+// Append a subtree as a root on another page, preserving every transferred ID.
+// If the source becomes empty, insert the supplied fresh paragraph ID.
+// Invalid input leaves both pages unchanged.
+void transfer_subtree(Page& source, Page& destination, const std::string& block_id,
+                      const std::string& empty_source_id);
 bool indent(Page& page, const std::string& block_id);
 bool outdent(Page& page, const std::string& block_id);
 Page sample_page();

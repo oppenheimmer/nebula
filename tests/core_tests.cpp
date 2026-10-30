@@ -111,6 +111,30 @@ int main()
             indent(page, "a");
             check(page.blocks.back().runs[0].reference->target_id == "a1", "Reference retargeted");
         }},
+        {"cross-page transfer preserves subtree and reference identities", [] {
+            auto source=tree(); Page destination{"other",{{"target","",BlockKind::Paragraph,{}}}};
+            source.blocks[1].runs={{"Self",true,false,Reference{ReferenceKind::Block,"a1"}}};
+            transfer_subtree(source,destination,"a","unused");
+            check(ids(source)=="b,b1,c,","Source retained transferred blocks");
+            check(ids(destination)=="target,a,a1,a2,","Subtree order changed");
+            check(destination.blocks[2].parent_id=="a","Child detached");
+            check(destination.blocks[2].runs[0].reference->target_id=="a1","Internal reference retargeted");
+            transfer_subtree(source,destination,"b1","unused");
+            check(destination.blocks.back().parent_id.empty(),"Transferred nested root retained old parent");
+        }},
+        {"cross-page transfer leaves an editable source and rejects collisions atomically", [] {
+            Page source{"source",{{"only","",BlockKind::Paragraph,{{"Keep"}}}}};
+            Page destination{"destination",{{"there","",BlockKind::Paragraph,{}}}};
+            rejects([&]{transfer_subtree(source,destination,"only","there");});
+            check(ids(source)=="only," && ids(destination)=="there,","Invalid transfer changed pages");
+            rejects([&]{transfer_subtree(source,source,"only","fresh");});
+            auto duplicate=destination; duplicate.blocks[0].id="only";
+            rejects([&]{transfer_subtree(source,duplicate,"only","fresh");});
+            rejects([&]{transfer_subtree(source,destination,"missing","fresh");});
+            transfer_subtree(source,destination,"only","fresh");
+            check(ids(source)=="fresh," && source.blocks[0].runs.empty(),"Empty source lacks paragraph");
+            check(ids(destination)=="there,only,","Transferred identity lost");
+        }},
         {"long-page fixture", [] {
             const auto page = long_page(1000); validate(page);
             check(page.blocks.size() == 1000, "Wrong fixture size");

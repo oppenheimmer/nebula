@@ -102,6 +102,8 @@ scrolls the document.
 | Leave the current parent | Shift+Tab, or Outdent |
 | Bold / italic | Ctrl+B / Ctrl+I |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
+| Move the active block and its children to another page | Ctrl+Shift+M, or Workspace → Move block to page… |
+| Undo / redo the latest block transfer | Ctrl+Alt+Z / Ctrl+Alt+Shift+Z, or the Workspace menu |
 | Follow a sample block reference | Ctrl+click the link |
 
 The first sibling cannot be indented. Unavailable toolbar actions are disabled.
@@ -111,6 +113,15 @@ Enter on an empty list/to-do block returns it to a paragraph. Consecutive typing
 forms one undo group until navigation, another command, a focus change, or a pause
 of at least one second.
 Image and file cards are layout representations; files are not imported yet.
+
+Workspace → Move page to database… keeps the page and block identities. Property
+values follow by matching name and type; missing destination properties are added.
+A conflicting property type cancels the whole move without dropping values.
+Moving a block to another page appends its subtree with the original identities,
+so existing links follow it. Both pages save together. An emptied source receives
+an empty paragraph. Moves clear the open page's editing undo. The latest block
+transfer has separate workspace undo/redo, available during this window's lifetime
+while neither affected page has changed since the transfer or its last undo/redo.
 
 Copy/cut/paste within Nebula retains block types, nesting, bold/italic text, card
 labels, and references. New blocks receive new IDs; the first pasted block may

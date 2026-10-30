@@ -76,6 +76,35 @@ changes, and a failed transaction leaves the pending editor/session values intac
 Foreign keys, uniqueness checks, core validation, and payload decoding supplement
 SQLite's integrity check.
 
+Moving a page between databases preserves its page/block IDs and block payloads.
+One transaction remaps its stored property values to destination definitions with
+the same name and type, creates missing definitions, updates membership/revision,
+and commits. A same-name/different-type conflict rolls everything back, including
+new definitions. Unset values and date-only values retain their types. Definitions
+with no stored value on this page are not copied. Existing source/destination
+views keep their settings; they query the page's new membership. Moving back uses
+matching source definitions again. Newly created definitions are retained.
+
+Cross-page block transfer commits both trees, both revisions, and their derived
+outgoing edges in one transaction. The transferred root becomes a root at the end
+of the destination; descendants, order, rich content, and all target IDs remain
+unchanged. An emptied source gets a fresh empty paragraph. Transferred identities
+are not deleted-block fragments. Incoming block references resolve through the
+block's current owning page; page references continue to identify their original
+page. Neither operation rewrites references by title or changes their display text.
+Resolution distinguishes available targets, trashed pages/databases, unavailable
+targets, and unresolved intended names without scanning every document.
+
+The desktop flushes pending edits before workspace moves and clears the open
+page's editing undo after a successful move. The latest block transfer has a
+separate in-memory Workspace undo/redo operation. Reversing it atomically restores
+both trees and updates their revisions/indexes, including removing/reinstating the
+synthetic empty-source paragraph. It requires both pages to be active and both
+revisions to match; subsequent changes, including saves from another window,
+cause refusal instead of overwriting them. Navigation alone does not invalidate
+this operation. A new transfer replaces it; it does not survive window close.
+Undoing while viewing another page preserves that page's text undo history.
+
 The desktop saves after 500 ms without a new edit, and flushes before page/database
 navigation or a normal window close. Pending changes are visible. Saved locally
 means the SQLite commit succeeded with `synchronous=FULL`; edits during the debounce interval are pending

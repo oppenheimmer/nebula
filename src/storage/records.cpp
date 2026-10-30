@@ -179,6 +179,90 @@ void Workspace::trash_page(const std::string& id, bool trashed)
     Statement update(database_.get(), "UPDATE pages SET trashed=?,revision=revision+1,modified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?");
     update.bind(1,trashed).bind(2,id).done(); sql::changed(database_.get());
 }
+ReferenceTarget Workspace::resolve_reference(const Reference& reference) const
+{
+    if (reference.target_id.empty()) return {ReferenceState::Unresolved,{},{}};
+    Statement query(database_.get(), reference.kind==ReferenceKind::Page
+        ? "SELECT p.id,'',p.trashed,d.trashed FROM pages p JOIN databases d ON d.id=p.database_id WHERE p.id=?"
+        : "SELECT p.id,b.id,p.trashed,d.trashed FROM blocks b JOIN pages p ON p.id=b.page_id JOIN databases d ON d.id=p.database_id WHERE b.id=?");
+    query.bind(1,reference.target_id);
+    if (!query.row()) return {};
+    const auto state=query.number(3)?ReferenceState::DatabaseTrashed
+        :query.number(2)?ReferenceState::PageTrashed:ReferenceState::Available;
+    return {state,query.text(0),query.text(1)};
+}
+void Workspace::move_page(PageRecord& page, const std::string& database)
+{
+    sql::Transaction transaction(database_.get());
+    const auto previous=load_page(page.document.id);
+    if (page.revision!=previous.revision) throw std::runtime_error("Page changed in another window; reopen it before moving");
+    if (resolve_reference({ReferenceKind::Page,page.document.id}).state!=ReferenceState::Available)
+        throw std::runtime_error("Restore the page and its database before moving it");
+    Statement target(database_.get(),"SELECT id FROM databases WHERE id=? AND NOT trashed"); target.bind(1,database);
+    if (!target.row()) throw std::runtime_error("Destination database is unavailable or in trash");
+    if (previous.database_id==database) { transaction.commit(); return; }
+    const auto source_definitions=properties(previous.database_id);
+    auto target_definitions=properties(database);
+    std::map<std::string,PropertyValue> values;
+    for (const auto& entry:previous.properties) {
+        const auto definition=std::find_if(source_definitions.begin(),source_definitions.end(),[&](const auto& d){return d.id==entry.first;});
+        if (definition==source_definitions.end()) throw std::runtime_error("Source property definition is unavailable");
+        auto found=std::find_if(target_definitions.begin(),target_definitions.end(),[&](const auto& d){return d.name==definition->name;});
+        if (found==target_definitions.end()) {
+            target_definitions.push_back(add_property(database,definition->name,definition->kind));
+            found=target_definitions.end()-1;
+        }
+        if (found->kind!=definition->kind) throw std::runtime_error("Destination property has a different type: "+definition->name);
+        validate_value(found->kind,entry.second); values.emplace(found->id,entry.second);
+    }
+    Statement update(database_.get(),"UPDATE pages SET database_id=?,revision=revision+1,modified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND revision=?");
+    update.bind(1,database).bind(2,page.document.id).bind(3,page.revision).done(); sql::changed(database_.get());
+    Statement clear(database_.get(),"DELETE FROM property_values WHERE page_id=?"); clear.bind(1,page.document.id).done();
+    for (const auto& entry:values) {
+        Statement add(database_.get(),"INSERT INTO property_values(page_id,property_id,value_json) VALUES(?,?,?)");
+        add.bind(1,page.document.id).bind(2,entry.first).bind(3,encode_value(entry.second)).done();
+    }
+    auto next=previous; next.database_id=database; next.properties=std::move(values); ++next.revision;
+    transaction.commit(); page=std::move(next);
+}
+void Workspace::replace_transfer_documents(const Page& source, std::int64_t source_revision,
+                                           const Page& destination, std::int64_t destination_revision)
+{
+    validate(source); validate(destination);
+    if (source.id==destination.id) throw std::invalid_argument("Choose a different destination page");
+    sql::Transaction transaction(database_.get());
+    for (const auto& entry:{std::pair<const Page*,std::int64_t>{&source,source_revision},{&destination,destination_revision}}) {
+        if (resolve_reference({ReferenceKind::Page,entry.first->id}).state!=ReferenceState::Available)
+            throw std::runtime_error("Restore both pages and their databases before transferring blocks");
+        Statement update(database_.get(),"UPDATE pages SET revision=revision+1,modified_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND revision=?");
+        update.bind(1,entry.first->id).bind(2,entry.second).done(); sql::changed(database_.get());
+    }
+    // Remove both old trees before inserting either tree: global block identities
+    // change owners, and their outgoing edges must follow them in this commit.
+    for (const auto* page:{&source,&destination}) {
+        Statement remove(database_.get(),"DELETE FROM blocks WHERE page_id=?"); remove.bind(1,page->id).done();
+    }
+    insert_blocks(database_.get(),source); insert_blocks(database_.get(),destination);
+    transaction.commit();
+}
+BlockTransfer Workspace::transfer_blocks(const PageRecord& source, const PageRecord& destination,
+                                         const std::string& block)
+{
+    BlockTransfer transfer{source.document,destination.document,source.document,destination.document,
+                           source.revision,destination.revision,true};
+    transfer_subtree(transfer.source_after,transfer.destination_after,block,sql::id(database_.get()));
+    replace_transfer_documents(transfer.source_after,transfer.source_revision,
+                               transfer.destination_after,transfer.destination_revision);
+    ++transfer.source_revision; ++transfer.destination_revision;
+    return transfer;
+}
+void Workspace::set_transfer_applied(BlockTransfer& transfer, bool applied)
+{
+    if (transfer.applied==applied) return;
+    replace_transfer_documents(applied?transfer.source_after:transfer.source_before,transfer.source_revision,
+                               applied?transfer.destination_after:transfer.destination_before,transfer.destination_revision);
+    ++transfer.source_revision; ++transfer.destination_revision; transfer.applied=applied;
+}
 std::vector<DeletedBlockGroup> Workspace::deleted_blocks() const
 {
     Statement query(database_.get(),"SELECT t.id,t.page_id,p.title,t.fragment FROM deleted_blocks t JOIN pages p ON p.id=t.page_id WHERE NOT t.restored ORDER BY t.removed_at,t.rowid");

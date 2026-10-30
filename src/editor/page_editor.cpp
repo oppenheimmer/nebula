@@ -428,6 +428,23 @@ void PageEditor::keyPressEvent(QKeyEvent* event)
     }
     const auto modifiers = event->modifiers()
         & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
+    const auto key=event->key();
+    const bool modifier_key=key==Qt::Key_Control || key==Qt::Key_Shift || key==Qt::Key_Alt
+        || key==Qt::Key_Meta || key==Qt::Key_AltGr || key==Qt::Key_CapsLock
+        || key==Qt::Key_NumLock || key==Qt::Key_ScrollLock;
+    const bool navigation_key=key==Qt::Key_Left || key==Qt::Key_Right || key==Qt::Key_Up
+        || key==Qt::Key_Down || key==Qt::Key_Home || key==Qt::Key_End
+        || key==Qt::Key_PageUp || key==Qt::Key_PageDown;
+    if (modifier_key || navigation_key || event->matches(QKeySequence::Copy)
+        || event->matches(QKeySequence::SelectAll)) {
+        // An empty QTextCursor edit group still emits textChanged. Navigation
+        // and shortcut modifiers must not create pending edits/autosave revisions.
+        // Alt+arrows below are structural commands and still need their own undo.
+        if (!(modifiers==Qt::AltModifier && (key==Qt::Key_Up || key==Qt::Key_Down))) {
+            typing_position_=-1;
+            QTextEdit::keyPressEvent(event); return;
+        }
+    }
     if (event->matches(QKeySequence::Undo) || event->matches(QKeySequence::Redo)) {
         typing_position_=-1;
         QTextEdit::keyPressEvent(event);

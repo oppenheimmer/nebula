@@ -97,9 +97,20 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setStretchLastSection(true); navigation_layout->addWidget(table_);
     auto* split=new QSplitter(this); split->addWidget(navigation); split->addWidget(page_panel); split->setSizes({450,850}); setCentralWidget(split);
-    auto* file=menuBar()->addMenu("Workspace");
+    auto* file=menuBar()->addMenu("&Workspace");
     auto* save=file->addAction("Save now"); save->setObjectName("saveNow"); save->setShortcut(QKeySequence::Save);
     connect(save,&QAction::triggered,this,[this]{ flush(); });
+    auto operation=[&](const char* text,const char* name,auto callback) {
+        auto* action=file->addAction(text); action->setObjectName(name);
+        connect(action,&QAction::triggered,this,[this,callback]{
+            try { callback(); } catch(const std::exception& e) { error(this,e); }
+        });
+        return action;
+    };
+    operation("Move page to database…","movePage",[this]{ move_page(); });
+    operation("Move block to page…","moveBlockToPage",[this]{ move_block(); })->setShortcut(QKeySequence("Ctrl+Shift+M"));
+    operation("Undo block transfer","undoBlockTransfer",[this]{ undo_block_transfer(false); })->setShortcut(QKeySequence("Ctrl+Alt+Z"));
+    operation("Redo block transfer","redoBlockTransfer",[this]{ undo_block_transfer(true); })->setShortcut(QKeySequence("Ctrl+Alt+Shift+Z"));
     addToolBarBreak();
     auto* bar=addToolBar("Database controls"); bar->setObjectName("databaseControls"); bar->setMovable(false);
     auto add=[&](const char* text,const char* name,auto callback) {
@@ -213,6 +224,7 @@ void WorkspaceWindow::switch_database()
     database_id_=s(databases_->currentData().toString());
     page_editor()->set_page({"no-page",{{"placeholder","",BlockKind::Paragraph,{}}}});
     page_editor()->setEnabled(false); title_->clear(); title_->setEnabled(false); backlinks_->clear();
+    update_transfer_actions();
     for (auto* bar:findChildren<QToolBar*>()) if (bar->objectName()!="databaseControls") bar->setEnabled(false);
     save_state_->setText("Select an entry or create a page.");
     definitions_=workspace_.properties(database_id_); saved_views_=workspace_.views(database_id_);
@@ -261,6 +273,7 @@ bool WorkspaceWindow::open_page(const std::string& id, const std::string& block)
         title_->setText(q(session_.record().title)); title_->setEnabled(true); page_editor()->set_page(session_.record().document); page_editor()->setEnabled(true);
         for (auto* bar:findChildren<QToolBar*>()) bar->setEnabled(true);
         loading_=false; pending_=false; save_state_->setText("Saved locally"); refresh_table(); update_links();
+        update_transfer_actions();
         if (!block.empty()) page_editor()->go_to_block(q(block));
         page_editor()->setFocus(); return true;
     } catch (const std::exception& e) { save_state_->setText(q(e.what())); return false; }
@@ -375,10 +388,87 @@ void WorkspaceWindow::insert_link()
 }
 void WorkspaceWindow::follow_reference(ReferenceKind kind, const std::string& id)
 {
-    if (kind==ReferenceKind::Page) { open_page(id); return; }
+    if (!flush()) return;
+    try {
+        const auto target=workspace_.resolve_reference({kind,id});
+        switch (target.state) {
+        case ReferenceState::Available: open_page(target.page_id,target.block_id); return;
+        case ReferenceState::PageTrashed: statusBar()->showMessage("This link's page is in trash. Use Restore… to restore it.",8000); return;
+        case ReferenceState::DatabaseTrashed: statusBar()->showMessage("This link's database is in trash. Use Restore… to restore it.",8000); return;
+        default: statusBar()->showMessage("This link target is unavailable or deleted. Deleted blocks may be recovered with Restore….",8000); return;
+        }
+    } catch (const std::exception& e) { statusBar()->showMessage(q(e.what()),8000); }
+}
+void WorkspaceWindow::update_transfer_actions()
+{
+    findChild<QAction*>("movePage")->setEnabled(session_.has_page());
+    findChild<QAction*>("moveBlockToPage")->setEnabled(session_.has_page());
+    findChild<QAction*>("undoBlockTransfer")->setEnabled(last_transfer_ && last_transfer_->applied);
+    findChild<QAction*>("redoBlockTransfer")->setEnabled(last_transfer_ && !last_transfer_->applied);
+}
+void WorkspaceWindow::reload_page(const std::string& block)
+{
+    if (!session_.has_page()) return;
+    const auto id=session_.record().document.id;
+    // These operations have committed outside the page editor. Reload its revision
+    // and clear local undo so it cannot recreate transferred block identities.
+    session_.close(); open_page(id,block);
+}
+void WorkspaceWindow::move_page()
+{
+    if (!session_.has_page() || !flush()) return;
+    const auto block=s(page_editor()->current_block_id());
+    QDialog dialog(this); dialog.setWindowTitle("Move page to database");
+    auto* layout=new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel("Property values follow the page. Matching names must have the same type; missing properties are added.",&dialog));
+    auto* choices=new QComboBox(&dialog); choices->setObjectName("moveDestinationDatabase"); choices->setAccessibleName("Destination database");
+    for (const auto& db:workspace_.databases()) if (db.id!=session_.record().database_id)
+        choices->addItem(q(db.name)+" ["+q(db.id.substr(0,8))+"]",q(db.id));
+    layout->addWidget(choices);
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons);
+    buttons->button(QDialogButtonBox::Ok)->setEnabled(choices->count()>0);
+    connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    const bool accepted=dialog.exec()==QDialog::Accepted;
+    activateWindow(); page_editor()->setFocus();
+    if (!accepted) return;
+    auto page=session_.record(); workspace_.move_page(page,s(choices->currentData().toString()));
+    reload_page(block);
+    statusBar()->showMessage("Page moved and saved locally.",6000);
+}
+void WorkspaceWindow::move_block()
+{
+    if (!session_.has_page() || !flush()) return;
+    const auto block=s(page_editor()->current_block_id());
+    QDialog dialog(this); dialog.setWindowTitle("Move block to page");
+    auto* layout=new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel("Move the active block and its children to the end of another page. Links keep their original targets.",&dialog));
+    auto* choices=new QComboBox(&dialog); choices->setObjectName("moveDestinationPage"); choices->setAccessibleName("Destination page");
     for (const auto& db:workspace_.databases()) for (const auto& page:workspace_.pages(db.id))
-        for (const auto& block:page.document.blocks) if (block.id==id) { open_page(page.document.id,id); return; }
-    statusBar()->showMessage("This link target is unavailable or in trash",6000);
+        if (page.document.id!=session_.record().document.id)
+            choices->addItem(q(db.name)+" / "+q(page.title)+" ["+q(page.document.id.substr(0,8))+"]",q(page.document.id));
+    layout->addWidget(choices);
+    layout->addWidget(new QLabel("This saves both pages and clears this page's editing undo. Workspace → Undo block transfer reverses the latest transfer while both pages are unchanged.",&dialog));
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons);
+    buttons->button(QDialogButtonBox::Ok)->setEnabled(choices->count()>0);
+    connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    const bool accepted=dialog.exec()==QDialog::Accepted;
+    activateWindow(); page_editor()->setFocus();
+    if (!accepted) return;
+    const auto destination=workspace_.load_page(s(choices->currentData().toString()));
+    auto transfer=workspace_.transfer_blocks(session_.record(),destination,block);
+    last_transfer_=std::move(transfer); transferred_block_=block;
+    reload_page(); update_transfer_actions();
+    statusBar()->showMessage("Block and children moved; both pages saved locally.",6000);
+}
+void WorkspaceWindow::undo_block_transfer(bool applied)
+{
+    if (!last_transfer_ || !flush()) return;
+    workspace_.set_transfer_applied(*last_transfer_,applied);
+    if (session_.has_page() && (session_.record().document.id==last_transfer_->source_before.id
+        || session_.record().document.id==last_transfer_->destination_before.id))
+        reload_page(applied?std::string{}:transferred_block_);
+    update_transfer_actions();
+    statusBar()->showMessage(applied?"Block transfer redone and saved locally.":"Block transfer undone and saved locally.",6000);
 }
 void WorkspaceWindow::closeEvent(QCloseEvent* event)
 {

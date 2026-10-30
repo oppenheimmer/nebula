@@ -102,8 +102,23 @@ private slots:
     void rich_paste_preserves_suffix_and_existing_children();
     void empty_list_enter_exits_without_an_extra_block();
     void pasted_divider_does_not_consume_surrounding_text();
+    void modifier_keys_do_not_change_document_or_undo_history();
 };
 
+void EditorTests::modifier_keys_do_not_change_document_or_undo_history()
+{
+    PageEditor editor; ready(editor);
+    QSignalSpy changes(&editor,&QTextEdit::textChanged);
+    const auto before=editor.snapshot();
+    QTest::keyPress(&editor,Qt::Key_Control); QTest::keyPress(&editor,Qt::Key_Alt);
+    QTest::keyRelease(&editor,Qt::Key_Alt); QTest::keyRelease(&editor,Qt::Key_Control);
+    QTest::keyClick(&editor,Qt::Key_Right); QTest::keyClick(&editor,Qt::Key_End);
+    QTest::keyClick(&editor,Qt::Key_Left,Qt::ShiftModifier);
+    QTest::keyClick(&editor,Qt::Key_C,Qt::ControlModifier);
+    QTest::keyClick(&editor,Qt::Key_Home,Qt::ControlModifier);
+    QCOMPARE(changes.count(),0); QVERIFY(!editor.document()->isUndoAvailable());
+    QCOMPARE(ids(editor.snapshot()),ids(before));
+}
 void EditorTests::grip_drag_reorders_and_undoes_a_subtree()
 {
     PageEditor editor; ready(editor,sample_page());

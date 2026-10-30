@@ -47,6 +47,12 @@ private slots:
     void version_three_upgrade_preserves_deleted_fragments();
     void partially_restored_sibling_still_anchors_recovery();
     void divider_migration_preserves_tree_links_and_recovery();
+    void reference_lifecycle_follows_ids_and_current_owners();
+    void transfer_undo_redo_survives_reopen_and_backup();
+    void transfer_failure_rolls_back_both_pages_and_index();
+    void transfer_rejects_stale_revisions_and_trash();
+    void page_move_preserves_typed_values_and_references();
+    void page_move_property_conflict_rolls_back();
 };
 void StorageTests::dates_and_types()
 {
@@ -385,6 +391,161 @@ void StorageTests::divider_migration_preserves_tree_links_and_recovery()
     w.backup_to(path(folder.filePath("backup"))); auto copy=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
     QCOMPARE(copy.load_page(id).document.blocks.back().kind,BlockKind::Divider);
     QCOMPARE(copy.backlinks(ReferenceKind::Block,"heading").size(),std::size_t(1));
+}
+void StorageTests::reference_lifecycle_follows_ids_and_current_owners()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path()));
+    const auto a=w.create_database("Notes"), b=w.create_database("Archive");
+    auto target=w.create_page(a.id,"Duplicate",{},{{"heading","",BlockKind::Heading,{{"Original heading"}}}});
+    const auto duplicate=w.create_page(a.id,"Duplicate");
+    auto source=w.create_page(b.id,"Source",{},{{"source","",BlockKind::Paragraph,{
+        {"Page",false,false,Reference{ReferenceKind::Page,target.document.id}},
+        {"Heading",false,false,Reference{ReferenceKind::Block,"heading"}}}}});
+    const Reference ref{ReferenceKind::Block,"heading"}, page_ref{ReferenceKind::Page,target.document.id};
+    target.title="Renamed"; target.document.blocks[0].runs[0].text=u8"見出し changed"; w.save_page(target);
+    w.move_page(target,b.id);
+    QCOMPARE(w.resolve_reference(ref).page_id,target.document.id);
+    QCOMPARE(w.resolve_reference(page_ref).state,ReferenceState::Available);
+    QCOMPARE(w.backlinks(ReferenceKind::Page,target.document.id).size(),std::size_t(2));
+    w.trash_page(target.document.id,true);
+    QCOMPARE(w.resolve_reference(ref).state,ReferenceState::PageTrashed);
+    QCOMPARE(w.resolve_reference(page_ref).state,ReferenceState::PageTrashed);
+    const auto reused=w.create_page(a.id,"Renamed");
+    QCOMPARE(w.resolve_reference(ref).page_id,target.document.id);
+    QVERIFY(w.backlinks(ReferenceKind::Page,reused.document.id).empty());
+    QVERIFY(w.backlinks(ReferenceKind::Page,duplicate.document.id).empty());
+    w.trash_page(target.document.id,false); w.trash_database(b.id,true);
+    QCOMPARE(w.resolve_reference(ref).state,ReferenceState::DatabaseTrashed);
+    QCOMPARE(w.resolve_reference(page_ref).state,ReferenceState::DatabaseTrashed);
+    w.trash_database(b.id,false);
+    target=w.load_page(target.document.id); target.document.blocks.push_back({"keep","",BlockKind::Paragraph,{}});
+    target.document.blocks.erase(target.document.blocks.begin()); w.save_page(target);
+    QCOMPARE(w.resolve_reference(ref).state,ReferenceState::Unavailable);
+    target=w.restore_deleted_blocks(w.deleted_blocks()[0].id);
+    QCOMPARE(w.resolve_reference(ref).state,ReferenceState::Available);
+    QCOMPARE(w.resolve_reference({ReferenceKind::Page,"unknown"}).state,ReferenceState::Unavailable);
+    QCOMPARE(w.resolve_reference({ReferenceKind::Page,"","Renamed",a.id}).state,ReferenceState::Unresolved);
+    QCOMPARE(w.load_page(source.document.id).document.blocks[0].runs[0].reference->target_id,target.document.id);
+    w.rebuild_links(); QCOMPARE(w.backlinks(ReferenceKind::Page,target.document.id).size(),std::size_t(2));
+}
+void StorageTests::transfer_undo_redo_survives_reopen_and_backup()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes");
+    const auto source=w.create_page(db.id,"Source",{},{{"heading","",BlockKind::Heading,{{"Heading"}}},
+        {"child","heading",BlockKind::Paragraph,{{"Self",true,false,Reference{ReferenceKind::Block,"child"}}}}});
+    const auto destination=w.create_page(db.id,"Destination");
+    const auto other=w.create_page(db.id,"Other",{},{{"other","",BlockKind::Paragraph,{{"Jump",false,true,Reference{ReferenceKind::Block,"heading"}}}}});
+    auto transfer=w.transfer_blocks(source,destination,"heading");
+    const auto placeholder=w.load_page(source.document.id).document.blocks[0].id;
+    QVERIFY(placeholder!="heading"); QVERIFY(w.deleted_blocks().empty());
+    auto check_moved=[&](Workspace& workspace) {
+        QCOMPARE(workspace.resolve_reference({ReferenceKind::Block,"heading"}).page_id,destination.document.id);
+        QCOMPARE(workspace.resolve_reference({ReferenceKind::Block,"child"}).page_id,destination.document.id);
+        const auto moved=workspace.load_page(destination.document.id);
+        QCOMPARE(moved.document.blocks[2].parent_id,std::string("heading"));
+        QVERIFY(moved.document.blocks[2].runs[0].bold);
+        QCOMPARE(workspace.backlinks(ReferenceKind::Page,source.document.id).size(),std::size_t(0));
+        QCOMPARE(workspace.backlinks(ReferenceKind::Page,destination.document.id).size(),std::size_t(2));
+        const auto backlinks=workspace.backlinks(ReferenceKind::Block,"child");
+        QCOMPARE(backlinks[0].source_page,destination.document.id);
+        QCOMPARE(workspace.load_page(other.document.id).document.blocks[0].runs[0].reference->target_id,std::string("heading"));
+    };
+    check_moved(w); w.rebuild_links(); check_moved(w);
+    auto reopened=Workspace::open(path(folder.filePath("workspace"))); check_moved(reopened);
+    reopened.set_transfer_applied(transfer,false);
+    QCOMPARE(encode_document(reopened.load_page(source.document.id).document),encode_document(source.document));
+    QCOMPARE(encode_document(reopened.load_page(destination.document.id).document),encode_document(destination.document));
+    QCOMPARE(reopened.resolve_reference({ReferenceKind::Block,"child"}).page_id,source.document.id);
+    reopened.set_transfer_applied(transfer,true); check_moved(reopened);
+    QCOMPARE(reopened.load_page(source.document.id).document.blocks[0].id,placeholder);
+    QVERIFY(reopened.deleted_blocks().empty());
+    reopened.backup_to(path(folder.filePath("backup")));
+    auto restored=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored"))); check_moved(restored);
+}
+void StorageTests::transfer_failure_rolls_back_both_pages_and_index()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto source=w.create_page(db.id,"Source",{},{{"root","",BlockKind::Paragraph,{{"Jump",false,false,Reference{ReferenceKind::Block,"child"}}}},
+        {"child","root",BlockKind::Paragraph,{{"Child"}}}});
+    const auto destination=w.create_page(db.id,"Destination");
+    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER reject_transfer BEFORE INSERT ON blocks WHEN NEW.id='child' BEGIN SELECT RAISE(ABORT,'injected transfer failure'); END;");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.transfer_blocks(source,destination,"root"));
+    QCOMPARE(encode_document(w.load_page(source.document.id).document),encode_document(source.document));
+    QCOMPARE(encode_document(w.load_page(destination.document.id).document),encode_document(destination.document));
+    QCOMPARE(w.load_page(source.document.id).revision,source.revision);
+    QCOMPARE(w.load_page(destination.document.id).revision,destination.revision);
+    QCOMPARE(w.backlinks(ReferenceKind::Block,"child")[0].source_page,source.document.id);
+    QVERIFY(w.deleted_blocks().empty());
+    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER reject_transfer;");
+    auto transfer=w.transfer_blocks(source,destination,"root");
+    const auto revision=transfer.source_revision;
+    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER reject_undo BEFORE INSERT ON blocks WHEN NEW.id='child' BEGIN SELECT RAISE(ABORT,'injected undo failure'); END;");
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.set_transfer_applied(transfer,false));
+    QVERIFY(transfer.applied); QCOMPARE(transfer.source_revision,revision);
+    QCOMPARE(w.resolve_reference({ReferenceKind::Block,"child"}).page_id,destination.document.id);
+    QCOMPARE(w.backlinks(ReferenceKind::Block,"child")[0].source_page,destination.document.id);
+}
+void StorageTests::transfer_rejects_stale_revisions_and_trash()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto source=w.create_page(db.id,"Source"), destination=w.create_page(db.id,"Destination");
+    const auto stale_source=source; source.title="New title"; w.save_page(source);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.transfer_blocks(stale_source,destination,source.document.blocks[0].id));
+    const auto stale_destination=destination; destination.title="Changed"; w.save_page(destination);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.transfer_blocks(source,stale_destination,source.document.blocks[0].id));
+    QCOMPARE(w.load_page(source.document.id).revision,source.revision);
+    w.trash_page(destination.document.id,true);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.transfer_blocks(source,w.load_page(destination.document.id),source.document.blocks[0].id));
+    w.trash_page(destination.document.id,false); destination=w.load_page(destination.document.id);
+    w.trash_database(db.id,true);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.transfer_blocks(source,destination,source.document.blocks[0].id));
+    w.trash_database(db.id,false);
+    auto transfer=w.transfer_blocks(source,destination,source.document.blocks[0].id);
+    auto edited=w.load_page(destination.document.id); edited.document.blocks.back().runs={{"New edit"}}; w.save_page(edited);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.set_transfer_applied(transfer,false));
+    QCOMPARE(w.load_page(source.document.id).revision,transfer.source_revision);
+    QCOMPARE(w.load_page(destination.document.id).document.blocks.back().runs[0].text,std::string("New edit"));
+}
+void StorageTests::page_move_preserves_typed_values_and_references()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Source"), b=w.create_database("Destination");
+    const auto text=w.add_property(a.id,"Text",PropertyKind::Text), number=w.add_property(a.id,"Number",PropertyKind::Number);
+    const auto date=w.add_property(a.id,"Entry date",PropertyKind::Date), check=w.add_property(a.id,"Done",PropertyKind::Checkbox);
+    const auto tags=w.add_property(a.id,"Tags",PropertyKind::Tags), empty=w.add_property(a.id,"Unset",PropertyKind::Text);
+    const auto target_date=w.add_property(b.id,"Entry date",PropertyKind::Date);
+    auto page=w.create_page(a.id,"Keep identity",{{text.id,std::string(u8"日本語")},{number.id,42.5},{date.id,Date{"2024-02-29"}},
+        {check.id,false},{tags.id,std::vector<std::string>{"diary","work"}},{empty.id,{}}});
+    const auto original=page;
+    const auto referring=w.create_page(a.id,"Referring",{},{{"referring","",BlockKind::Paragraph,{{"Jump",false,false,Reference{ReferenceKind::Block,page.document.blocks[0].id}}}}});
+    w.move_page(page,b.id); QCOMPARE(page.document.id,original.document.id); QCOMPARE(page.database_id,b.id);
+    QCOMPARE(encode_document(page.document),encode_document(original.document));
+    QCOMPARE(std::get<Date>(page.properties.at(target_date.id)).iso,std::string("2024-02-29"));
+    QCOMPARE(page.properties.size(),original.properties.size()); QCOMPARE(w.properties(b.id).size(),std::size_t(6));
+    for (const auto& target:w.properties(b.id)) for (const auto& source:w.properties(a.id)) if (source.name==target.name)
+        QCOMPARE(encode_value(page.properties.at(target.id)),encode_value(original.properties.at(source.id)));
+    auto reopened=Workspace::open(path(folder.path()));
+    QCOMPARE(reopened.load_page(page.document.id).database_id,b.id);
+    QCOMPARE(reopened.backlinks(ReferenceKind::Page,page.document.id)[0].source_page,referring.document.id);
+    w.move_page(page,a.id); QCOMPARE(page.properties.size(),original.properties.size());
+    for (const auto& value:original.properties) QCOMPARE(encode_value(page.properties.at(value.first)),encode_value(value.second));
+}
+void StorageTests::page_move_property_conflict_rolls_back()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Source"), b=w.create_database("Destination");
+    auto first=w.add_property(a.id,"First",PropertyKind::Text), second=w.add_property(a.id,"Second",PropertyKind::Number);
+    // Definitions iterate by property ID in a page map; ensure one new target
+    // definition is inserted before the later incompatible property is rejected.
+    const auto& conflict=first.id>second.id?first:second;
+    const auto incompatible=w.add_property(b.id,conflict.name,PropertyKind::Checkbox);
+    auto page=w.create_page(a.id,"Keep",{{first.id,std::string("text")},{second.id,4.0}}); const auto original=page;
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.move_page(page,b.id));
+    QCOMPARE(page.revision,original.revision); QCOMPARE(page.database_id,a.id);
+    QCOMPARE(w.load_page(page.document.id).database_id,a.id); QCOMPARE(w.load_page(page.document.id).revision,original.revision);
+    QCOMPARE(w.properties(b.id).size(),std::size_t(1)); QCOMPARE(w.properties(b.id)[0].id,incompatible.id);
+    w.trash_database(b.id,true); QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.move_page(page,b.id));
+    auto changed=page; changed.title="Updated"; w.save_page(changed);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.move_page(page,b.id));
+    QCOMPARE(w.load_page(page.document.id).title,std::string("Updated"));
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

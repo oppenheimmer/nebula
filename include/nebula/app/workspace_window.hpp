@@ -37,6 +37,8 @@ private:
     std::string database_id_;
     bool loading_ = false;
     bool pending_ = false;
+    std::optional<BlockTransfer> last_transfer_;
+    std::string transferred_block_;
     void switch_database();
     void mark_pending();
     void update_links();
@@ -45,5 +47,10 @@ private:
     void show_trash();
     void insert_link();
     void follow_reference(ReferenceKind kind, const std::string& id);
+    void move_page();
+    void move_block();
+    void undo_block_transfer(bool applied);
+    void reload_page(const std::string& block = {});
+    void update_transfer_actions();
 };
 } // namespace nebula

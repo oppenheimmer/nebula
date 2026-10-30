@@ -22,6 +22,7 @@ Original children follow the trailing root, as when Enter splits a parent.
 
 Cut/paste also creates pasted identities. It is not an identity-preserving move
 between pages; references from elsewhere still identify the original blocks.
+Use Workspace → Move block to page… for an identity-preserving subtree transfer.
 Clipboard data does not transfer page properties, database definitions, views,
 workspace identity, or managed files. Asset cards currently carry representations
 and labels. A reference copied from another workspace can remain unavailable.

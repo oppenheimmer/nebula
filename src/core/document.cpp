@@ -167,6 +167,30 @@ bool outdent(Page& page, const std::string& block_id)
     return true;
 }
 
+void transfer_subtree(Page& source, Page& destination, const std::string& block_id,
+                      const std::string& empty_source_id)
+{
+    validate(source); validate(destination);
+    if (source.id==destination.id) throw std::invalid_argument("Choose a different destination page");
+    std::unordered_set<std::string> ids;
+    for (const auto& block:source.blocks) ids.insert(block.id);
+    for (const auto& block:destination.blocks)
+        if (!ids.insert(block.id).second) throw std::invalid_argument("Block IDs must be unique across pages");
+    const auto start=find(source,block_id), end=subtree_end(source,start);
+    auto next_source=source, next_destination=destination;
+    std::vector<Block> fragment(source.blocks.begin()+start,source.blocks.begin()+end);
+    fragment.front().parent_id.clear();
+    next_destination.blocks.insert(next_destination.blocks.end(),fragment.begin(),fragment.end());
+    next_source.blocks.erase(next_source.blocks.begin()+start,next_source.blocks.begin()+end);
+    if (next_source.blocks.empty()) {
+        if (empty_source_id.empty() || ids.count(empty_source_id))
+            throw std::invalid_argument("An emptied source needs a fresh paragraph identity");
+        next_source.blocks.push_back({empty_source_id,"",BlockKind::Paragraph,{}});
+    }
+    validate(next_source); validate(next_destination);
+    source=std::move(next_source); destination=std::move(next_destination);
+}
+
 Page sample_page()
 {
     Page page{"sample-journal", {

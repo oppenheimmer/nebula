@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSignalSpy>
+#include <QStatusBar>
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -113,6 +114,11 @@ private slots:
     void toolbar_divider_persists_and_undoes();
     void typing_undo_group_survives_autosave();
     void rich_clipboard_persists_remapped_links_and_undo();
+    void block_transfer_saves_pending_edits_and_has_workspace_undo();
+    void failed_transfer_undo_preserves_later_edits();
+    void page_move_control_preserves_properties_and_focus();
+    void unavailable_references_preserve_current_page_and_identity();
+    void failed_save_blocks_workspace_moves();
 };
 
 void DesktopTests::default_location_is_suggested_without_creating_it()
@@ -563,5 +569,132 @@ void DesktopTests::rich_clipboard_persists_remapped_links_and_undo()
     editor->redo(); QVERIFY(window.flush()); QCOMPARE(w.load_page(target.document.id).document.blocks[0].id,copied.document.blocks[0].id);
 }
 
+void DesktopTests::block_transfer_saves_pending_edits_and_has_workspace_undo()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path()));
+    const auto db=w.create_database("Notes"), other_db=w.create_database("Other");
+    const auto source=w.create_page(db.id,"Source",{},{{"heading","",BlockKind::Heading,{{"Heading"}}},
+        {"child","heading",BlockKind::Paragraph,{{"Child"}}},{"remain","",BlockKind::Paragraph,{{"Remain"}}}});
+    const auto destination=w.create_page(other_db.id,"Duplicate"); w.create_page(db.id,"Duplicate");
+    const auto ref=w.create_page(db.id,"References",{},{{"ref","",BlockKind::Paragraph,{{"Jump",false,false,Reference{ReferenceKind::Block,"child"}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    auto* editor=window.page_editor(); editor->go_to_block("heading");
+    QTimer::singleShot(0,&window,[]{ auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog); dialog->reject(); });
+    window.findChild<QAction*>("moveBlockToPage")->trigger();
+    QCOMPARE(editor->snapshot().blocks.size(),std::size_t(3));
+    QVERIFY(!window.findChild<QAction*>("undoBlockTransfer")->isEnabled());
+    QVERIFY(QTest::qWaitForWindowActive(&window)); QTRY_COMPARE(QApplication::focusWidget(),editor);
+    QTest::keyClick(editor,Qt::Key_End); QTest::keyClicks(editor," edited");
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+        auto* choices=dialog->findChild<QComboBox*>("moveDestinationPage"); QVERIFY(choices);
+        choices->setCurrentIndex(choices->findData(QString::fromStdString(destination.document.id)));
+        QVERIFY(choices->currentText().startsWith("Other / Duplicate"));
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    });
+    QTest::keyClick(editor,Qt::Key_M,Qt::ControlModifier|Qt::ShiftModifier);
+    QCOMPARE(editor->snapshot().blocks.size(),std::size_t(1)); QCOMPARE(editor->snapshot().blocks[0].id,std::string("remain"));
+    QCOMPARE(w.load_page(destination.document.id).document.blocks[1].runs[0].text,std::string("Heading edited"));
+    QVERIFY(!editor->document()->isUndoAvailable()); QTRY_COMPARE(QApplication::focusWidget(),editor);
+    QVERIFY(window.open_page(ref.document.id));
+    editor->reference_activated(int(ReferenceKind::Block),"child");
+    QCOMPARE(editor->snapshot().id,destination.document.id); QCOMPARE(editor->current_block_id(),QString("child"));
+    QCOMPARE(window.findChild<QListWidget*>("backlinks")->count(),1);
+    QString unexpected_error; QTimer dismiss_error;
+    connect(&dismiss_error,&QTimer::timeout,&window,[&]{
+        if (auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) { unexpected_error=box->text(); box->accept(); }
+    });
+    dismiss_error.start(0);
+    QTest::keyClick(editor,Qt::Key_Z,Qt::ControlModifier|Qt::AltModifier);
+    dismiss_error.stop(); QVERIFY2(unexpected_error.isEmpty(),qPrintable(unexpected_error));
+    QCOMPARE(w.resolve_reference({ReferenceKind::Block,"child"}).page_id,source.document.id);
+    QVERIFY(window.findChild<QAction*>("redoBlockTransfer")->isEnabled());
+    QCOMPARE(editor->snapshot().blocks.size(),std::size_t(1));
+    QTest::keyClick(editor,Qt::Key_Z,Qt::ControlModifier|Qt::AltModifier|Qt::ShiftModifier);
+    QCOMPARE(w.resolve_reference({ReferenceKind::Block,"child"}).page_id,destination.document.id);
+    QVERIFY(window.open_page(ref.document.id)); editor->reference_activated(int(ReferenceKind::Block),"child");
+    QCOMPARE(editor->current_block_id(),QString("child")); QVERIFY(window.flush());
+    auto reopened=Workspace::open(path(folder.path()));
+    QCOMPARE(reopened.load_page(destination.document.id).document.blocks[2].parent_id,std::string("heading"));
+    QVERIFY(window.open_page(ref.document.id)); QTest::keyClicks(editor,"Context ");
+    QVERIFY(editor->document()->isUndoAvailable()); window.findChild<QAction*>("undoBlockTransfer")->trigger();
+    QCOMPARE(editor->snapshot().id,ref.document.id); QVERIFY(editor->document()->isUndoAvailable());
+    editor->undo(); QVERIFY(window.flush());
+    QCOMPARE(editor->snapshot().blocks[0].runs[0].text,std::string("Jump"));
+    window.findChild<QAction*>("redoBlockTransfer")->trigger();
+    QCOMPARE(w.resolve_reference({ReferenceKind::Block,"child"}).page_id,destination.document.id);
+}
+void DesktopTests::failed_transfer_undo_preserves_later_edits()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto source=w.create_page(db.id,"Source"), destination=w.create_page(db.id,"Destination");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+        auto* choices=dialog->findChild<QComboBox*>("moveDestinationPage"); choices->setCurrentIndex(choices->findData(QString::fromStdString(destination.document.id)));
+        dialog->accept();
+    });
+    window.findChild<QAction*>("moveBlockToPage")->trigger();
+    QVERIFY(window.open_page(destination.document.id)); QTest::keyClicks(window.page_editor(),"New edit");
+    QTimer::singleShot(0,&window,[]{ auto* box=qobject_cast<QMessageBox*>(QApplication::activeModalWidget()); QVERIFY(box); box->accept(); });
+    window.findChild<QAction*>("undoBlockTransfer")->trigger();
+    QCOMPARE(w.load_page(destination.document.id).document.blocks[0].runs[0].text,std::string("New edit"));
+    QCOMPARE(w.resolve_reference({ReferenceKind::Block,source.document.blocks[0].id}).page_id,destination.document.id);
+    QVERIFY(window.findChild<QAction*>("undoBlockTransfer")->isEnabled());
+    QCOMPARE(window.page_editor()->snapshot().blocks[0].runs[0].text,std::string("New edit"));
+}
+void DesktopTests::page_move_control_preserves_properties_and_focus()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"), b=w.create_database("Archive");
+    const auto date=w.add_property(a.id,"Entry date",PropertyKind::Date);
+    const auto page=w.create_page(a.id,"Entry",{{date.id,Date{"2024-02-29"}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id)); QTest::keyClicks(window.page_editor(),"Content");
+    QTimer::singleShot(0,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
+        auto* choices=dialog->findChild<QComboBox*>("moveDestinationDatabase"); choices->setCurrentIndex(choices->findData(QString::fromStdString(b.id))); dialog->accept();
+    });
+    window.findChild<QAction*>("movePage")->trigger();
+    QCOMPARE(window.findChild<QComboBox*>("databases")->currentData().toString(),QString::fromStdString(b.id));
+    QCOMPARE(window.page_editor()->snapshot().id,page.document.id); QTRY_COMPARE(QApplication::focusWidget(),window.page_editor());
+    const auto moved=w.load_page(page.document.id);
+    QCOMPARE(moved.document.blocks[0].runs[0].text,std::string("Content"));
+    QCOMPARE(std::get<Date>(moved.properties.at(w.properties(b.id)[0].id)).iso,std::string("2024-02-29"));
+    QCOMPARE(window.findChild<QTableWidget*>("databaseTable")->rowCount(),1);
+    QVERIFY(window.flush());
+}
+void DesktopTests::unavailable_references_preserve_current_page_and_identity()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Source"), b=w.create_database("Target");
+    auto target=w.create_page(b.id,"Target");
+    const auto source=w.create_page(a.id,"Source",{},{{"source","",BlockKind::Paragraph,{{"Jump",false,false,Reference{ReferenceKind::Block,target.document.blocks[0].id}}}}});
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    auto* editor=window.page_editor(); const auto target_id=QString::fromStdString(target.document.blocks[0].id);
+    w.trash_page(target.document.id,true); editor->reference_activated(int(ReferenceKind::Block),target_id);
+    QCOMPARE(editor->snapshot().id,source.document.id); QVERIFY(window.statusBar()->currentMessage().contains("page is in trash"));
+    w.create_page(b.id,"Target"); w.trash_page(target.document.id,false); w.trash_database(b.id,true);
+    editor->reference_activated(int(ReferenceKind::Block),target_id);
+    QCOMPARE(editor->snapshot().id,source.document.id); QVERIFY(window.statusBar()->currentMessage().contains("database is in trash"));
+    w.trash_database(b.id,false); window.refresh_databases(); QVERIFY(window.open_page(source.document.id));
+    editor->reference_activated(int(ReferenceKind::Block),target_id);
+    QCOMPARE(editor->snapshot().id,target.document.id); QCOMPARE(editor->current_block_id(),target_id);
+    QVERIFY(window.open_page(source.document.id)); editor->reference_activated(int(ReferenceKind::Page),"unknown");
+    QCOMPARE(editor->snapshot().id,source.document.id); QVERIFY(window.statusBar()->currentMessage().contains("unavailable"));
+    QCOMPARE(editor->snapshot().blocks[0].runs[0].reference->target_id,target_id.toStdString());
+}
+void DesktopTests::failed_save_blocks_workspace_moves()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto a=w.create_database("Notes"); w.create_database("Archive");
+    const auto source=w.create_page(a.id,"Source"); w.create_page(a.id,"Destination");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    sql(folder.filePath("nebula.sqlite3"),"CREATE TRIGGER fail_save BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT,'injected save failure'); END;");
+    QTest::keyClicks(window.page_editor(),"Pending");
+    window.findChild<QAction*>("moveBlockToPage")->trigger(); window.findChild<QAction*>("movePage")->trigger();
+    QVERIFY(window.findChild<QLabel*>("saveState")->text().startsWith("Save failed"));
+    QVERIFY(!window.findChild<QAction*>("undoBlockTransfer")->isEnabled());
+    QCOMPARE(window.page_editor()->snapshot().blocks[0].runs[0].text,std::string("Pending"));
+    QCOMPARE(w.load_page(source.document.id).revision,source.revision);
+    QCOMPARE(w.load_page(source.document.id).database_id,a.id);
+    sql(folder.filePath("nebula.sqlite3"),"DROP TRIGGER fail_save;"); QVERIFY(window.flush());
+}
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"
