@@ -285,6 +285,7 @@ including material data-handling limitations, rather than a running progress log
 | M08 | Reliability, accessibility, and performance | M04–M07 | In progress |
 | M09 | Linux release | M08 | In progress |
 | M10 | FreeBSD and OpenBSD releases (amd64) | M09 | In progress |
+| M11 | Thorough code audit and simplification | M00–M10 complete | Not started |
 
 ### M00 — Project definition and working conventions
 
@@ -651,6 +652,41 @@ Exit criteria: both BSD amd64 packages complete the agreed offline workflow and
 cross-platform data-transfer checks on their recorded supported environments.
 Each system has its own build, desktop, data-reliability and package evidence;
 a Linux build or a successful check on one BSD cannot complete the other.
+
+### M11 — Thorough code audit and simplification
+
+Deliverables: a recorded audit of the completed application and a simpler,
+well-organized implementation using the
+[Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+Begin only after all M00–M10 milestones and their exit criteria are complete.
+
+- [ ] M11.1 Capture the audited source revision and baseline evidence: Linux,
+  FreeBSD amd64 and OpenBSD amd64 builds/checks, recovery and interchange
+  fixtures, desktop workflows and the established performance measurements.
+- [ ] M11.2 Audit the complete codebase, tests, build/dependency configuration and
+  packaging for correctness, data safety, security, ownership/lifetime errors,
+  platform assumptions, duplicated rules, unnecessary abstraction and complexity.
+  Publish prioritized findings with code references, impact and reproducible
+  evidence; give confirmed defects stable BUG IDs and regression tests.
+- [ ] M11.3 Define and document the Google C++ style baseline for naming, headers,
+  includes, class/function organization, ownership, comments and formatting.
+  Record narrow, justified exceptions for Qt integration, C++17 compatibility or
+  established error/data contracts; do not change those contracts implicitly.
+  Configure the existing formatter and appropriate isolated automated checks.
+- [ ] M11.4 Address audit defects and simplify modules in small reviewable changes:
+  reduce duplication and long functions, clarify interfaces and ownership, and
+  remove unnecessary indirection while preserving offline scope, stable IDs,
+  persistent formats, transactions, recovery and observable behavior. Separate
+  mechanical formatting/renaming from semantic fixes/refactoring in Git history.
+- [ ] M11.5 Re-run applicable compiler, sanitizer, parser, desktop, storage,
+  migration, backup/restore, interchange, package and native platform checks.
+  Compare representative performance with the recorded baseline, account for
+  every audit finding, and document remaining limitations and final evidence.
+
+Exit criteria: the thorough audit is reviewable, findings have verified fixes or
+explicitly documented dispositions, the code follows the recorded Google C++
+style baseline, and simplification preserves tested behavior/data compatibility
+without unexplained performance regressions on all three supported platforms.
 
 Progress from the Suggestions implementation (2026-10-30), before the subsequent M08
 verification checkpoint: integrated benchmarks over representative fixtures now exist for M08.3
@@ -2770,6 +2806,19 @@ begin as part of this shutdown.
   It includes the installed documentation fix. Actual native transfer outcomes
   will be recorded after dispatch; M10.6 remains unchecked until then.
 
+### Post-milestone audit scheduled — 2026-10-30
+
+- At the user's request, added M11 after completion of all existing milestones.
+  It requires a thorough audit followed by code simplification and organization
+  using the official Google C++ Style Guide, with separate mechanical/semantic
+  commits and cross-platform regression/performance evidence. M11 is Not started;
+  this scheduling change does not start a broad refactor during M08–M10.
+- Read the official guide's goals and organization/include guidance to reference
+  the requested standard. Checked roadmap dependencies, task ordering, scope and
+  status. Prose links/fences across 17 Markdown files, 83 unique ordered task IDs
+  and `git diff --check` passed. Application tests are not required for this
+  documentation-only scheduling change.
+
 ## Technical references discussed
 
 - [Zim Desktop Wiki repository](https://github.com/zim-desktop-wiki/zim-desktop-wiki)
@@ -2789,6 +2838,7 @@ begin as part of this shutdown.
 - [Appropriate uses for SQLite](https://sqlite.org/whentouse.html)
 - [SQLite online backup API](https://sqlite.org/backup.html)
 - [SQLite FTS5](https://sqlite.org/fts5.html)
+- [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html)
 
 These references informed the discussion. Confirm exact supported dependency
 versions and platform requirements when implementing the affected milestone.
