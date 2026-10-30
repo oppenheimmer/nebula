@@ -149,9 +149,15 @@ revisions. Each job boots its own amd64 BSD guest and installs dependencies ther
 then runs `scripts/bsd-check.sh` as an unprivileged user. No host package install
 or runtime service is introduced. Linux is still validated separately through
 Docker. Guest package versions are recorded by their build/test logs; the selected
-FreeBSD 14.3/OpenBSD 7.8 versions are preflight environments rather than supported
-release baselines. Native desktop/IME/accessibility, cross-system transfer and
-package validation remain separate M10 requirements.
+FreeBSD 14.5/OpenBSD 8.0 versions are current validation candidates rather than
+supported desktop release baselines. Earlier 14.3/7.8 results remain historical
+preflight evidence. The selected candidates are listed by the projects as
+[supported FreeBSD releases](https://www.freebsd.org/security/) and the
+[current OpenBSD release](https://www.openbsd.org/). After dependency preparation,
+the guest drops its default routes, retaining only the local VM control link.
+Backup/JSON fixtures are transferred among all three OSes in short-lived CI
+artifacts, with exact canonical manifest and attachment-byte checks. Native
+desktop/IME/accessibility and package validation remain separate M10 requirements.
 
 ## Debian package preview
 

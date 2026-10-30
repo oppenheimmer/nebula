@@ -1,5 +1,9 @@
 #include "nebula/attachments/files.hpp"
+#include "nebula/interchange/interchange.hpp"
 #include "nebula/storage/workspace.hpp"
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <fstream>
 #include <iostream>
 
@@ -40,32 +44,109 @@ void verify(const std::filesystem::path& root)
     require(bytes == "retained package attachment", "Package attachment bytes differ");
     require(workspace.audit_attachments().empty(), "Package attachment audit failed");
 }
+void create(const std::filesystem::path& root)
+{
+    auto workspace = Workspace::open(root);
+    const auto notes = workspace.create_database("Notes");
+    const auto target = workspace.create_page(notes.id, "Package target", {},
+                                              {{"package-heading", {}, BlockKind::Heading, {{u8"見出し"}}}});
+    const auto journal = workspace.create_journal();
+    const auto score = workspace.add_property(journal.id, "Score", PropertyKind::Number);
+    const auto done = workspace.add_property(journal.id, "Done", PropertyKind::Checkbox);
+    auto entry = workspace.create_dated_entry(journal.id, "2026-10-29");
+    entry.properties[score.id] = 3.25;
+    entry.properties[done.id] = true;
+    for (const auto& property : workspace.properties(journal.id))
+        if (property.kind == PropertyKind::Tags)
+            entry.properties[property.id] = std::vector<std::string>{u8"日本語", "work"};
+    entry.title = "Package entry";
+    entry.document.blocks.front().runs = {{"Package body ", true},
+                                          {"target", false, false, Reference{ReferenceKind::Block, "package-heading"}}};
+    entry.document.blocks.front().runs.push_back(
+        {" Future", false, true, Reference{ReferenceKind::Page, {}, "Later", journal.id, false}});
+    entry.document.blocks.push_back(
+        {"package-todo", entry.document.blocks.front().id, BlockKind::Todo, {{"Done"}}, {}, true});
+    entry.document.blocks.push_back({"package-bullet", "package-todo", BlockKind::Bullet, {{u8"Nested 😀"}}});
+    workspace.save_page(entry);
+    View view;
+    view.database_id = journal.id;
+    view.name = "Portable view";
+    view.visible_properties = {score.id, done.id};
+    view.sort_property = score.id;
+    view.filters = {{score.id, Comparison::Greater, 1.0}};
+    view.link_filters = {{LinkRelation::ReferencesPage, target.document.id}};
+    workspace.save_view(view);
+    const auto trashed = workspace.create_page(notes.id, "Retained trash");
+    workspace.trash_page(trashed.document.id, true);
+    const auto original = root.parent_path() / "original.bin";
+    {
+        std::ofstream file(original, std::ios::binary);
+        file << "retained package attachment";
+        require(bool(file), "Cannot write package source fixture");
+    }
+    workspace.import_attachment(entry, entry.document.blocks.front().id, original, false);
+    std::filesystem::remove(original);
+}
+QJsonObject manifest(const std::filesystem::path& folder)
+{
+    QFile input(QString::fromStdString((folder / "workspace.json").u8string()));
+    require(input.open(QIODevice::ReadOnly), "Cannot read portability manifest");
+    require(input.size() <= 1024 * 1024, "Portability fixture manifest exceeds 1 MiB");
+    QJsonParseError error;
+    const auto json = QJsonDocument::fromJson(input.readAll(), &error);
+    require(error.error == QJsonParseError::NoError && json.isObject(), "Malformed portability manifest");
+    return json.object();
+}
+void bundle(const std::filesystem::path& root)
+{
+    require(files::make_private_directory(root), "Choose a new portability bundle folder");
+    create(root / "workspace");
+    {
+        auto workspace = Workspace::read_only(root / "workspace");
+        interchange::export_json(workspace, root / "json");
+        workspace.backup_to(root / "backup");
+    }
+    std::filesystem::remove_all(root / "workspace");
+}
+void transfer(const std::filesystem::path& source, const std::filesystem::path& output)
+{
+    require(files::make_private_directory(output), "Choose a new portability output folder");
+    const auto expected = manifest(source / "json");
+    {
+        auto restored = Workspace::restore(source / "backup", output / "restored");
+        auto imported = interchange::import_json(source / "json", output / "imported");
+        verify(output / "restored");
+        verify(output / "imported");
+        interchange::export_json(restored, output / "json");
+        interchange::export_json(imported, output / "check-json");
+        require(manifest(output / "json") == expected, "Backup transfer changed canonical records or file digests");
+        require(manifest(output / "check-json") == expected, "JSON transfer changed canonical records or file digests");
+        restored.backup_to(output / "backup");
+    }
+    for (const auto* name : {"restored", "imported", "check-json"})
+        std::filesystem::remove_all(output / name);
+    std::cout << "Verified backup/JSON transfer, all canonical IDs/records and attachment bytes: " << source << '\n';
+}
 } // namespace
 int main(int argc, char** argv)
 {
-    if (argc != 3)
+    if (argc != 3 && argc != 4)
         return 2;
     try {
         const auto root = std::filesystem::u8path(argv[2]);
-        if (std::string(argv[1]) == "create") {
-            auto workspace = Workspace::open(root);
-            const auto notes = workspace.create_database("Notes");
-            const auto target = workspace.create_page(notes.id, "Package target", {},
-                                                      {{"package-heading", {}, BlockKind::Heading, {{u8"見出し"}}}});
-            const auto journal = workspace.create_journal();
-            auto entry = workspace.create_dated_entry(journal.id, "2026-10-29");
-            entry.title = "Package entry";
-            entry.document.blocks.front().runs = {
-                {"Package body ", true}, {"target", false, false, Reference{ReferenceKind::Block, "package-heading"}}};
-            workspace.save_page(entry);
-            const auto original = root.parent_path() / "original.bin";
-            {
-                std::ofstream file(original, std::ios::binary);
-                file << "retained package attachment";
-                require(bool(file), "Cannot write package source fixture");
-            }
-            workspace.import_attachment(entry, entry.document.blocks.front().id, original, false);
-            std::filesystem::remove(original);
+        const std::string mode = argv[1];
+        if (mode == "bundle" && argc == 3) {
+            bundle(root);
+            return 0;
+        }
+        if (mode == "transfer" && argc == 4) {
+            transfer(root, std::filesystem::u8path(argv[3]));
+            return 0;
+        }
+        if (argc != 3)
+            return 2;
+        if (mode == "create") {
+            create(root);
         } else if (std::string(argv[1]) != "verify")
             return 2;
         verify(root);

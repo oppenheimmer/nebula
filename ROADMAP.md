@@ -2742,6 +2742,34 @@ begin as part of this shutdown.
   The later package-documentation inclusion fix was checked locally with the full
   package script; this earlier CI run is not claimed to certify that later edit.
 
+### Cross-system transfer acceptance infrastructure — 2026-10-30
+
+- M10.3/M10.4/M10.6 are In progress. Extended the existing package fixture
+  instead of adding another executable: Unicode and nested blocks, resolved and
+  unresolved references, Number/Checkbox/Tags/Date properties, saved view filters,
+  retained trash and managed attachment bytes now travel together. The checker
+  compares full canonical JSON objects, including IDs and file digests, after
+  both a fresh backup restore and a fresh lossless JSON import.
+- The native workflow now produces one synthetic fixture per OS and verifies
+  all three origins on each OS. Artifacts expire after one day and contain no
+  user data. Dependency preparation remains isolated; guest tests drop default
+  routes and retain only the local control link. Linux checks use network=none.
+- Selected FreeBSD 14.5 and OpenBSD 8.0 for the next validation run: upstream
+  [FreeBSD support](https://www.freebsd.org/security/) lists 14.3 as obsolete,
+  while [OpenBSD](https://www.openbsd.org/) now lists 8.0 as current and supports
+  its two latest releases. The pinned VM actions provide both selected images.
+  This changes the test candidates, not the still-open supported desktop baseline.
+- Local GCC fixture build and three-origin verification passed (all three local
+  inputs were Linux copies, so this is not yet cross-OS evidence). Two further
+  backup/JSON round trips passed. A deliberately changed manifest title was
+  rejected. Launcher regressions check offline routing, read-only source mounts,
+  isolated build output and invalid mode rejection; shell syntax and those tests
+  pass. The tiny fixture reader caps its manifest at 1 MiB.
+- Linux CI for revision `090408dc16e8196f7f0dfdca5496c21e64d5daeb` completed
+  successfully: [run 41035518213](https://github.com/oppenheimmer/nebula/actions/runs/41035518213).
+  It includes the installed documentation fix. Actual native transfer outcomes
+  will be recorded after dispatch; M10.6 remains unchecked until then.
+
 ## Technical references discussed
 
 - [Zim Desktop Wiki repository](https://github.com/zim-desktop-wiki/zim-desktop-wiki)

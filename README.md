@@ -300,7 +300,13 @@ workspace` measures the real window over a 10,000-block page, a 5,000-entry Jour
 a page referenced by 1,000 entries and a page with 200 images.
 `.github/workflows/ci.yml` runs the Docker checks on GitHub-hosted Linux.
 The manually dispatched `BSD native checks` workflow builds/tests in separate
-amd64 FreeBSD/OpenBSD VMs; it does not establish supported BSD desktop releases.
+amd64 FreeBSD 14.5/OpenBSD 8.0 VMs. It transfers synthetic backup and lossless JSON
+fixtures from each OS to all three systems, checking canonical records, IDs and
+attachment bytes. Fixtures are short-lived CI artifacts; no user workspace is
+uploaded. `./scripts/dev.sh portability bundle` creates the Linux fixture;
+`portability verify` checks the three downloaded `portability-*` artifact folders
+under ignored `build-portability-inputs/`. These checks do not establish supported
+BSD desktop releases.
 See [DEPENDENCIES.md](docs/DEPENDENCIES.md) for isolation and baseline limits.
 
 `fuzz` uses Clang with coverage-guided libFuzzer, ASan and UBSan for each parser

@@ -17,11 +17,30 @@ case "$(uname -s)" in
     FreeBSD) pkg info qt6-base ;;
     OpenBSD) pkg_info | grep 'qt6-qtbase' ;;
 esac
-cmake -S . -B build-bsd-core -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DNEBULA_BUILD_EDITOR=OFF -DNEBULA_WERROR=ON
-cmake --build build-bsd-core --parallel 2
-ctest --test-dir build-bsd-core --output-on-failure
+mode=${1:-test}
+case "$mode" in test|transfer) ;; *) exit 2 ;; esac
+if [ "$mode" = test ]; then
+    cmake -S . -B build-bsd-core -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DNEBULA_BUILD_EDITOR=OFF -DNEBULA_WERROR=ON
+    cmake --build build-bsd-core --parallel 2
+    ctest --test-dir build-bsd-core --output-on-failure
+fi
 cmake -S . -B build-bsd -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_PREFIX_PATH=/usr/local -DNEBULA_WERROR=ON
-cmake --build build-bsd --parallel 2
-ctest --test-dir build-bsd --verbose
+if [ "$mode" = test ]; then
+    cmake --build build-bsd --parallel 2
+    ctest --test-dir build-bsd --verbose
+    rm -rf build-bsd/portability-output
+    build-bsd/nebula_package_fixture bundle "$PWD/build-bsd/portability-output"
+else
+    cmake --build build-bsd --parallel 2 --target nebula_package_fixture
+    stage=$(mktemp -d "$PWD/build-bsd/portability-check.XXXXXX")
+    trap 'rm -rf "$stage"' EXIT
+    count=0
+    for source in "$PWD"/build-portability-inputs/portability-*; do
+        test -d "$source"
+        build-bsd/nebula_package_fixture transfer "$source" "$stage/$(basename "$source")"
+        count=$((count + 1))
+    done
+    test "$count" -eq 3
+fi
