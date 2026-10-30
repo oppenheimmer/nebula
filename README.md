@@ -9,6 +9,9 @@ Workspace pages and properties are stored in a local SQLite database. The separa
 `--demo` mode edits an in-memory sample and discards it on close. Implementation
 status, milestones, bugs, and verification results belong in [ROADMAP.md](ROADMAP.md).
 
+New here? Start with the [first-use guide](docs/USER_GUIDE.md), including save
+checks, recovery and common corrections.
+
 ## Build with Docker
 
 Use the existing Docker CLI and daemon. Qt and build dependencies stay inside the
@@ -74,7 +77,8 @@ deletion.
 
 Edits save after a 500 ms pause, before navigating to another page, and when closing
 the window. The status distinguishes pending edits, successful saves, and failures.
-Ctrl+S saves immediately. On failure, edits remain visible and closing asks whether
+Ctrl+S saves immediately. A forced kill or power loss can lose edits still pending.
+On failure, edits remain visible and closing asks whether
 to keep the window open or discard pending changes. If the page changed elsewhere,
 Workspace → Keep my version as a new page saves your edits as a separate copy. Undo
 survives autosave but is cleared when switching pages and does not survive restart.
@@ -212,6 +216,11 @@ explicit page creation in a chosen database. Page creation and source binding
 commit together; undoing the binding keeps the created page. Escaping,
 completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
 
+The Link… picker loads pages and blocks in batches of 100. Expand a page to see
+its matching blocks; select **Show more pages… / Show more blocks…** and press
+Enter or double-click for the next batch. Search examines all cached targets,
+including blocks beyond the displayed batch and unsaved text on the open page.
+
 ## Pasted web links
 
 Pasting a complete HTTP or HTTPS URL keeps the link and attempts a text-only
@@ -257,6 +266,8 @@ UndefinedBehaviorSanitizer.
 
 ```sh
 ./scripts/dev.sh test asan
+./scripts/dev.sh fuzz 30
+./scripts/dev.sh format --check
 ./scripts/dev.sh stress 20
 ./scripts/dev.sh test-native
 ./scripts/dev.sh run --smoke-test
@@ -275,6 +286,12 @@ measurements for the 1,000-block editor fixture; see
 workspace` measures the real window over a 10,000-block page, a 5,000-entry Journal,
 a page referenced by 1,000 entries and a page with 200 images.
 `.github/workflows/ci.yml` runs the same Docker checks on GitHub-hosted Linux.
+
+`fuzz` uses Clang with coverage-guided libFuzzer, ASan and UBSan for each parser
+target; its corpus, logs and crash artifacts stay in ignored `build-container-fuzz/`.
+Rebuild the development image to supply the fuzzing and formatting tools.
+`format --check` checks C++ formatting without writing; `format` applies the
+repository style through the container. These commands need a Git checkout.
 
 Nebula's source is [MIT licensed](LICENSE). Dependencies retain their own licenses.
 Project management conventions are in [AGENTS.md](AGENTS.md).

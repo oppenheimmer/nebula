@@ -1,5 +1,6 @@
 #include "nebula/app/workspace_window.hpp"
 #include "nebula/app/trash_controls.hpp"
+#include "nebula/qt/utf8.hpp"
 #include <QAction>
 #include <QComboBox>
 #include <QLabel>
@@ -12,7 +13,7 @@
 
 namespace nebula {
 namespace {
-QString q(const std::string& text) {return QString::fromUtf8(text.data(),qsizetype(text.size()));}
+QString q(const std::string& text) {return utf8::decode(text);}
 }
 void WorkspaceWindow::update_trash_actions()
 {

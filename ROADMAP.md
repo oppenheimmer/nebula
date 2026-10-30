@@ -50,7 +50,8 @@ The following remain implementation decisions rather than settled facts:
 - Minimum Linux distribution/compiler baseline and FreeBSD/OpenBSD version
   baselines (amd64).
 - Linux packaging format and the FreeBSD and OpenBSD distribution methods.
-- Benchmark thresholds; supported search behavior is defined in
+- Portable performance expectations beyond the recorded reference machine;
+  budgets are in [PERFORMANCE.md](docs/PERFORMANCE.md) and search behavior in
   [SEARCH.md](docs/SEARCH.md).
 - Cross-platform verification of the defined lossless interchange and Markdown
   subset; contracts are in [INTERCHANGE.md](docs/INTERCHANGE.md),
@@ -552,7 +553,7 @@ images, while failed extraction leaves the pasted link usable.
 Deliverables: verified recovery behavior, interaction checks, benchmark results,
 and a release candidate with known limitations documented.
 
-- [ ] M08.1 Exercise crash/interruption scenarios, failed writes, migration errors,
+- [x] M08.1 Exercise crash/interruption scenarios, failed writes, migration errors,
   trash restoration, and backup restoration across the complete workflow.
 - [ ] M08.2 Recheck keyboard navigation, focus, screen-reader semantics, clipboard,
   Unicode, and input-method composition in the integrated application. Use an
@@ -560,13 +561,13 @@ and a release candidate with known limitations documented.
   and Enter/cursor/selection/undo at block boundaries. Check screen-reader
   navigation/selection for headings, lists, to-do
   state, references, and asset labels. Record IME, reader, desktop, Qt, and results.
-- [ ] M08.3 Benchmark long pages and large databases against the thresholds agreed
+- [x] M08.3 Benchmark long pages and large databases against the thresholds agreed
   in M01; investigate bottlenecks using measured evidence.
-- [ ] M08.4 Verify storage invariants and regression coverage for actual defects;
+- [x] M08.4 Verify storage invariants and regression coverage for actual defects;
   check that attachments and derived indexes remain consistent.
-- [ ] M08.5 Document the workspace format, recovery procedure, export limitations,
+- [x] M08.5 Document the workspace format, recovery procedure, export limitations,
   supported environments, and unresolved release issues.
-- [ ] M08.6 Verify references/backlinks through duplicate titles, renames, moves,
+- [x] M08.6 Verify references/backlinks through duplicate titles, renames, moves,
   heading changes, target trash/restore, reuse of deleted titles, undo/redo, backup
   restore, import identity remapping, and derived-index rebuilding.
 - [x] M08.7 Clarify recoverable trash at block/subtree, page and whole-database
@@ -576,19 +577,20 @@ and a release candidate with known limitations documented.
   failure, retain attachments, and verify cancel/Escape, restore, block undo/redo
   and restart behavior. These buttons must never invoke permanent purge. Rename
   the visible reference lists to “Referenced by:” and “References”.
-- [ ] M08.8 Finish the remaining Suggestions follow-ups (scheduled 2026-10-30):
-  build the Link… picker incrementally from the cached link-target rows instead of
-  creating a tree item for every block (SUG-28); move view editing and import/
-  export coordination out of `WorkspaceWindow` into Qt-free application services
-  with focused tests (SUG-34); share one set of Qt UTF-8 conversion helpers across
-  the storage, format, interchange and desktop modules (SUG-36); rebuild the
-  development image with `clang-format` and the Clang libFuzzer runtime, run the
-  libFuzzer targets and record results, then reformat existing dense files in
-  formatting-only commits (SUG-38/SUG-40); confirm the GitHub CI workflow passes on
-  a real runner (SUG-40); measure GUI autosaves against concurrent headless
-  backups/exports of a large workspace and record whether chunked backup steps
-  avoid save failures (SUG-22). Agreeing the proposed integrated benchmark budgets
-  belongs to M08.3.
+- [x] M08.8 Build the Link… picker incrementally from cached link-target rows,
+  instead of creating a tree item for every block (SUG-28).
+- [x] M08.9 Move view editing and import/export coordination out of
+  `WorkspaceWindow` into Qt-free application services with focused tests (SUG-34).
+- [x] M08.10 Share one set of Qt UTF-8 conversion helpers across storage, format,
+  interchange and desktop modules (SUG-36).
+- [ ] M08.11 Rebuild the development image with `clang-format` and the Clang
+  libFuzzer runtime, run the coverage-guided libFuzzer targets and record results,
+  then reformat existing dense files in formatting-only commits (SUG-38/SUG-40).
+- [ ] M08.12 Confirm the GitHub CI workflow passes on a real runner and record
+  which source revision it verified (SUG-40).
+- [x] M08.13 Measure GUI autosaves against concurrent headless backups/exports
+  of a large workspace; record whether chunked backup steps avoid save failures
+  (SUG-22). Integrated benchmark budgets belong to M08.3.
 
 Exit criteria: required checks have recorded outcomes; supported saved data
 survives the documented recovery scenarios; no unresolved release-blocking defect
@@ -650,8 +652,8 @@ cross-platform data-transfer checks on their recorded supported environments.
 Each system has its own build, desktop, data-reliability and package evidence;
 a Linux build or a successful check on one BSD cannot complete the other.
 
-Progress from the Suggestions implementation (2026-10-30), without completing an M08
-task: integrated benchmarks over representative fixtures now exist for M08.3
+Progress from the Suggestions implementation (2026-10-30), before the subsequent M08
+verification checkpoint: integrated benchmarks over representative fixtures now exist for M08.3
 (measured values and proposed budgets are in the work log, not yet agreed gates);
 sanitizer, fuzz and stress modes support M08.1/M08.4; Empty trash, schema hardening
 and conflict recovery support M08.1. Each M08 task stays open until its own exit
@@ -1008,6 +1010,25 @@ problems remain in the risk register until reproduced.
   candidate as in BUG-014. M08.2 must check native activation preconditions and
   repeat the workflow. A passing retry is not claimed as a fix.
 
+### BUG-020 — Reused read-only export falsely reports a corrupt search index
+
+- **Milestone/state:** M08.1/M08.4/M08.13; Fixed and verified. The export fails safely; no damaged notes were observed.
+- **Environment/reproduction:** Debian 13 Docker, SQLite 3.46.1, Qt 6.8.2.
+  Keep one read-only workspace connection, commit a page change on another
+  connection, then export lossless JSON repeatedly through the first connection.
+- **Expected/actual:** each export includes the committed changes. Without the
+  fix, the retained regression aborts with `Invalid workspace integrity:
+  malformed inverted index for FTS5 table main.page_search`.
+- **Diagnosis/resolution:** SQLite retains stale virtual-table state on the
+  reused connection. Read the FTS table inside the export snapshot before
+  `quick_check`; retain integrity and canonical-row validation. Actual corrupted
+  derived content must still be refused.
+- **Verification:** deliberately removing this refresh reproduced the failure
+  (exit 134) in `reused_read_only_export_includes_other_connection_commits`.
+  The source was restored immediately; the final GCC, Clang and ASan/UBSan
+  suites pass the regression, including refusal of genuinely inconsistent search
+  content. Native Xwayland passes it as well.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -1120,6 +1141,16 @@ milestone, evidence, and the resulting action.
   `CMakeLists.txt` and this roadmap. Partial staging kept each change set apart, and
   BUG-015 surfaced only in the combined tree. Inspect `git status`/`git log` before
   committing, stage by hunk, and rerun the combined suites.
+
+- **G28 — Size limits apply to the whole fixture (2026-10-30, M08):** a
+  64 MiB body fixture exceeds the 64 MiB JSON manifest contract after metadata.
+  The container also caps `/tmp` at 256 MiB. Large concurrency fixtures use
+  supported-size data in the ignored build directory; record code 13 as disk
+  exhaustion rather than diagnosing backup locking from a generic error.
+- **G29 — Refresh FTS state before repeated read-only checks (2026-10-30,
+  M08):** BUG-020 reproduced a false integrity failure after another connection
+  committed. A normal FTS read within the export snapshot refreshes SQLite 3.46.1
+  state without dropping integrity or canonical-content checks.
 
 ## Suggestions
 
@@ -2379,6 +2410,101 @@ begin as part of this shutdown.
   That run does not certify these later unpushed changes. OS IME/screen-reader
   acceptance and both BSD amd64 environments remain unverified. M08 continues;
   M09 and the retargeted M10 remain Not started.
+
+### Reliability and application-service continuation — 2026-10-30
+
+- Resumed the uncommitted M08 preparation without discarding it. Split the full
+  M08.8 follow-up requirements into M08.8–M08.13 so each has separate completion
+  evidence. Added process-kill checkpoints before/after page and trash commits,
+  during attachment copy, after file promotion and after attachment commit. Each
+  case reopens, audits, rebuilds derived indexes, backs up/restores and exports/
+  imports while preserving note IDs, reference targets, dates and retained bytes.
+- M08.8 now allocates Link… picker items in batches of 100 pages and blocks.
+  Search covers every cached target and current unsaved text; expansion loads
+  children on demand. Continuations support Enter/double-click. Persistent model
+  indexes cancel queued continuations when a search replaces the tree. Widget
+  tests cover paging, late Unicode matches, empty queries and queued rebuilds;
+  full-window tests cover insertion, autosave, undo/redo and backlinks.
+- M08.9 extracts typed view-edit parsing/validation/persistence and Markdown/JSON
+  coordination into Qt-free application services. Window code retains dialogs
+  and display updates. Focused service tests cover invalid typed filters without
+  mutating a saved view, settings preservation, all four interchange routes,
+  destination refusal and independent ownership of imported workspaces.
+- M08.10 shares length-aware UTF-8 conversion/validation across desktop, storage,
+  format, interchange and attachment manifests, retaining error types and embedded
+  NUL behavior. Added invalid/truncated/overlong UTF-8, Japanese and emoji checks.
+  GCC 14's `maybe-uninitialized` diagnostic on inlined temporary optional members
+  required named preview runs; warnings remain enabled and fatal.
+- Initial GCC, Clang and ASan/UBSan suites each passed all 15 CTest groups before
+  the final service and large-fixture changes. Five coverage-guided parser targets
+  completed 21 seconds each with ASan/UBSan: wiki 1,931,000, codec 137,022,
+  manifest 132,996, JSON 89,578 and Markdown 2,529 executions, without a reported
+  finding. Leak detection remains disabled. Logs/corpus stay in ignored builds.
+- The larger concurrent-maintenance fixture initially failed with SQLite code 13,
+  `database or disk is full`: its data exceeded the launcher's 256 MiB `/tmp`
+  tmpfs. Added the SQLite error to backup failures and placed that fixture in the
+  ignored build directory via `NEBULA_TEST_TMPDIR`; production backup locking was
+  not changed. An initial 64 MiB body fixture also correctly exceeded the JSON
+  manifest limit once metadata was included; the final supported fixture contains
+  2,001 pages with 32 MiB of body text.
+- Added the first-use guide and linked it from README, covering workspace choice,
+  save confirmation, keyboard controls, previews, managed files and recovery.
+  Actual OS IME/reader acceptance remains unperformed: the host IBus command
+  reports no connected engine; Orca availability does not establish a reader
+  check. No QEMU executable or `/dev/kvm` is available for BSD validation.
+- Final compiler/sanitizer/native, benchmark, formatting, documentation and CI
+  results will be recorded below before closing this checkpoint. M08 remains
+  In progress; M09/M10 retain their dependencies and are not claimed complete.
+
+### M08 verified reliability, services and performance — 2026-10-30
+
+- Completed M08.1, M08.3–M08.6, M08.8–M08.10 and M08.13. M08.2 remains open
+  for actual OS IME/screen-reader acceptance and investigation of the intermittent
+  native activation check (BUG-019). M08.11 awaits its formatting-only commit;
+  M08.12 awaits verification of this source on the real runner. M08 stays
+  In progress; Linux release and both native BSD milestones remain unfinished.
+- **Final checks:** GCC and Clang Release and GCC Debug ASan/UBSan each passed
+  all 15 CTest groups with warnings-as-errors; core-only passed 2/2 without Qt or
+  SQLite. Leak detection remains off. Native Xwayland passed 58 editor, 60 desktop,
+  13 review-desktop, 18 preview-controller, nine reliability and eight trash-safety
+  cases (setup/cleanup excluded). The seven process-kill boundaries and restored/
+  imported attachment bytes pass. Existing storage/migration/failure, reference
+  lifecycle, clipboard remapping and interchange regressions pass in these runs.
+- **Concurrent maintenance:** the real window edited a 69,492,736-byte workspace
+  while a separate process completed four headless backup/export cycles. Eight
+  typing events produced six persisted autosaves before the final flush, with no
+  visible save failure. Backup restore and lossless JSON import each retained all
+  2,001 pages. The 256-page backup steps needed no locking change for this fixture;
+  this is measured evidence, not a universal scheduling guarantee.
+- **Performance:** selected the documented M01 budgets and proposed integrated
+  budgets before measuring; [PERFORMANCE.md](docs/PERFORMANCE.md) defines fixtures,
+  scope and commands. Three sequential runs on the otherwise idle reference
+  machine (RHEL 9.8, Intel i5-1345U, Debian 13 container, GCC 14.2.0 Release,
+  Qt 6.8.2/offscreen) all met them. Image remains `sha256:d80b4106…a66e5d`.
+
+| Measurement | Range across all three runs | Budget |
+| --- | --- | --- |
+| 1,000-block load | 7–8 ms | 500 ms |
+| 1,000-block typing p95 | 2.18–2.24 ms | 50 ms |
+| 1,000-block adjacent move | 3 ms | 100 ms |
+| 1,000-block peak RSS | 41,480–42,040 KiB | 128 MiB |
+| 10,000-block open | 354–357 ms | 1,000 ms |
+| 10,000-block typing p95 | 4.16–4.24 ms | 16 ms |
+| 10,000-block body save | 70 ms | 250 ms |
+| Hub typing p95 / body save | 0.35–0.40 ms / 0 ms at clock resolution | 16 / 250 ms |
+| 200-image page typing p95 / save | 0.67–0.72 ms / 39 ms | 16 / 250 ms |
+| Hub rename (1,200 referrers) | 161–165 ms | 1,000 ms |
+| 5,000-entry table switch | 78–79 ms | 300 ms |
+| Integrated peak RSS | 84,300–86,172 KiB | 128 MiB |
+
+  Diagnostic results: 10,000-block move 25 ms; 200-image import 1,026–1,033 ms;
+  search 15 ms; hub/image opens 40/27 ms. No outlier was discarded. These are
+  reference-machine checks, not portable CI timing assertions or IME measurements.
+- Final documentation checks cover local links outside code examples, balanced
+  fences, 78 unique task IDs, scope/status consistency and `git diff --check`.
+  No host dependencies were installed. No power-loss, actual OS IME/reader or
+  native FreeBSD/OpenBSD result is claimed. Checkpoint commit/push and subsequent
+  formatting/CI outcomes are recorded in the next entry.
 
 ## Technical references discussed
 

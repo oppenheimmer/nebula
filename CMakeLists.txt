@@ -8,6 +8,17 @@ include(CTest)
 option(NEBULA_BUILD_EDITOR "Build the Qt editor feasibility prototype" ON)
 option(NEBULA_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(NEBULA_WERROR "Treat compiler warnings in Nebula targets as errors" OFF)
+option(NEBULA_LIBFUZZER "Build coverage-guided parser fuzzing (Clang)" OFF)
+if(NEBULA_LIBFUZZER)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "NEBULA_LIBFUZZER requires Clang and its libFuzzer runtime")
+    endif()
+    # Instrument the parsers, not just the driver; omit libFuzzer's main until
+    # linking the fuzz executable. Ordinary test executables still build.
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fsanitize=fuzzer-no-link,address,undefined>"
+        "$<$<COMPILE_LANGUAGE:CXX>:-fno-omit-frame-pointer>")
+    add_link_options(-fsanitize=address,undefined)
+endif()
 if(NEBULA_SANITIZE)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined)
     add_link_options(-fsanitize=address,undefined)
@@ -62,8 +73,8 @@ if(NEBULA_BUILD_EDITOR)
     add_library(nebula_interchange src/interchange/markdown.cpp src/interchange/json.cpp)
     target_include_directories(nebula_interchange PUBLIC include)
     target_link_libraries(nebula_interchange PUBLIC nebula_storage PRIVATE SQLite::SQLite3 Qt6::Core)
-    add_library(nebula_application src/app/page_session.cpp src/app/navigation.cpp src/app/property_text.cpp src/app/link_targets.cpp)
-    target_link_libraries(nebula_application PUBLIC nebula_storage)
+    add_library(nebula_application src/app/page_session.cpp src/app/navigation.cpp src/app/property_text.cpp src/app/link_targets.cpp src/app/view_edit.cpp src/app/interchange.cpp)
+    target_link_libraries(nebula_application PUBLIC nebula_interchange)
     add_executable(nebula_workspace src/cli/workspace_main.cpp)
     target_link_libraries(nebula_workspace PRIVATE nebula_interchange)
     add_library(nebula_editor
@@ -85,7 +96,7 @@ if(NEBULA_BUILD_EDITOR)
 
     add_library(nebula_desktop
         src/app/pasted_link_preview.cpp include/nebula/app/pasted_link_preview.hpp
-        src/app/trash_controls.cpp src/app/workspace_trash.cpp
+        src/app/trash_controls.cpp src/app/workspace_trash.cpp src/app/link_target_tree.cpp
         src/app/workspace_dialog.cpp src/app/prototype_window.cpp
         src/app/workspace_window.cpp src/app/termination.cpp include/nebula/app/workspace_window.hpp
         include/nebula/app/workspace_dialog.hpp include/nebula/app/prototype_window.hpp)
@@ -151,7 +162,6 @@ if(NEBULA_BUILD_EDITOR)
         target_link_libraries(nebula_fuzz PRIVATE nebula_interchange Qt6::Core)
         add_test(NAME fuzz_smoke COMMAND nebula_fuzz all 300)
         set_tests_properties(fuzz_smoke PROPERTIES TIMEOUT 120)
-        option(NEBULA_LIBFUZZER "Build coverage-guided libFuzzer targets (Clang with libFuzzer runtime)" OFF)
         if(NEBULA_LIBFUZZER)
             add_executable(nebula_libfuzzer tests/fuzz_targets.cpp)
             target_compile_definitions(nebula_libfuzzer PRIVATE NEBULA_LIBFUZZER)
@@ -163,6 +173,17 @@ if(NEBULA_BUILD_EDITOR)
         set_target_properties(app_tests PROPERTIES AUTOMOC ON)
         target_link_libraries(app_tests PRIVATE nebula_application Qt6::Test)
         add_test(NAME app COMMAND app_tests)
+        add_executable(nebula_reliability_worker tests/reliability_worker.cpp)
+        target_link_libraries(nebula_reliability_worker PRIVATE nebula_interchange)
+        nebula_warnings(nebula_reliability_worker)
+        add_executable(reliability_tests tests/reliability_tests.cpp)
+        set_target_properties(reliability_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(reliability_tests PRIVATE nebula_desktop Qt6::Test SQLite::SQLite3)
+        nebula_warnings(reliability_tests)
+        add_dependencies(reliability_tests nebula_reliability_worker)
+        add_test(NAME reliability COMMAND reliability_tests)
+        set_tests_properties(reliability PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen;NEBULA_TEST_TMPDIR=${CMAKE_CURRENT_BINARY_DIR}" TIMEOUT 90)
         add_test(NAME prototype_smoke COMMAND nebula_prototype --smoke-test)
         set_tests_properties(prototype_smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
     endif()

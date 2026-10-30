@@ -1,5 +1,6 @@
 // Window-level checks for the 2026-10-30 review suggestions (SUG-xx in ROADMAP.md).
 #include "nebula/app/termination.hpp"
+#include "nebula/app/link_target_tree.hpp"
 #include "nebula/app/workspace_dialog.hpp"
 #include "nebula/app/workspace_window.hpp"
 #include "nebula/storage/workspace.hpp"
@@ -7,6 +8,7 @@
 #include <QApplication>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QInputDialog>
@@ -69,6 +71,8 @@ private slots:
     void termination_signals_reach_the_event_loop();
     void integrity_check_reports_from_the_window();
     void journal_bootstrap_is_complete();
+    void link_picker_batches_pages_blocks_and_searches_all_rows();
+    void link_picker_links_pending_blocks_from_the_window();
 };
 
 void ReviewDesktopTests::folder_dialog_refuses_backups_and_confirms_unrelated_folders()
@@ -241,6 +245,75 @@ void ReviewDesktopTests::journal_bootstrap_is_complete()
     { WorkspaceWindow window(w); }
     const auto databases = w.databases(); QCOMPARE(databases.size(), std::size_t(1));
     QCOMPARE(w.properties(databases[0].id).size(), std::size_t(3)); QCOMPARE(w.views(databases[0].id)[0].visible_properties.size(), std::size_t(3));
+}
+
+void ReviewDesktopTests::link_picker_batches_pages_blocks_and_searches_all_rows()
+{
+    std::vector<LinkTargetRow> rows;
+    for (int p = 0; p < 205; ++p) {
+        const auto id = std::to_string(p);
+        rows.push_back({ReferenceKind::Page, id, "Duplicate", id, "Duplicate", "Notes", false});
+        for (int b = 0; b < (p == 204 ? 251 : 1); ++b)
+            rows.push_back({ReferenceKind::Block, id + "-" + std::to_string(b),
+                b == 250 ? u8"日本語 needle" : "Body", id, "Duplicate", "Notes", b == 250});
+    }
+    LinkTargetTree tree(std::move(rows)); show_window(tree);
+    QCOMPARE(tree.topLevelItemCount(), 101);
+    QCOMPARE(tree.topLevelItem(0)->childCount(), 0);
+    tree.setCurrentItem(tree.topLevelItem(100)); QTest::keyClick(&tree, Qt::Key_Return);
+    QTRY_COMPARE(tree.topLevelItemCount(), 201);
+    tree.setCurrentItem(tree.topLevelItem(200)); QTest::keyClick(&tree, Qt::Key_Return);
+    QTRY_COMPARE(tree.topLevelItemCount(), 205);
+    auto* page = tree.topLevelItem(204); tree.expandItem(page);
+    QCOMPARE(page->childCount(), 101);
+    tree.setCurrentItem(page->child(100)); QTest::keyClick(&tree, Qt::Key_Return);
+    QTRY_COMPARE(page->childCount(), 201);
+    tree.setCurrentItem(page->child(200)); QTest::keyClick(&tree, Qt::Key_Return);
+    QTRY_COMPARE(page->childCount(), 251);
+    tree.search(QString::fromUtf8(u8"Notes 日本語 needle"));
+    QCOMPARE(tree.topLevelItemCount(), 1);
+    page = tree.topLevelItem(0); tree.expandItem(page);
+    QCOMPARE(page->childCount(), 1);
+    QCOMPARE(page->child(0)->data(0, Qt::UserRole).toString(), QString("204-250"));
+    tree.search("missing"); QCOMPARE(tree.topLevelItemCount(), 0);
+    tree.search({});
+    // Queue a continuation, then replace the query before that callback runs.
+    tree.setCurrentItem(tree.topLevelItem(100)); QTest::keyClick(&tree, Qt::Key_Return);
+    tree.search("missing"); QApplication::processEvents();
+    QCOMPARE(tree.topLevelItemCount(), 0);
+}
+void ReviewDesktopTests::link_picker_links_pending_blocks_from_the_window()
+{
+    QTemporaryDir folder; auto w = Workspace::open(path(folder.path()));
+    auto page = w.create_page(w.create_database("Notes").id, "Source");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(page.document.id));
+    auto* editor = window.page_editor();
+    QTest::keyClicks(editor, "Unsaved target");
+    const auto block = editor->snapshot().blocks.front().id;
+    bool selected = false;
+    answer(&window, [&](QWidget* dialog) {
+        QVERIFY(dialog);
+        auto* tree = dialog->findChild<QTreeWidget*>("linkTargets"); QVERIFY(tree);
+        auto* search = dialog->findChild<QLineEdit*>("linkSearch"); QVERIFY(search);
+        search->setText("Unsaved target");
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        auto* parent = tree->topLevelItem(0); tree->expandItem(parent);
+        QCOMPARE(parent->childCount(), 1);
+        QCOMPARE(parent->child(0)->data(0, Qt::UserRole).toString(), QString::fromStdString(block));
+        tree->setCurrentItem(parent->child(0));
+        dialog->findChild<QLineEdit*>("linkLabel")->setText("Jump");
+        dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+        selected = true;
+    });
+    window.findChild<QAction*>("insertLink")->trigger();
+    QVERIFY(selected); QVERIFY(window.flush());
+    const auto saved = w.load_page(page.document.id);
+    QVERIFY(saved.document.blocks.front().runs.back().reference);
+    QCOMPARE(saved.document.blocks.front().runs.back().reference->target_id, block);
+    editor->undo(); QVERIFY(window.flush());
+    QCOMPARE(editor->toPlainText(), QString("Unsaved target"));
+    editor->redo(); QVERIFY(window.flush());
+    QCOMPARE(w.backlinks(ReferenceKind::Block, block).size(), std::size_t(1));
 }
 
 QTEST_MAIN(ReviewDesktopTests)

@@ -100,6 +100,19 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 // nebula_fuzz [TARGET] [ITERATIONS]: deterministic mutations of built-in seeds.
 int main(int argc, char** argv)
 {
+    if (argc == 3 && std::string(argv[1]) == "--seed-dir") {
+        for (const auto& entry : seeds()) {
+            const auto directory = std::filesystem::path(argv[2]) / entry.first;
+            std::filesystem::create_directories(directory);
+            for (std::size_t i = 0; i < entry.second.size(); ++i) {
+                QFile file(QString::fromStdString((directory / std::to_string(i)).string()));
+                const auto& bytes = entry.second[i];
+                if (!file.open(QIODevice::WriteOnly) || file.write(bytes.data(), qint64(bytes.size())) != qint64(bytes.size()) || !file.flush())
+                    throw std::runtime_error("Cannot write fuzz seed corpus");
+            }
+        }
+        return 0;
+    }
     const std::string only = argc > 1 ? argv[1] : "all";
     const int iterations = argc > 2 ? std::atoi(argv[2]) : 200;
     for (const auto& entry : targets()) {

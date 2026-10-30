@@ -1,5 +1,6 @@
 #include "nebula/attachments/manifest.hpp"
 #include "nebula/attachments/files.hpp"
+#include "nebula/qt/utf8.hpp"
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -12,9 +13,7 @@
 namespace nebula::files {
 namespace {
 QString utf8(const std::string& text) {
-    const auto value=QString::fromUtf8(text.data(),qsizetype(text.size()));
-    if (value.toUtf8().toStdString()!=text) throw std::runtime_error("Backup file names must be valid UTF-8");
-    return value;
+    return nebula::utf8::checked<std::runtime_error>(text,"Backup file names must be valid UTF-8");
 }
 std::set<std::string> data_files(const std::filesystem::path& root) {
     std::set<std::string> result{"nebula.sqlite3"};
@@ -61,7 +60,7 @@ Digests verify_backup_manifest(const std::filesystem::path& root,const std::stri
         if (!value.isObject()) throw std::runtime_error("Invalid backup manifest file entry");
         const auto entry=value.toObject();
         if (!entry["path"].isString() || !entry["size"].isString() || !entry["sha256"].isString()) throw std::runtime_error("Invalid backup manifest field types");
-        const auto relative=entry["path"].toString().toUtf8().toStdString(); bool valid=false;
+        const auto relative=nebula::utf8::encode(entry["path"].toString()); bool valid=false;
         const auto size=entry["size"].toString().toLongLong(&valid); const auto checksum=entry["sha256"].toString().toStdString();
         if (!safe_relative(relative) || !listed.insert(relative).second || !valid || size<0 || checksum.size()!=64
             || !std::all_of(checksum.begin(),checksum.end(),[](char c){return (c>='0'&&c<='9') || (c>='a'&&c<='f');}))

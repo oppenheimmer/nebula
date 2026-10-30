@@ -11,6 +11,8 @@ usage() {
 Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh test [gcc|clang|core|asan]
        ./scripts/dev.sh stress [REPEATS]
+       ./scripts/dev.sh fuzz [SECONDS_PER_TARGET]
+       ./scripts/dev.sh format [--check]
        ./scripts/dev.sh benchmark [single|separate|workspace]
        ./scripts/dev.sh test-native
        ./scripts/dev.sh backup SOURCE_FOLDER NEW_BACKUP_FOLDER
@@ -89,6 +91,15 @@ case "$command_name" in
         [[ "$mode" == single || "$mode" == separate || "$mode" == workspace ]] || { usage >&2; exit 2; }
         compiler=gcc
         ;;
+    fuzz)
+        seconds=${2:-30}
+        [[ "$seconds" =~ ^[0-9]+$ && "$seconds" -gt 0 ]] || { usage >&2; exit 2; }
+        compiler=fuzz
+        ;;
+    format)
+        [[ $# == 1 || ( $# == 2 && $2 == --check ) ]] || { usage >&2; exit 2; }
+        compiler=gcc
+        ;;
     run|test-native|shell|backup|restore|export-md|import-md|export-json|import-json) compiler=gcc ;;
     *) usage >&2; exit 2 ;;
 esac
@@ -109,6 +120,17 @@ run=(docker run --rm --init --network=none --cap-drop=ALL
      --workdir /workspace)
 
 case "$command_name" in
+    format)
+        format_args=(-i)
+        source_mode=
+        if [[ ${2:-} == --check ]]; then format_args=(--dry-run --Werror); source_mode=readonly; fi
+        mapfile -d '' -t sources < <(git -C "$project_dir" ls-files -z --cached --others --exclude-standard -- '*.cpp' '*.hpp')
+        (( ${#sources[@]} > 0 )) || { printf 'No Git-listed C++ source files found.\n' >&2; exit 2; }
+        exec docker run --rm --init --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --user "$(id -u):$(id -g)" --read-only \
+            --mount "$(mount_spec "$project_dir" /workspace "$source_mode")" \
+            --workdir /workspace "$image" clang-format "${format_args[@]}" "${sources[@]}"
+        ;;
     test)
         # Leak checking needs ptrace, which the restricted container does not grant.
         exec "${run[@]}" --env "NEBULA_CXX_COMPILER=$cxx" --env "NEBULA_BUILD_EDITOR=$editor" \
@@ -126,6 +148,23 @@ case "$command_name" in
             sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DNEBULA_BUILD_EDITOR=ON \
                 && cmake --build /build --parallel 4 \
                 && ctest --test-dir /build --output-on-failure -R "editor|desktop|pasted_link_preview|trash_safety" --repeat until-fail:"$NEBULA_REPEATS"'
+        ;;
+    fuzz)
+        exec "${run[@]}" --env "NEBULA_FUZZ_SECONDS=$seconds" \
+            --env ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+            --env UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 "$image" sh -ec '
+                cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Debug \
+                    -DCMAKE_CXX_COMPILER=clang++ -DNEBULA_LIBFUZZER=ON -DNEBULA_WERROR=ON
+                cmake --build /build --parallel 4 --target nebula_libfuzzer nebula_fuzz
+                /build/nebula_fuzz --seed-dir /build/corpus
+                mkdir -p /build/fuzz-logs /build/fuzz-artifacts
+                for target in wiki codec manifest json markdown; do
+                    NEBULA_FUZZ_TARGET=$target /build/nebula_libfuzzer /build/corpus/$target \
+                        -max_total_time="$NEBULA_FUZZ_SECONDS" -timeout=10 -max_len=65536 \
+                        -rss_limit_mb=1024 -artifact_prefix=/build/fuzz-artifacts/ \
+                        > /build/fuzz-logs/$target.log 2>&1 || { cat /build/fuzz-logs/$target.log; exit 1; }
+                    tail -n 2 /build/fuzz-logs/$target.log
+                done'
         ;;
     benchmark)
         "${run[@]}" "$image" sh -ec 'cmake -S /workspace -B /build -DCMAKE_BUILD_TYPE=Release \
@@ -197,6 +236,7 @@ case "$command_name" in
         if [[ "$command_name" == test-native ]]; then
             exec "${gui[@]}" "$image" sh -ec '/build/editor_tests && /build/desktop_tests && /build/review_desktop_tests \
                 && /build/pasted_link_preview_tests \
+                && NEBULA_TEST_TMPDIR=/build /build/reliability_tests \
                 && { [ ! -x /build/trash_safety_tests ] || /build/trash_safety_tests; }'
         fi
         host_workspace=

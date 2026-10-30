@@ -2,6 +2,7 @@
 #include "nebula/storage/internals.hpp"
 #include "nebula/storage/sql.hpp"
 #include "nebula/attachments/files.hpp"
+#include "nebula/qt/utf8.hpp"
 #include <QFile>
 #include <QString>
 #include <algorithm>
@@ -9,11 +10,9 @@
 namespace nebula::interchange::detail {
 namespace fs=std::filesystem;
 inline QString q(const std::string& value) {
-    auto result=QString::fromUtf8(value.data(),qsizetype(value.size()));
-    if (result.toUtf8().toStdString()!=value) throw std::runtime_error("Interchange requires valid UTF-8");
-    return result;
+    return utf8::checked<std::runtime_error>(value,"Interchange requires valid UTF-8");
 }
-inline std::string s(const QString& value) { return value.toUtf8().toStdString(); }
+inline std::string s(const QString& value) { return utf8::encode(value); }
 inline std::string read(const fs::path& path) {
     const auto digest=files::digest(path);
     if (digest.size>64*1024*1024) throw std::runtime_error("Interchange text files are limited to 64 MiB each");

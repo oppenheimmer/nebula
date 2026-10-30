@@ -1,11 +1,15 @@
 #include "nebula/interchange/interchange.hpp"
 #include "nebula/app/workspace_window.hpp"
+#include "nebula/app/link_target_tree.hpp"
+#include "nebula/app/view_edit.hpp"
+#include "nebula/app/interchange.hpp"
 #include "nebula/app/pasted_link_preview.hpp"
 #include "nebula/app/trash_controls.hpp"
 #include "nebula/app/property_text.hpp"
 #include "nebula/attachments/files.hpp"
 #include "nebula/editor/page_editor.hpp"
 #include "nebula/core/wiki.hpp"
+#include "nebula/qt/utf8.hpp"
 #include <QAction>
 #include <QApplication>
 #include <QAbstractItemView>
@@ -55,8 +59,8 @@
 
 namespace nebula {
 namespace {
-QString q(const std::string& text) { return QString::fromUtf8(text.data(),qsizetype(text.size())); }
-std::string s(const QString& text) { return text.toUtf8().toStdString(); }
+QString q(const std::string& text) { return utf8::decode(text); }
+std::string s(const QString& text) { return utf8::encode(text); }
 QString display(const PropertyValue& value) { return q(format_property(value)); }
 PropertyValue parse_value(PropertyKind kind, const QString& text) { return parse_property(kind,s(text)); }
 // Messages often contain names from notes or imported files; never interpret them as HTML.
@@ -563,18 +567,16 @@ void WorkspaceWindow::edit_view(bool create)
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{
         try {
-            View view; if (!create) view.id=current_view_.id; view.database_id=database_id_; view.name=s(name->text().trimmed()); view.sort_property=s(sort->currentData().toString()); view.ascending=ascending->isChecked();
+            ViewEdit edit; auto& view=edit.settings; if (!create) view.id=current_view_.id; view.database_id=database_id_; view.name=s(name->text().trimmed()); view.sort_property=s(sort->currentData().toString()); view.ascending=ascending->isChecked();
             view.link_filters=selected_link_filters(references->findChild<QTableWidget*>("linkFilters"));
             for (int i=0;i<visible->count();++i) if (visible->item(i)->checkState()==Qt::Checked) view.visible_properties.push_back(s(visible->item(i)->data(Qt::UserRole).toString()));
             for (int r=0;r<filters->rowCount();++r) {
                 const auto id=s(qobject_cast<QComboBox*>(filters->cellWidget(r,0))->currentData().toString());
                 const auto op=Comparison(qobject_cast<QComboBox*>(filters->cellWidget(r,1))->currentIndex());
                 const auto text=qobject_cast<QLineEdit*>(filters->cellWidget(r,2))->text();
-                auto kind=PropertyKind::Text; for (const auto& d:definitions_) if (d.id==id) kind=d.kind;
-                auto value=(op==Comparison::Empty || op==Comparison::NotEmpty)?PropertyValue{}:parse_value(op==Comparison::Contains?PropertyKind::Text:kind,text);
-                view.filters.push_back({id,op,value});
+                edit.filters.push_back({id,op,s(text)});
             }
-            workspace_.save_view(view); current_view_=view; saved_views_=workspace_.views(database_id_);
+            view=save_view_edit(workspace_,edit); current_view_=view; saved_views_=workspace_.views(database_id_);
             loading_=true; views_->clear(); int index=0;
             for (std::size_t i=0;i<saved_views_.size();++i) { views_->addItem(q(saved_views_[i].name)); if (saved_views_[i].id==view.id) index=int(i); }
             views_->setCurrentIndex(index); loading_=false; refresh_table(); dialog.accept();
@@ -688,16 +690,10 @@ void WorkspaceWindow::insert_link(const QString& query, const QString& custom_la
     if (!session_.has_page()) return;
     QDialog dialog(this); dialog.setWindowTitle("Link to a page, heading or block"); auto* layout=new QVBoxLayout(&dialog);
     auto* search=new QLineEdit(&dialog); search->setObjectName("linkSearch"); search->setPlaceholderText("Search database, page, heading, block text or ID"); search->setAccessibleName("Find link target"); layout->addWidget(search);
-    auto* tree=new QTreeWidget(&dialog); tree->setObjectName("linkTargets"); tree->setHeaderLabel("Choose a specific target"); layout->addWidget(tree);
-    std::map<std::string,QTreeWidgetItem*> pages;
-    for (const auto& target:link_candidates()) {
-        const auto label=target.kind==ReferenceKind::Page?q(target.database)+" / "+q(target.title)
-            :(target.heading?"Heading: ":"Block: ")+q(target.label).left(100);
-        auto* item=target.kind==ReferenceKind::Page?new QTreeWidgetItem(tree):new QTreeWidgetItem(pages.at(target.page));
-        item->setText(0,label+" ["+q(target.id)+"]"); item->setData(0,Qt::UserRole,q(target.id));
-        item->setData(0,Qt::UserRole+1,int(target.kind)); item->setData(0,Qt::UserRole+2,q(target.label));
-        if (target.kind==ReferenceKind::Page) pages.emplace(target.id,item);
-    }
+    std::vector<LinkTargetRow> targets;
+    for (const auto& target : link_candidates())
+        targets.push_back({target.kind,target.id,target.label,target.page,target.title,target.database,target.heading});
+    auto* tree=new LinkTargetTree(std::move(targets),&dialog); layout->addWidget(tree);
     auto* label=new QLineEdit(&dialog); label->setObjectName("linkLabel"); label->setText(custom_label); label->setPlaceholderText("Optional custom label"); layout->addWidget(label);
     auto* unresolved=new QLineEdit(&dialog); unresolved->setObjectName("unresolvedName"); unresolved->setPlaceholderText("Name of an unresolved page (does not create it)"); layout->addWidget(unresolved);
     auto* keep_unresolved=new QPushButton("Insert unresolved link",&dialog); keep_unresolved->setObjectName("insertUnresolved"); layout->addWidget(keep_unresolved);
@@ -708,21 +704,9 @@ void WorkspaceWindow::insert_link(const QString& query, const QString& custom_la
     });
     auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
     buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
-    connect(tree,&QTreeWidget::currentItemChanged,&dialog,[&](QTreeWidgetItem* item){ buttons->button(QDialogButtonBox::Ok)->setEnabled(item && !item->isHidden()); });
-    connect(search,&QLineEdit::textChanged,&dialog,[&](const QString& text){
-        tree->setCurrentItem(nullptr);
-        for (int p=0;p<tree->topLevelItemCount();++p) {
-            auto* page=tree->topLevelItem(p); bool visible=page->text(0).contains(text,Qt::CaseInsensitive);
-            for (int b=0;b<page->childCount();++b) {
-                auto* block=page->child(b); const auto combined=page->text(0)+" "+block->text(0);
-                const auto terms=text.split(' ',Qt::SkipEmptyParts);
-                const bool match=std::all_of(terms.begin(),terms.end(),[&](const auto& term){return combined.contains(term,Qt::CaseInsensitive);});
-                block->setHidden(!match); visible=visible||match;
-            }
-            page->setHidden(!visible); page->setExpanded(!text.isEmpty());
-        }
-    });
-    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem(); item && !item->isHidden()) {
+    connect(tree,&QTreeWidget::currentItemChanged,&dialog,[&](QTreeWidgetItem* item){ buttons->button(QDialogButtonBox::Ok)->setEnabled(item && !item->isHidden() && !item->data(0,Qt::UserRole).toString().isEmpty()); });
+    connect(search,&QLineEdit::textChanged,tree,&LinkTargetTree::search);
+    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=tree->currentItem(); item && !item->isHidden() && !item->data(0,Qt::UserRole).toString().isEmpty()) {
         const auto text=label->text().isEmpty()?item->data(0,Qt::UserRole+2).toString():label->text();
         const Reference reference{ReferenceKind(item->data(0,Qt::UserRole+1).toInt()),s(item->data(0,Qt::UserRole).toString()),"","",!label->text().isEmpty()};
         if (page_editor()->textCursor().hasSelection() && page_editor()->selected_reference_location()) page_editor()->replace_selected_reference(reference,text);
@@ -864,7 +848,8 @@ void WorkspaceWindow::markdown_interchange(bool importing)
     const auto accepted=dialog.exec()==QDialog::Accepted; activateWindow(); page_editor()->setFocus();
     if (!accepted || dialog.selectedFiles().isEmpty()) return;
     const auto folder=std::filesystem::u8path(s(dialog.selectedFiles()[0]));
-    const auto report=importing?interchange::import_markdown(workspace_,folder,database_id_):interchange::export_markdown(workspace_,folder);
+    const auto report=run_interchange(workspace_,importing?InterchangeAction::ImportMarkdown:InterchangeAction::ExportMarkdown,
+        importing?folder:std::filesystem::path{},importing?std::filesystem::path{}:folder,database_id_).report;
     if (importing) {link_targets_.invalidate(); refresh_table(); if (!report.pages.empty()) open_page(report.pages.front());}
     QString message=QString::number(report.pages.size())+(importing?" pages imported.":" pages exported.");
     for (const auto& warning:report.warnings) message+="\n\n"+q(warning);
@@ -888,12 +873,13 @@ void WorkspaceWindow::json_interchange(bool importing)
     if (!accepted || dialog.selectedFiles().isEmpty()) return;
     const auto destination=std::filesystem::u8path(s(dialog.selectedFiles()[0]));
     if (importing) {
-        auto workspace=std::make_shared<Workspace>(interchange::import_json(std::filesystem::u8path(s(source)),destination));
+        auto result=run_interchange(workspace_,InterchangeAction::ImportJson,std::filesystem::u8path(s(source)),destination);
+        auto workspace=std::shared_ptr<Workspace>(std::move(result.imported_workspace));
         auto* window=new WorkspaceWindow(*workspace); window->setAttribute(Qt::WA_DeleteOnClose);
         // Keep the imported workspace alive through destruction of its window.
         connect(window,&QObject::destroyed,qApp,[workspace]{(void)workspace;}); window->show();
     } else {
-        interchange::export_json(workspace_,destination);
+        run_interchange(workspace_,InterchangeAction::ExportJson,{},destination);
         notify(this,QMessageBox::Information,"Lossless JSON export","Exported notes, properties, views, trash, recovery history and retained attachment files to:\n"+q(destination.u8string()));
         activateWindow(); page_editor()->setFocus();
     }

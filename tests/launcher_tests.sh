@@ -185,3 +185,36 @@ for command in export-json import-json; do
     has_argument "/output/$command" || fail 'JSON destination lost'
 done
 printf 'PASS: lossless JSON command routing and mount scopes\n'
+
+reset_calls
+bash "$launcher" fuzz 1
+count_calls 1
+load_call 0
+has_argument --network=none || fail 'fuzzing must stay offline'
+has_argument NEBULA_FUZZ_SECONDS=1 || fail 'fuzz duration lost'
+[[ "${call[*]}" == *NEBULA_LIBFUZZER=ON* ]] || fail 'parsers must be instrumented'
+if bash "$launcher" fuzz 0 >/dev/null 2>&1; then fail 'zero fuzz duration accepted'; fi
+
+cat > "$fixture/bin/git" <<'MOCK'
+#!/usr/bin/env bash
+case "$*" in *ls-files*) printf 'sample.cpp\0' ;; *) exit 1 ;; esac
+MOCK
+chmod +x "$fixture/bin/git"
+for mode in check write; do
+    reset_calls
+    if [[ $mode == check ]]; then bash "$launcher" format --check; else bash "$launcher" format; fi
+    count_calls 1
+    load_call 0
+    has_argument --network=none || fail 'formatting must stay offline'
+    has_argument clang-format || fail 'formatting must use container tools'
+    has_argument sample.cpp || fail 'source list lost'
+    mount="type=bind,\"source=$fixture/project\",\"target=/workspace\""
+    if [[ $mode == check ]]; then
+        has_argument --dry-run || fail 'format check must not write'
+        has_argument "$mount,readonly" || fail 'format check source must be read-only'
+    else
+        has_argument -i || fail 'format must rewrite sources'
+        has_argument "$mount" || fail 'format source must be writable'
+    fi
+done
+printf 'PASS: isolated fuzzing and formatting commands\n'

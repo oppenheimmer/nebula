@@ -29,7 +29,8 @@ void copy_database(sqlite3* source,sqlite3* output) {
     }
     const int finish=sqlite3_backup_finish(backup);
     if (status!=SQLITE_DONE || finish!=SQLITE_OK)
-        throw StorageError(sql::kind_of(status==SQLITE_DONE?finish:status),"Database backup failed; retry when the workspace is idle");
+        throw StorageError(sql::kind_of(status==SQLITE_DONE?finish:status),
+            "Database backup failed ("+std::to_string(status==SQLITE_DONE?finish:status)+"): "+sqlite3_errmsg(output));
 }
 void collect(const Page& page,std::unordered_set<std::string>& ids) {
     for (const auto& block:page.blocks) {

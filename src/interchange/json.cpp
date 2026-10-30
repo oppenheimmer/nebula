@@ -131,7 +131,15 @@ QJsonObject records(sqlite3* db) {
 }
 void validate_records(const Workspace& workspace,sqlite3* db) {
     sql::Statement relationships(db,"PRAGMA foreign_key_check"); if (relationships.row()) throw std::runtime_error("Invalid imported relationships");
-    if (sql::scalar(db,"PRAGMA quick_check")!="ok") throw std::runtime_error("Invalid workspace integrity");
+    // SQLite 3.46.1 can retain a stale FTS5 integrity cursor on a read-only
+    // connection after another connection commits. A normal virtual-table read
+    // refreshes it within this snapshot; do not bypass the integrity check.
+    if (sql::scalar(db,"SELECT count(*) FROM sqlite_schema WHERE name='page_search'")!="0") {
+        sql::Statement refresh(db,"SELECT rowid FROM page_search LIMIT 1");
+        refresh.row();
+    }
+    const auto integrity=sql::scalar(db,"PRAGMA quick_check");
+    if (integrity!="ok") throw std::runtime_error("Invalid workspace integrity: "+integrity);
     sql::Statement meta(db,"SELECT id,workspace_id FROM workspace_meta");
     if (!meta.row() || meta.number(0)!=1 || meta.text(1).empty() || meta.text(1).find('\0')!=std::string::npos || meta.row())
         throw std::runtime_error("Expected one permanent workspace identity");

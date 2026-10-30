@@ -1,6 +1,7 @@
 #include "nebula/storage/workspace.hpp"
 #include "nebula/storage/internals.hpp"
 #include "nebula/format/codec.hpp"
+#include "nebula/qt/utf8.hpp"
 #include "records_internal.hpp"
 #include <QChar>
 #include <QString>
@@ -14,8 +15,7 @@
 namespace nebula {
 namespace {
 QString text(const std::string& value) {
-    auto result=QString::fromUtf8(value.data(),qsizetype(value.size()));
-    if (result.toUtf8().toStdString()!=value) throw std::invalid_argument("Search text must be valid UTF-8");
+    auto result=utf8::checked(value,"Search text must be valid UTF-8");
     result.replace(QChar::Null,' ');
     return result;
 }
@@ -176,7 +176,7 @@ void storage_detail::refresh_search(sqlite3* database,const PageRecord& page,con
 }
 namespace {
 QString fold(const std::string& value) {
-    return QString::fromUtf8(value.data(),qsizetype(value.size())).normalized(QString::NormalizationForm_KC).toCaseFolded();
+    return utf8::decode(value).normalized(QString::NormalizationForm_KC).toCaseFolded();
 }
 // Case-insensitive natural order ("Item 9" before "Item 10"), independent of the
 // process locale so every machine shows the same order for the same workspace.

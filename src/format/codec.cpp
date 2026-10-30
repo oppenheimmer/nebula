@@ -1,4 +1,5 @@
 #include "nebula/format/codec.hpp"
+#include "nebula/qt/utf8.hpp"
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -7,13 +8,11 @@
 namespace nebula {
 namespace {
 QString q(const std::string& s) {
-    const auto result = QString::fromUtf8(s.data(), qsizetype(s.size()));
-    if (result.toUtf8().toStdString() != s) throw std::invalid_argument("Text must be valid UTF-8");
-    return result;
+    return utf8::checked(s);
 }
 std::string s(const QJsonValue& value) {
     if (!value.isString()) throw std::runtime_error("Expected JSON text");
-    return value.toString().toUtf8().toStdString();
+    return utf8::encode(value.toString());
 }
 bool flag(const QJsonValue& value) {
     if (!value.isBool()) throw std::runtime_error("Expected JSON boolean");
