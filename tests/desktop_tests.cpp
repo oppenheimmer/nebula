@@ -86,6 +86,8 @@ void click_action(PrototypeWindow& window, const char* name)
 class DesktopTests : public QObject {
     Q_OBJECT
 private slots:
+    void search_shortcut_opens_matching_block_and_preserves_history();
+    void search_scope_cancel_and_rebuild_with_pending_edits();
     void default_location_is_suggested_without_creating_it();
     void cancel_does_not_create_a_workspace();
     void accepting_expands_home_and_normalizes_path();
@@ -1026,6 +1028,50 @@ void DesktopTests::journal_with_image_and_file_restores_into_fresh_window()
     QVERIFY(window.page_editor()->go_to_block(QString::fromStdString(image.card))); QCOMPARE(window.page_editor()->current_attachment_id(),image.file.id);
     QVERIFY(window.page_editor()->go_to_block(QString::fromStdString(file.card))); QVERIFY(window.findChild<QAction*>("exportAttachment")->isEnabled());
     QVERIFY(restored.audit_attachments().empty());
+}
+void DesktopTests::search_shortcut_opens_matching_block_and_preserves_history()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    const auto source=w.create_page(db.id,"Source"); auto target=w.create_page(db.id,"Target");
+    target.document.blocks[0].runs={{"ordinary opening paragraph"}};
+    target.document.blocks.push_back({"search-target",{},BlockKind::Paragraph,{{"uniquevolcano"}}}); w.save_page(target);
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(source.document.id));
+    auto* editor=window.page_editor(); QTest::keyClicks(editor,"pending source"); const auto position=editor->textCursor().position();
+    QTimer choose; bool opened=false;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); if (!dialog || dialog->objectName()!="workspaceSearch") return;
+        auto* query=dialog->findChild<QLineEdit*>("searchText"); if (query->text()!="uniquevolcano") query->setText("uniquevolcano");
+        auto* results=dialog->findChild<QTreeWidget*>("searchResults"); if (results->topLevelItemCount()!=1) return;
+        results->setCurrentItem(results->topLevelItem(0)); opened=true; QTest::keyClick(results,Qt::Key_Return);
+    });
+    choose.start(10); QTimer::singleShot(3000,&window,[]{if (auto* d=qobject_cast<QDialog*>(QApplication::activeModalWidget())) d->reject();});
+    QTest::keyClick(editor,Qt::Key_F,Qt::ControlModifier|Qt::ShiftModifier); choose.stop(); QVERIFY(opened);
+    QCOMPARE(editor->snapshot().id,target.document.id); QCOMPARE(editor->current_block_id(),QString("search-target"));
+    QVERIFY(w.load_page(source.document.id).document.blocks[0].runs[0].text.find("pending source")!=std::string::npos);
+    QTRY_VERIFY(window.isActiveWindow()); QTRY_VERIFY(editor->hasFocus());
+    QTest::keyClick(editor,Qt::Key_Left,Qt::AltModifier); QCOMPARE(editor->snapshot().id,source.document.id);
+    QCOMPARE(editor->textCursor().position(),position);
+}
+void DesktopTests::search_scope_cancel_and_rebuild_with_pending_edits()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto first=w.create_database("Same"), second=w.create_database("Same");
+    const auto a=w.create_page(first.id,"Duplicate"); w.create_page(second.id,"Duplicate");
+    WorkspaceWindow window(w); show_window(window); QVERIFY(window.open_page(a.document.id)); bool checked=false;
+    QTimer choose;
+    connect(&choose,&QTimer::timeout,&window,[&]{
+        auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); if (!dialog || dialog->objectName()!="workspaceSearch") return;
+        auto* query=dialog->findChild<QLineEdit*>("searchText"); if (query->text()!="Duplicate") query->setText("Duplicate");
+        auto* scope=dialog->findChild<QComboBox*>("searchDatabase"); scope->setCurrentIndex(scope->findData(QString::fromStdString(second.id)));
+        auto* results=dialog->findChild<QTreeWidget*>("searchResults"); if (results->topLevelItemCount()!=1) return;
+        QVERIFY(results->topLevelItem(0)->data(0,Qt::UserRole).toString()!=QString::fromStdString(a.document.id));
+        checked=true; dialog->reject();
+    });
+    choose.start(10); QTimer::singleShot(3000,&window,[]{if (auto* d=qobject_cast<QDialog*>(QApplication::activeModalWidget())) d->reject();});
+    window.findChild<QAction*>("searchWorkspace")->trigger(); choose.stop(); QVERIFY(checked);
+    QCOMPARE(window.page_editor()->snapshot().id,a.document.id);
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search"); QTest::keyClicks(window.page_editor(),"retainedpending");
+    window.findChild<QAction*>("rebuildSearch")->trigger(); QCOMPARE(w.search("retainedpending").size(),std::size_t(1));
+    QCOMPARE(w.pages(first.id).size(),std::size_t(1)); QCOMPARE(w.pages(second.id).size(),std::size_t(1));
 }
 QTEST_MAIN(DesktopTests)
 #include "desktop_tests.moc"

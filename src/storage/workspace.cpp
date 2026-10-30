@@ -5,12 +5,13 @@
 #include <utility>
 #include "sql.hpp"
 #include "nebula/attachments/files.hpp"
+#include "records_internal.hpp"
 
 namespace nebula {
 namespace {
 
 constexpr int ApplicationId = 0x4e454255; // NEBU
-constexpr int SchemaVersion = 7;
+constexpr int SchemaVersion = 8;
 
 void execute(sqlite3* database, const std::string& sql)
 {
@@ -90,7 +91,7 @@ Workspace Workspace::open(const std::filesystem::path& directory)
             version = "1";
         } else if (application != std::to_string(ApplicationId)) {
             throw std::runtime_error("This folder contains a database that is not a Nebula workspace");
-        } else if (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" && version != "6" && version != std::to_string(SchemaVersion)) {
+        } else if (version != "1" && version != "2" && version != "3" && version != "4" && version != "5" && version != "6" && version != "7" && version != std::to_string(SchemaVersion)) {
             throw std::runtime_error("This workspace format is not supported by this version of Nebula");
         }
         const auto id = scalar(raw, "SELECT workspace_id FROM workspace_meta WHERE id=1");
@@ -179,12 +180,16 @@ Workspace Workspace::open(const std::filesystem::path& directory)
             version="5";
         }
         if (version=="5") { execute(raw,"PRAGMA user_version=6"); version="6"; }
-        if (version=="6") execute(raw,R"SQL(
+        if (version=="6") { execute(raw,R"SQL(
             CREATE TABLE attachments(id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL,
                 size INTEGER NOT NULL CHECK(size>=0), sha256 TEXT NOT NULL CHECK(length(sha256)=64),
                 image INTEGER NOT NULL CHECK(image IN(0,1)));
             PRAGMA user_version=7;
-        )SQL");
+        )SQL"); version="7"; }
+        if (version=="7") {
+            storage_detail::create_search(raw); storage_detail::rebuild_search(raw);
+            execute(raw,"PRAGMA user_version=8");
+        }
         if (scalar(raw, "PRAGMA quick_check") != "ok")
             throw std::runtime_error("Workspace integrity check failed");
         sql::Statement relationships(raw,"PRAGMA foreign_key_check");

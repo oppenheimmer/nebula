@@ -142,6 +142,14 @@ WorkspaceWindow::WorkspaceWindow(Workspace& workspace, const QString& display_pa
     });
     attachment_action("Save a copy…","exportAttachment",[this]{ export_attachment(); });
     attachment_action("Check managed files…","auditAttachments",[this]{ show_attachment_audit(); });
+    auto* search_menu=menuBar()->addMenu("&Search");
+    auto* search=search_menu->addAction("Find in workspace…"); search->setObjectName("searchWorkspace"); search->setShortcut(QKeySequence("Ctrl+Shift+F"));
+    connect(search,&QAction::triggered,this,[this]{ try { show_search(); } catch(const std::exception& e){error(this,e);} });
+    auto* rebuild=search_menu->addAction("Rebuild search index"); rebuild->setObjectName("rebuildSearch");
+    connect(rebuild,&QAction::triggered,this,[this]{
+        try { workspace_.rebuild_search(); if (flush()) statusBar()->showMessage("Search index rebuilt from saved notes.",6000); }
+        catch(const std::exception& e) {error(this,e);}
+    });
     addToolBarBreak();
     auto* bar=addToolBar("Database controls"); bar->setObjectName("databaseControls"); bar->setMovable(false);
     auto add=[&](const char* text,const char* name,auto callback) {
@@ -687,6 +695,41 @@ void WorkspaceWindow::update_attachment_actions()
     for (const auto* name:{"importImage","importFile"}) findChild<QAction*>(name)->setEnabled(session_.has_page());
     const bool active=session_.has_page() && !page_editor()->current_attachment_id().empty();
     for (const auto* name:{"openAttachment","exportAttachment"}) findChild<QAction*>(name)->setEnabled(active);
+}
+void WorkspaceWindow::show_search()
+{
+    if (!flush()) return;
+    QDialog dialog(this); dialog.setObjectName("workspaceSearch"); dialog.setWindowTitle("Find in workspace"); auto* layout=new QVBoxLayout(&dialog);
+    auto* query=new QLineEdit(last_search_,&dialog); query->setObjectName("searchText"); query->setMaxLength(1024); query->setAccessibleName("Search words");
+    query->setPlaceholderText("Words to find; add * to a term for prefix matching"); layout->addWidget(query);
+    auto* scope=new QComboBox(&dialog); scope->setObjectName("searchDatabase"); scope->setAccessibleName("Search database"); scope->addItem("All databases",QString{});
+    for (const auto& db:workspace_.databases())
+        scope->addItem(q(db.name)+" ["+q(db.id.substr(0,8))+"]",q(db.id));
+    layout->addWidget(scope);
+    auto* results=new QTreeWidget(&dialog); results->setObjectName("searchResults"); results->setHeaderLabels({"Page / database","Context"}); results->setRootIsDecorated(false); layout->addWidget(results);
+    auto* state=new QLabel(&dialog); state->setTextFormat(Qt::PlainText); layout->addWidget(state);
+    auto* buttons=new QDialogButtonBox(QDialogButtonBox::Open|QDialogButtonBox::Cancel,&dialog); layout->addWidget(buttons); buttons->button(QDialogButtonBox::Open)->setEnabled(false);
+    QTimer debounce; debounce.setSingleShot(true); debounce.setInterval(150);
+    auto run=[&]{
+        results->clear(); buttons->button(QDialogButtonBox::Open)->setEnabled(false);
+        try {
+            const auto matches=workspace_.search(s(query->text()),s(scope->currentData().toString()));
+            for (const auto& match:matches) {
+                auto* item=new QTreeWidgetItem(results,{q(match.title)+" / "+q(match.database_name)+" ["+q(match.page_id.substr(0,8))+"]",q(match.context).simplified().left(240)});
+                item->setData(0,Qt::UserRole,q(match.page_id)); item->setData(0,Qt::UserRole+1,q(match.block_id));
+            }
+            state->setText(query->text().trimmed().isEmpty()?"Enter one or more words.":QString::number(matches.size())+" matching notes (up to 100). Select a result to open it.");
+        } catch(const std::exception& e){state->setText(q(e.what()));}
+    };
+    connect(query,&QLineEdit::textChanged,&dialog,[&]{ debounce.start(); }); connect(&debounce,&QTimer::timeout,&dialog,run);
+    connect(scope,&QComboBox::currentIndexChanged,&dialog,[&]{ debounce.stop(); run(); });
+    connect(results,&QTreeWidget::currentItemChanged,&dialog,[&](QTreeWidgetItem* item){buttons->button(QDialogButtonBox::Open)->setEnabled(item);});
+    connect(results,&QTreeWidget::itemActivated,&dialog,[&]{ buttons->button(QDialogButtonBox::Open)->click(); });
+    std::string page,block;
+    connect(buttons,&QDialogButtonBox::accepted,&dialog,[&]{ if (auto* item=results->currentItem()) { page=s(item->data(0,Qt::UserRole).toString()); block=s(item->data(0,Qt::UserRole+1).toString()); dialog.accept(); } });
+    connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+    run(); query->selectAll(); query->setFocus(); dialog.resize(900,500); dialog.exec(); last_search_=query->text();
+    activateWindow(); page_editor()->setFocus(); if (!page.empty()) open_page(page,block);
 }
 void WorkspaceWindow::import_attachment(bool image)
 {

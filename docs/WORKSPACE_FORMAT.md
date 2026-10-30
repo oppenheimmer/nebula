@@ -1,7 +1,7 @@
-# Workspace format, version 7
+# Workspace format, version 8
 
 A workspace contains `nebula.sqlite3`, `attachments/`, and `.nebula.lock`. The database has SQLite
-application ID `0x4e454255` and `user_version = 7`. The application refuses unknown
+application ID `0x4e454255` and `user_version = 8`. The application refuses unknown
 versions. Version 1 contained only workspace identity; upgrading to version 2
 adds the persistent record tables in one transaction and preserves that identity.
 Version 3 adds deleted-block recovery. Version 4 records deletion operation IDs and
@@ -11,7 +11,8 @@ one transaction while preserving their records. Version 6 enables explicit
 default/custom reference labels with block payload version 2. Its marker upgrade
 preserves version 1 payloads and deleted fragments; legacy labels remain custom.
 Version 7 adds managed attachment metadata and block payload version 3; older
-representation-only cards retain empty attachment IDs. Versions 1–6 migrate
+representation-only cards retain empty attachment IDs. Version 8 adds rebuildable
+FTS5 page/block/property search. Versions 1–7 migrate
 transactionally; existing version 3 fragments retain their content and original
 parent/next-sibling anchors.
 Failed migrations roll back. Managed attachment paths and database files cannot be
@@ -29,6 +30,7 @@ symlinks.
 | `links` | Rebuildable source page/block/run to target page/block edges, indexed by target identity. |
 | `deleted_blocks` | Deleted subtree fragments, original parent/next sibling, deletion operation ID, original position, page, timestamp, and restored state; saved atomically with page edits. |
 | `attachments` | Permanent file ID, original basename, byte count, SHA-256, and image/file presentation flag. Bytes live in the managed directory, not SQLite BLOBs. |
+| `page_search` | Derived FTS5 rows for active/trashed pages; canonical joins exclude trash. Shadow tables are implementation details. See [SEARCH.md](SEARCH.md). |
 
 Block kinds are paragraph (0), heading (1), bullet (2), to-do (3), image card (4),
 attachment card (5), and divider (6). Dividers have no text runs. Positions are

@@ -42,6 +42,7 @@ struct AttachmentIssue {
     std::string path, attachment_id, message;
     bool removable = false, prevents_backup = false;
 };
+struct SearchResult { std::string page_id, block_id, title, database_name, context; };
 
 class Workspace {
 public:
@@ -86,6 +87,8 @@ public:
     std::vector<LinkEdge> backlinks(ReferenceKind kind, const std::string& id) const;
     std::vector<LinkEdge> outgoing_links(const std::string& page) const;
     void rebuild_links();
+    std::vector<SearchResult> search(const std::string& text, const std::string& database = {}) const;
+    void rebuild_search();
     void backup_to(const std::filesystem::path& destination) const;
     static Workspace restore(const std::filesystem::path& backup, const std::filesystem::path& destination);
 

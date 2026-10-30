@@ -60,6 +60,12 @@ Ctrl+S saves immediately. On failure, edits remain visible and closing asks whet
 to keep the window open or discard pending changes. Undo survives autosave but is
 cleared when switching pages and does not survive restart.
 
+Ctrl+Shift+F opens local workspace search over titles, blocks and properties.
+Select a database or search all active notes, then open a matching page/block.
+Words are AND-combined; a trailing * requests a prefix. Search → Rebuild search
+index repairs derived search data. Language behavior and limits are documented in
+[SEARCH.md](docs/SEARCH.md).
+
 The folder chooser sees your home directory read-only. The editor receives only
 the selected workspace as a writable data mount at `/data`. To select a location
 directly, including a location outside your home:

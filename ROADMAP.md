@@ -47,7 +47,8 @@ The following remain implementation decisions rather than settled facts:
   module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 - Minimum Linux distribution/compiler baseline and macOS deployment target.
 - Linux packaging format and the eventual macOS distribution method.
-- Benchmark thresholds and supported search languages/tokenization behavior.
+- Benchmark thresholds; supported search behavior is defined in
+  [SEARCH.md](docs/SEARCH.md).
 - Lossless interchange schema and supported Markdown import/export subset; current
   rich-text/asset payloads are documented in [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 - Markdown interchange mapping for duplicate titles, custom labels, precise
@@ -271,7 +272,7 @@ including material data-handling limitations, rather than a running progress log
 | M04 | Database-to-page workflow | M03 | Complete |
 | M05 | Complete first-release block editing | M01, M04 | Complete |
 | M06 | Attachments and diary workflow | M03, M05 | Complete |
-| M07 | Search and portable interchange | M04, M06 | Not started |
+| M07 | Search and portable interchange | M04, M06 | In progress |
 | M08 | Reliability, accessibility, and performance | M04–M07 | Not started |
 | M09 | Linux release | M08 | Not started |
 | M10 | macOS release | M09 | Not started |
@@ -508,9 +509,9 @@ data-handling limits are in [ATTACHMENTS.md](docs/ATTACHMENTS.md).
 
 Deliverables: searchable notes and documented export/import formats.
 
-- [ ] M07.1 Index appropriate page text and properties using FTS5; keep the index
+- [x] M07.1 Index appropriate page text and properties using FTS5; keep the index
   consistent with edits and trash changes and provide a rebuild path.
-- [ ] M07.2 Define and test search/tokenization behavior for supported languages;
+- [x] M07.2 Define and test search/tokenization behavior for supported languages;
   search results should navigate to the relevant page or block.
 - [ ] M07.3 Implement a documented Markdown import/export subset with explicit
   handling of unsupported formatting, attachment references, internal link paths/
@@ -1306,6 +1307,39 @@ begin as part of this shutdown.
 - **Next:** M07.1–M07.2 indexed search/tokenization and navigation, M07.3–M07.6
   Markdown/lossless interchange and validation, and M07.7 reference filters in
   search/views. M00–M06 are Complete; M07–M10 remain Not started at this checkpoint.
+
+### Indexed local search checkpoint — 2026-10-30
+
+- Pushed attachment milestone commit `161e640` to `origin/main`. Completed
+  M07.1–M07.2; M07 is In progress. Schema 8 adds an FTS5 index with block and
+  whole-page rows for titles, content, managed-file labels and typed property
+  text. Edits, target-label changes, block transfers and index updates commit
+  together; canonical joins exclude trashed pages/databases immediately.
+- Added Ctrl+Shift+F workspace/database search, explicit result selection,
+  matching-block navigation and existing position history. Index repair rebuilds
+  from canonical records before saving pending edits, so a missing index cannot
+  prevent repair. Restore rebuilds derived search data without changing note IDs
+  or revisions. Unsupported/malformed migration input rolls back unchanged.
+- Defined literal AND terms and optional trailing prefix *, NFKC/case folding,
+  Latin accent folding and character segmentation for CJK substring matching.
+  Representative Latin/fullwidth, Japanese, Chinese, Korean and Arabic fixtures
+  pass. No stemming, transliteration or emoji-only query support is claimed.
+  Search limits and behavior are in [SEARCH.md](docs/SEARCH.md). Existing SQLite
+  must include FTS5; no external dependency or baseline increase was added.
+- **Verification:** GCC and Clang passed all six CTest entries, including 48 storage,
+  56 desktop, 52 editor and 23 core cases plus launcher/smoke. The new checks cover
+  typed properties, cross-block terms, duplicate-title database scope, edits,
+  trash/restore, literal escaping, Unicode/NUL preservation, default labels after
+  rename/transfer/removal, failed-save rollback, v7 migration/rollback and backup
+  restore with missing index rows. Native Xwayland passed 52 editor and 56 desktop
+  cases, including the search shortcut, Enter selection, exact block, Back history,
+  cancel, scoped results and repair with pending edits. The initial shortcut test
+  needed to wait for modal-to-window activation before sending Back; both
+  offscreen and native checks then passed. Actual OS IME/reader and macOS checks
+  remain unperformed. Build environment is unchanged from M06. All 69 unique
+  task IDs, local documentation links/fences and `git diff --check` passed.
+- **Next:** M07.3 Markdown subset, M07.4–M07.6 lossless portable interchange and
+  validation, then M07.7 reference filters. M08–M10 remain Not started.
 
 ## Technical references discussed
 

@@ -1,6 +1,7 @@
 #include "nebula/storage/workspace.hpp"
 #include "nebula/format/codec.hpp"
 #include "sql.hpp"
+#include "records_internal.hpp"
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -139,22 +140,27 @@ PageRecord Workspace::create_page_in_transaction(const std::string& database, co
         Statement add_value(database_.get(),"INSERT INTO property_values(page_id,property_id,value_json) VALUES(?,?,?)");
         add_value.bind(1,page_id).bind(2,entry.first).bind(3,encode_value(entry.second)).done();
     }
+    storage_detail::refresh_search(database_.get(),page_id);
     return page;
 }
 PageRecord Workspace::load_page(const std::string& id) const
 {
-    Statement query(database_.get(), "SELECT database_id,title,revision,trashed FROM pages WHERE id=?");
+    return storage_detail::load_page(database_.get(),id);
+}
+PageRecord storage_detail::load_page(sqlite3* database,const std::string& id)
+{
+    Statement query(database, "SELECT database_id,title,revision,trashed FROM pages WHERE id=?");
     query.bind(1,id);
     if (!query.row()) throw std::runtime_error("Page not found");
     PageRecord page{{id,{}},query.text(0),query.text(1),{},query.number(2),bool(query.number(3))};
-    Statement blocks(database_.get(), "SELECT id,parent_id,kind,payload FROM blocks WHERE page_id=? ORDER BY position");
+    Statement blocks(database, "SELECT id,parent_id,kind,payload FROM blocks WHERE page_id=? ORDER BY position");
     blocks.bind(1,id);
     while (blocks.row()) {
         Block block{blocks.text(0),blocks.text(1),BlockKind(blocks.number(2))};
         decode_block(block,blocks.text(3)); page.document.blocks.push_back(std::move(block));
     }
     validate(page.document);
-    Statement values(database_.get(), "SELECT property_id,value_json FROM property_values WHERE page_id=?");
+    Statement values(database, "SELECT property_id,value_json FROM property_values WHERE page_id=?");
     values.bind(1,id);
     while (values.row()) page.properties.emplace(values.text(0),decode_value(values.text(1)));
     return page;
@@ -194,6 +200,10 @@ void Workspace::save_page_in_transaction(PageRecord& page)
         Statement add(database_.get(), "INSERT INTO property_values(page_id,property_id,value_json) VALUES(?,?,?)");
         add.bind(1,page.document.id).bind(2,id).bind(3,encode_value(value)).done();
     }
+    std::unordered_set<std::string> live; for (const auto& block:page.document.blocks) live.insert(block.id);
+    std::vector<std::string> removed;
+    for (const auto& block:previous.document.blocks) if (!live.count(block.id)) removed.push_back(block.id);
+    storage_detail::refresh_search(database_.get(),page.document.id,removed);
 }
 void Workspace::trash_page(const std::string& id, bool trashed)
 {
@@ -214,8 +224,12 @@ ReferenceTarget Workspace::resolve_reference(const Reference& reference) const
 }
 std::optional<std::string> Workspace::reference_label(const Reference& reference) const
 {
+    return storage_detail::reference_label(database_.get(),reference);
+}
+std::optional<std::string> storage_detail::reference_label(sqlite3* database,const Reference& reference)
+{
     if (reference.target_id.empty()) return reference.unresolved_name;
-    Statement query(database_.get(),reference.kind==ReferenceKind::Page
+    Statement query(database,reference.kind==ReferenceKind::Page
         ?"SELECT title FROM pages WHERE id=?":"SELECT payload FROM blocks WHERE id=?");
     query.bind(1,reference.target_id); if (!query.row()) return {};
     if (reference.kind==ReferenceKind::Page) return query.text(0);
@@ -283,6 +297,7 @@ void Workspace::move_page(PageRecord& page, const std::string& database)
         add.bind(1,page.document.id).bind(2,entry.first).bind(3,encode_value(entry.second)).done();
     }
     auto next=previous; next.database_id=database; next.properties=std::move(values); ++next.revision;
+    storage_detail::refresh_search(database_.get(),page.document.id);
     transaction.commit(); page=std::move(next);
 }
 void Workspace::replace_transfer_documents(const Page& source, std::int64_t source_revision,
@@ -303,6 +318,7 @@ void Workspace::replace_transfer_documents(const Page& source, std::int64_t sour
         Statement remove(database_.get(),"DELETE FROM blocks WHERE page_id=?"); remove.bind(1,page->id).done();
     }
     insert_blocks(database_.get(),source); insert_blocks(database_.get(),destination);
+    storage_detail::refresh_search(database_.get(),source.id); storage_detail::refresh_search(database_.get(),destination.id);
     transaction.commit();
 }
 BlockTransfer Workspace::transfer_blocks(const PageRecord& source, const PageRecord& destination,

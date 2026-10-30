@@ -72,6 +72,12 @@ private slots:
     void file_locks_protect_active_backups_and_imports_from_cleanup();
     void version_six_migration_preserves_old_cards_and_recovery();
     void registered_files_removed_inside_a_block_remain_available_for_undo();
+    void search_indexes_properties_blocks_scope_and_trash();
+    void search_languages_literals_and_prefixes();
+    void search_tracks_reference_labels_moves_and_removals();
+    void search_failure_rolls_back_and_rebuild_repairs();
+    void version_seven_search_migration_and_backup_restore();
+    void failed_search_migration_preserves_original_data();
 };
 void StorageTests::dates_and_types()
 {
@@ -338,7 +344,7 @@ void StorageTests::version_two_upgrade_preserves_notes()
 {
     QTemporaryDir folder; std::string id;
     { auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); id=w.create_page(db.id,"Older notes").document.id; }
-    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE deleted_blocks; DROP TABLE attachments; PRAGMA user_version=2");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE deleted_blocks; DROP TABLE attachments; DROP TABLE page_search; PRAGMA user_version=2");
     auto w=Workspace::open(path(folder.path())); QCOMPARE(w.load_page(id).title,std::string("Older notes")); QVERIFY(w.deleted_blocks().empty());
 }
 void StorageTests::restoring_siblings_in_reverse_order_keeps_their_order()
@@ -370,7 +376,7 @@ void StorageTests::version_three_upgrade_preserves_deleted_fragments()
         DROP TABLE deleted_blocks;
         ALTER TABLE legacy_deleted_blocks RENAME TO deleted_blocks;
         CREATE INDEX deleted_blocks_page ON deleted_blocks(page_id,restored);
-        DROP TABLE attachments; PRAGMA user_version=3;
+        DROP TABLE attachments; DROP TABLE page_search; PRAGMA user_version=3;
         COMMIT;
     )SQL");
     auto w=Workspace::open(path(folder.path())); QCOMPARE(w.id(),workspace_id);
@@ -401,7 +407,7 @@ void StorageTests::divider_migration_preserves_tree_links_and_recovery()
         auto page=w.create_page(db.id,"Before divider migration",{},sample_page().blocks); id=page.document.id;
         page.document.blocks.erase(page.document.blocks.begin()+7); w.save_page(page); group=w.deleted_blocks()[0].id;
     }
-    sql(folder.filePath("source/nebula.sqlite3"),"DROP TABLE attachments; PRAGMA user_version=4");
+    sql(folder.filePath("source/nebula.sqlite3"),"DROP TABLE attachments; DROP TABLE page_search; PRAGMA user_version=4");
     auto w=Workspace::open(path(folder.filePath("source"))); auto page=w.load_page(id);
     QCOMPARE(page.document.blocks[3].parent_id,std::string("list")); QCOMPARE(w.backlinks(ReferenceKind::Block,"heading").size(),std::size_t(1));
     page.document.blocks.push_back({"divider","",BlockKind::Divider,{}}); w.save_page(page);
@@ -595,7 +601,7 @@ void StorageTests::version_five_migration_keeps_legacy_labels_and_reads_new_mode
     const auto legacy=w.create_page(db.id,"Legacy"); const auto identity=w.id();
     sql(folder.filePath("source/nebula.sqlite3"),R"SQL(
         UPDATE blocks SET payload='{"version":1,"runs":[{"text":"Legacy label","bold":true,"italic":false,"reference":{"kind":0,"target":"legacy-target"}}],"asset_label":"","checked":false}';
-        DROP TABLE attachments; PRAGMA user_version=5;
+        DROP TABLE attachments; DROP TABLE page_search; PRAGMA user_version=5;
     )SQL");
     auto upgraded=Workspace::open(path(folder.filePath("source"))); QCOMPARE(upgraded.id(),identity);
     auto page=upgraded.load_page(legacy.document.id); QVERIFY(page.document.blocks[0].runs[0].reference->custom_label);
@@ -749,7 +755,7 @@ void StorageTests::version_six_migration_preserves_old_cards_and_recovery()
     QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
     auto page=w.create_page(db.id,"Old cards",{},{{"keep","",BlockKind::Paragraph,{{"Text"}}},{"old-card","",BlockKind::Attachment,{},"Legacy label"}});
     page.document.blocks.pop_back(); w.save_page(page); const auto group=w.deleted_blocks()[0].id; const auto identity=w.id();
-    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE attachments; PRAGMA user_version=6;");
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE attachments; DROP TABLE page_search; PRAGMA user_version=6;");
     auto upgraded=Workspace::open(path(folder.path())); QCOMPARE(upgraded.id(),identity); QVERIFY(upgraded.attachments().empty());
     const auto restored=upgraded.restore_deleted_blocks(group); QCOMPARE(restored.document.blocks[1].asset_label,std::string("Legacy label"));
     QVERIFY(restored.document.blocks[1].attachment_id.empty());
@@ -767,6 +773,98 @@ void StorageTests::registered_files_removed_inside_a_block_remain_available_for_
     QCOMPARE(bytes(QString::fromStdString(restored.attachment_path(imported.file.id).u8string())),QByteArray("undo bytes"));
     QCOMPARE(bytes(QString::fromStdString(w.attachment_path(imported.file.id).u8string())),QByteArray("undo bytes"));
     page.document=before; w.save_page(page); QVERIFY(w.audit_attachments().empty());
+}
+void StorageTests::search_indexes_properties_blocks_scope_and_trash()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path()));
+    const auto db=w.create_database("Journal"), other=w.create_database("Other");
+    const auto tag=w.add_property(db.id,"Category",PropertyKind::Tags);
+    const auto date=w.add_property(db.id,"Entry date",PropertyKind::Date);
+    const auto score=w.add_property(db.id,"Score",PropertyKind::Number);
+    const auto done=w.add_property(db.id,"Done",PropertyKind::Checkbox);
+    auto page=w.create_page(db.id,"Summer",{{tag.id,std::vector<std::string>{"travel","家族"}},{date.id,Date{"2024-03-10"}},{score.id,42.5},{done.id,false}});
+    page.document.blocks[0].runs={{"ocean early morning"}};
+    page.document.blocks.push_back({"search-second",{},BlockKind::Paragraph,{{"volcano hiking"}}});
+    w.save_page(page); w.create_page(other.id,"Ocean");
+    auto results=w.search("hiking"); QCOMPARE(results.size(),std::size_t(1));
+    QCOMPARE(results[0].block_id,page.document.blocks[1].id);
+    QCOMPARE(w.search("ocean").size(),std::size_t(2)); QCOMPARE(w.search("ocean",db.id).size(),std::size_t(1));
+    QCOMPARE(w.search("morning hiking").size(),std::size_t(1));
+    for (const auto* term:{"Summer","travel","家族","2024-03-10","42.5","false"})
+        QCOMPARE(w.search(term,db.id).size(),std::size_t(1));
+    page.document.blocks[1].runs={{"forest walking"}}; w.save_page(page); QVERIFY(w.search("hiking").empty());
+    w.trash_page(page.document.id,true); QVERIFY(w.search("forest").empty()); w.trash_page(page.document.id,false);
+    QCOMPARE(w.search("forest").size(),std::size_t(1)); w.trash_database(db.id,true); QVERIFY(w.search("forest").empty());
+    w.trash_database(db.id,false); const auto revision=w.load_page(page.document.id).revision;
+    w.rebuild_search(); QCOMPARE(w.search("forest").size(),std::size_t(1)); QCOMPARE(w.load_page(page.document.id).revision,revision);
+}
+void StorageTests::search_languages_literals_and_prefixes()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Languages");
+    auto page=w.create_page(db.id,"Fixtures");
+    page.document.blocks[0].runs={{u8"Café ＡＢＣ 日本語の記録 中文笔记 한국어일기 العربية quoted\"word OR testing"}};
+    w.save_page(page);
+    for (const auto* term:{"CAFE","abc","本語","文笔","국어","العربية","quoted\"word","OR","test*"})
+        QCOMPARE(w.search(term).size(),std::size_t(1));
+    QVERIFY(w.search("test").empty()); QVERIFY(w.search("absent OR").empty());
+    QVERIFY(w.search("\"* () 😀").empty()); QVERIFY(w.search("hiking' OR 1=1 --").empty());
+    QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.search(std::string(4097,'a')));
+    std::string many; for (int i=0;i<33;++i) many+="a ";
+    QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.search(many));
+    QVERIFY_THROWS_EXCEPTION(std::invalid_argument,w.search(std::string(1,char(0xff))));
+    page.document.blocks[0].runs={{std::string("before\0after",12)}}; w.save_page(page);
+    QCOMPARE(w.search("after").size(),std::size_t(1));
+    QCOMPARE(w.load_page(page.document.id).document.blocks[0].runs[0].text,std::string("before\0after",12));
+}
+void StorageTests::search_tracks_reference_labels_moves_and_removals()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto target=w.create_page(db.id,"Oldlabel"), source=w.create_page(db.id,"Source"), destination=w.create_page(db.id,"Destination");
+    target.document.blocks[0].runs={{"Oldheading"}}; w.save_page(target);
+    source.document.blocks[0].runs={{"fallback",false,false,Reference{ReferenceKind::Page,target.document.id,{},{},false}},
+        {" "},{"fallbackblock",false,false,Reference{ReferenceKind::Block,target.document.blocks[0].id,{},{},false}}};
+    w.save_page(source); QCOMPARE(w.search("Oldlabel").size(),std::size_t(2));
+    target.title="Newlabel"; target.document.blocks[0].runs={{"Newheading"}}; w.save_page(target);
+    QVERIFY(w.search("Oldlabel").empty()); QCOMPARE(w.search("Newlabel").size(),std::size_t(2));
+    QCOMPARE(w.search("Newheading").size(),std::size_t(2));
+    const auto transfer=w.transfer_blocks(target,destination,target.document.blocks[0].id);
+    Q_UNUSED(transfer); destination=w.load_page(destination.document.id); destination.document.blocks.back().runs={{"Movedheading"}}; w.save_page(destination);
+    QCOMPARE(w.search("Movedheading").size(),std::size_t(2)); QVERIFY(w.search("Newheading").empty());
+    destination.document.blocks.pop_back(); w.save_page(destination);
+    QVERIFY(w.search("Movedheading").empty()); QCOMPARE(w.search("fallbackblock").size(),std::size_t(1));
+}
+void StorageTests::search_failure_rolls_back_and_rebuild_repairs()
+{
+    QTemporaryDir folder; auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes");
+    auto page=w.create_page(db.id,"Original"); const auto revision=page.revision;
+    sql(folder.filePath("nebula.sqlite3"),"DROP TABLE page_search"); page.title="Pending";
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,w.save_page(page)); QCOMPARE(page.revision,revision);
+    QCOMPARE(w.load_page(page.document.id).title,std::string("Original"));
+    w.rebuild_search(); QCOMPARE(w.search("Original").size(),std::size_t(1)); w.save_page(page);
+    QVERIFY(w.search("Original").empty()); QCOMPARE(w.search("Pending").size(),std::size_t(1));
+}
+void StorageTests::version_seven_search_migration_and_backup_restore()
+{
+    QTemporaryDir folder; std::string id;
+    {
+        auto w=Workspace::open(path(folder.filePath("workspace"))); const auto db=w.create_database("Notes");
+        id=w.create_page(db.id,"Migrated searchable").document.id;
+    }
+    sql(folder.filePath("workspace/nebula.sqlite3"),"DROP TABLE page_search; PRAGMA user_version=7");
+    auto w=Workspace::open(path(folder.filePath("workspace"))); QCOMPARE(w.search("Migrated")[0].page_id,id);
+    sql(folder.filePath("workspace/nebula.sqlite3"),"DELETE FROM page_search");
+    w.backup_to(path(folder.filePath("backup")));
+    auto restored=Workspace::restore(path(folder.filePath("backup")),path(folder.filePath("restored")));
+    QCOMPARE(restored.search("Migrated")[0].page_id,id); QCOMPARE(restored.load_page(id).revision,std::int64_t(1));
+}
+void StorageTests::failed_search_migration_preserves_original_data()
+{
+    QTemporaryDir folder;
+    { auto w=Workspace::open(path(folder.path())); const auto db=w.create_database("Notes"); w.create_page(db.id,"Preserve"); }
+    const auto file=folder.filePath("nebula.sqlite3");
+    sql(file,"DROP TABLE page_search; PRAGMA user_version=7; UPDATE blocks SET payload='unsupported'");
+    const auto before=bytes(file); QVERIFY_THROWS_EXCEPTION(std::runtime_error,Workspace::open(path(folder.path())));
+    QCOMPARE(bytes(file),before);
 }
 QTEST_GUILESS_MAIN(StorageTests)
 #include "storage_tests.moc"

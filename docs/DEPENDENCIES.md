@@ -89,8 +89,11 @@ Record the exact linked libraries and notices during M09/M10.
 SQLite is [public domain](https://sqlite.org/copyright.html); it has no Qt or GUI
 dependency and is available on both Linux and macOS. The bootstrap uses the
 [`sqlite_schema` name available since SQLite 3.33](https://sqlite.org/forum/info/d90adfbb0a6eea88);
-later storage features must
-respect or explicitly revise this baseline.
+FTS5 must be enabled in SQLite for schema 8 search. The development image provides
+it; no new external dependency or minimum version increase is introduced.
+Search normalization uses existing Qt Core Unicode operations in the storage
+adapter; the document core still builds without Qt/SQLite. See
+[SEARCH.md](SEARCH.md) for tokenization and rebuild behavior.
 
 - [Qt licensing](https://doc.qt.io/qt-6/licensing.html)
 - [Qt Widgets](https://doc.qt.io/qt-6/qtwidgets-index.html)

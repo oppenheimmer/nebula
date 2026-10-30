@@ -19,7 +19,7 @@ Workspace Workspace::read_only(const std::filesystem::path& directory)
     if (opened!=SQLITE_OK) throw std::runtime_error("Cannot read backup database");
     if (sql::scalar(raw,"PRAGMA application_id")!=std::to_string(0x4e454255)) throw std::runtime_error("Not a Nebula workspace");
     const auto version=sql::scalar(raw,"PRAGMA user_version");
-    if (version!="1" && version!="2" && version!="3" && version!="4" && version!="5" && version!="6" && version!="7") throw std::runtime_error("Unsupported backup format");
+    if (version!="1" && version!="2" && version!="3" && version!="4" && version!="5" && version!="6" && version!="7" && version!="8") throw std::runtime_error("Unsupported backup format");
     if (sql::scalar(raw,"PRAGMA quick_check")!="ok") throw std::runtime_error("Backup integrity check failed");
     const auto id=sql::scalar(raw,"SELECT workspace_id FROM workspace_meta WHERE id=1");
     return Workspace(root,id,std::move(db));
@@ -29,7 +29,7 @@ void Workspace::backup_to(const std::filesystem::path& destination) const
     namespace fs = std::filesystem;
     if (!destination.is_absolute()) throw std::invalid_argument("Backup destination must be absolute");
     const auto target = fs::weakly_canonical(destination);
-    const bool managed=sql::scalar(database_.get(),"PRAGMA user_version")=="7";
+    const bool managed=std::stoi(sql::scalar(database_.get(),"PRAGMA user_version"))>=7;
     std::optional<files::WorkspaceLock> lock;
     if (managed) lock.emplace(directory_,false);
     if (fs::is_symlink(directory_/"attachments") || !fs::is_directory(directory_/"attachments"))
@@ -72,9 +72,12 @@ void Workspace::backup_to(const std::filesystem::path& destination) const
 Workspace Workspace::restore(const std::filesystem::path& backup, const std::filesystem::path& destination)
 {
     auto source = Workspace::read_only(backup);
-    files::verify_backup_manifest(source.directory_,source.id_,sql::scalar(source.database_.get(),"PRAGMA user_version")=="7");
+    const auto version=std::stoi(sql::scalar(source.database_.get(),"PRAGMA user_version"));
+    files::verify_backup_manifest(source.directory_,source.id_,version>=7);
     source.backup_to(destination);
     std::filesystem::remove(destination/"backup-manifest.json"); files::sync_directory(destination);
-    return Workspace::open(destination);
+    auto restored=Workspace::open(destination); restored.rebuild_links();
+    if (version>=8) restored.rebuild_search();
+    return restored;
 }
 } // namespace nebula
