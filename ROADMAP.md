@@ -1575,6 +1575,51 @@ begin as part of this shutdown.
   checks remain unperformed. M07/M08 remain In progress; next is M07.8, followed
   by the remaining reliability, accessibility, performance and release work.
 
+### Paste-preview adapter checkpoint — 2026-10-30
+
+- Pushed M08.7 commit `963cdfb` to `origin/main`, with a subject-only commit
+  message and the configured author. Other uncommitted Suggestions work remains
+  preserved. At the user's direction, further shared-window edits wait until the
+  Suggestions agent finishes its window changes.
+- Began M07.8 with an independent `nebula_previews` adapter. It performs a
+  cancellable asynchronous GET with a five-second total deadline, a 512 KiB
+  aggregate byte limit and at most three same-origin redirects. It sends no
+  cookies, credentials or Referer, retains no cookies/cache, uses no system proxy,
+  rejects credential-bearing URLs and authentication challenges, and keeps normal
+  HTTPS certificate/hostname checks. Only HTML/XHTML/plain-text responses yield
+  bounded plain title/excerpt text; resource loading is disabled and controls,
+  format characters and image placeholders are removed.
+- Recorded the network decision in [PREVIEW_DESIGN.md](docs/PREVIEW_DESIGN.md):
+  explicitly pasted private/loopback origins are permitted for local/intranet
+  pages; redirects cannot change host, scheme or port. No image/subresource
+  retrieval, background refresh or other networking is introduced. Qt Network
+  adds no host installation or SDK baseline increase. Dependency, license and
+  Linux/macOS TLS deployment implications are in
+  [DEPENDENCIES.md](docs/DEPENDENCIES.md).
+- **Verification:** isolated HEAD-plus-adapter GCC/Clang builds passed all nine
+  CTest entries. The final nine preview cases also passed focused GCC/Clang and
+  ASan/UBSan Debug runs with warnings-as-errors. Fixtures cover URL rejection,
+  HTML metadata/body/Unicode/plain encodings, malformed/truncated input, missing
+  metadata delimiters, no image/frame requests, cookie suppression, same-origin
+  redirect success/limits, cross-origin refusal, declared/streamed excess bytes,
+  timeout, cancellation/destruction, HTTP/authentication errors and HTTPS trust/
+  hostname validation. All requests used loopback servers inside network-disabled
+  containers. The TLS backend reported OpenSSL 3.5.7 with Qt 6.8.2. Leak detection
+  was not run (`detect_leaks=0`); no memory or undefined-behavior failure was
+  reported by the enabled sanitizers.
+- Core-only checks passed both CTest entries without Qt/SQLite. Documentation
+  links/fences, the 71 unique milestone task IDs and `git diff --check` passed.
+  The preview target also built with warnings-as-errors and passed all nine
+  preview cases against a fresh capture of the concurrent Suggestions changes;
+  that focused check does not certify the other agent's full application changes.
+- **Remaining M07.8 work:** wire explicit paste and cancellation into the editor,
+  preserve the original URL on every failure, insert removable canonical text
+  blocks, reject stale asynchronous results, enable the narrow GUI runtime network
+  capability, and verify full-window removal, save/reopen, clipboard and undo/redo.
+  The application does not yet offer pasted-link previews. M07.8 stays unchecked,
+  and M07/M08 remain In progress. Shared-window integration awaits the concurrent
+  agent as requested; OS IME, screen-reader and macOS checks remain open.
+
 ## Technical references discussed
 
 - [Zim Desktop Wiki repository](https://github.com/zim-desktop-wiki/zim-desktop-wiki)

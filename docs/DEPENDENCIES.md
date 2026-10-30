@@ -76,6 +76,29 @@ regular files, durable directory/file flushes, same-directory hard links and Uni
 shared/exclusive locks. Linux checks do not establish macOS filesystem behavior;
 M10 must validate that adapter and the image-reader/plugin distribution.
 
+## Paste-preview adapter
+
+M07.8 adds a separate `nebula_previews` adapter using the existing Qt 6 baseline's
+Network and Gui modules. Qt Network provides asynchronous HTTP(S), timeout and
+cancellation; Qt Gui supplies text-only HTML extraction with resource loading
+disabled. The document core, storage and headless interchange do not link this
+target. No browser engine, HTML scripting runtime or image importer is added.
+The adapter contract and remaining integration checks are in
+[PREVIEW_DESIGN.md](PREVIEW_DESIGN.md).
+
+The existing Debian 13 development image already contains Qt Network 6.8.2 and
+its OpenSSL TLS plugin, with OpenSSL 3.5.7. No image rebuild or host package
+installation was needed. Qt Network has the same commercial/LGPLv3/GPLv2 options
+recorded by its [module documentation](https://doc.qt.io/qt-6.8/qtnetwork-index.html).
+OpenSSL 3 uses [Apache License 2.0](https://openssl-library.org/source/license/).
+Packaging must include the selected Qt/TLS plugin and applicable third-party
+notices; this adapter does not settle release-distribution licensing choices.
+
+Qt Network supports Linux and macOS; its
+[TLS backends](https://doc.qt.io/qt-6.8/ssl.html) differ by build/platform. M10
+must verify the shipped backend, certificate trust and plugin deployment on an
+actual macOS runner. Linux checks do not establish macOS HTTPS support.
+
 ## Licensing and references
 
 The user selected MIT for Nebula's own source on 2026-10-29. The root `LICENSE`

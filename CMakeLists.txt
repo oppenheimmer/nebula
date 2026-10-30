@@ -26,7 +26,7 @@ if(BUILD_TESTING)
 endif()
 
 if(NEBULA_BUILD_EDITOR)
-    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Network)
     find_package(SQLite3 3.33 REQUIRED)
     add_library(nebula_format src/format/codec.cpp)
     target_include_directories(nebula_format PUBLIC include)
@@ -55,6 +55,14 @@ if(NEBULA_BUILD_EDITOR)
         target_compile_options(nebula_editor PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
+    add_library(nebula_previews src/previews/text_preview.cpp include/nebula/previews/text_preview.hpp)
+    set_target_properties(nebula_previews PROPERTIES AUTOMOC ON)
+    target_include_directories(nebula_previews PUBLIC include)
+    target_link_libraries(nebula_previews PUBLIC Qt6::Network Qt6::Gui)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(nebula_previews PRIVATE -Wall -Wextra -Wpedantic $<$<BOOL:${NEBULA_WERROR}>:-Werror>)
+    endif()
+
     add_library(nebula_desktop
         src/app/trash_controls.cpp src/app/workspace_trash.cpp
         src/app/workspace_dialog.cpp src/app/prototype_window.cpp
@@ -74,6 +82,12 @@ if(NEBULA_BUILD_EDITOR)
 
     if(BUILD_TESTING)
         find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+        add_executable(preview_tests tests/preview_tests.cpp)
+        set_target_properties(preview_tests PROPERTIES AUTOMOC ON)
+        target_link_libraries(preview_tests PRIVATE nebula_previews Qt6::Test)
+        target_compile_definitions(preview_tests PRIVATE NEBULA_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+        add_test(NAME previews COMMAND preview_tests)
+        set_tests_properties(previews PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 20)
         add_executable(storage_tests tests/storage_tests.cpp)
         add_executable(recovery_writer tests/recovery_writer.cpp)
         target_link_libraries(recovery_writer PRIVATE SQLite::SQLite3)
