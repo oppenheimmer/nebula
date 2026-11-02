@@ -1,0 +1,17 @@
+ARG BASE_IMAGE=almalinux:9@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2
+FROM ${BASE_IMAGE} AS runtime
+RUN dnf -y install dnf-plugins-core epel-release \
+    && dnf config-manager --set-enabled crb \
+    && dnf -y install qt6-qtbase-gui sqlite-libs ca-certificates dejavu-sans-fonts \
+        google-noto-sans-cjk-ttc-fonts google-noto-emoji-color-fonts util-linux \
+    && dnf clean all
+
+FROM runtime AS verification
+COPY nebula.rpm /tmp/nebula.rpm
+RUN --network=none rpm -Uvh /tmp/nebula.rpm
+COPY package-fixture /opt/package-fixture
+COPY check-upgrade.sh /opt/check-upgrade.sh
+RUN --network=none sh /opt/check-upgrade.sh \
+    && rm /tmp/nebula.rpm /opt/package-fixture /opt/check-upgrade.sh
+ENV LANG=C.UTF-8 QT_QPA_PLATFORM=offscreen XDG_CACHE_HOME=/tmp/nebula-cache
+USER 65532:65532

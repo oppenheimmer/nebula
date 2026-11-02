@@ -49,6 +49,12 @@ read transaction when the last recorded check (`maintenance.integrity_checked_at
 older than seven days, and on request through Workspace → Check workspace integrity….
 Failures refuse opening or are listed in the report.
 
+JSON/Markdown export explicitly checks FTS5 index/content consistency on its
+private database snapshot before making that copy query-only. SQLite versions
+before 3.44 do not include virtual-table integrity in `PRAGMA quick_check`.
+An inconsistent index refuses the export and removes its incomplete destination;
+the source remains unchanged. Rebuild the search index and retry the export.
+
 ## Identities
 
 Page, block, database, property, view, recovery and workspace identities are 1–128

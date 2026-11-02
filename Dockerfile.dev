@@ -1,5 +1,6 @@
 # Pin the official base manifest and signed package snapshot; refresh with tests.
 ARG BASE_IMAGE=debian:trixie-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4
+ARG RPM_BASE_IMAGE=almalinux:9@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2
 FROM ${BASE_IMAGE} AS development
 COPY packaging/debian.sources /etc/apt/sources.list.d/debian.sources
 
@@ -45,5 +46,22 @@ ENV HOME=/tmp/nebula-desktop-home \
     XDG_RUNTIME_DIR=/tmp/nebula-desktop-runtime \
     LANG=en_US.UTF-8 QT_QPA_PLATFORM=xcb QT_IM_MODULE=ibus QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
 USER ${TEST_UID}:${TEST_GID}
+
+# Optional Enterprise Linux 9 RPM builder. The base ABI is pinned; AlmaLinux/EPEL
+# repositories are live, so record the actual package inventory with each build.
+FROM ${RPM_BASE_IMAGE} AS rpm-repositories
+RUN dnf -y install dnf-plugins-core epel-release \
+    && dnf config-manager --set-enabled crb \
+    && dnf clean all
+
+FROM rpm-repositories AS rpm-development
+RUN dnf -y install gcc-c++ cmake ninja-build rpm-build file \
+        qt6-qtbase-devel sqlite-devel dejavu-sans-fonts \
+        google-noto-sans-cjk-ttc-fonts google-noto-emoji-color-fonts \
+    && dnf clean all
+ENV LANG=C.UTF-8 QT_QPA_PLATFORM=offscreen XDG_CACHE_HOME=/tmp/nebula-cache \
+    CMAKE_GENERATOR=Ninja NEBULA_REQUIRE_SAMPLE_FONTS=1
+WORKDIR /workspace
+USER 65532:65532
 
 FROM development AS default

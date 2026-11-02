@@ -1,0 +1,5 @@
+#pragma once
+
+namespace nebula {
+inline constexpr char version[] = "@NEBULA_VERSION@";
+} // namespace nebula

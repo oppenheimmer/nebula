@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 project(Nebula VERSION 0.1.0 LANGUAGES CXX C)
 
+# Keep executable diagnostics and package metadata on the same preview version.
+set(NEBULA_VERSION "${PROJECT_VERSION}~alpha")
+configure_file(cmake/version.hpp.in generated/nebula/version.hpp @ONLY)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -76,6 +80,7 @@ if(NEBULA_BUILD_EDITOR)
     add_library(nebula_application src/app/page_session.cpp src/app/navigation.cpp src/app/property_text.cpp src/app/link_targets.cpp src/app/view_edit.cpp src/app/interchange.cpp)
     target_link_libraries(nebula_application PUBLIC nebula_interchange)
     add_executable(nebula_workspace src/cli/workspace_main.cpp)
+    target_include_directories(nebula_workspace PRIVATE "${PROJECT_BINARY_DIR}/generated")
     target_link_libraries(nebula_workspace PRIVATE nebula_interchange)
     add_library(nebula_editor
         src/editor/page_editor.cpp
@@ -106,9 +111,17 @@ if(NEBULA_BUILD_EDITOR)
         nebula_warnings(${target})
     endforeach()
     add_executable(nebula_prototype src/prototype/main.cpp)
+    target_include_directories(nebula_prototype PRIVATE "${PROJECT_BINARY_DIR}/generated")
     target_link_libraries(nebula_prototype PRIVATE nebula_desktop)
 
     if(BUILD_TESTING)
+        add_test(NAME command_line COMMAND "${CMAKE_COMMAND}"
+            "-DNEBULA_GUI=$<TARGET_FILE:nebula_prototype>"
+            "-DNEBULA_WORKSPACE=$<TARGET_FILE:nebula_workspace>"
+            "-DNEBULA_VERSION=${NEBULA_VERSION}"
+            "-DNEBULA_TEST_TMPDIR=${CMAKE_CURRENT_BINARY_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/command_line_tests.cmake")
+        set_tests_properties(command_line PROPERTIES TIMEOUT 20)
         find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
         add_executable(pasted_link_preview_tests tests/pasted_link_preview_tests.cpp)
         set_target_properties(pasted_link_preview_tests PROPERTIES AUTOMOC ON)

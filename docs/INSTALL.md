@@ -1,9 +1,21 @@
 # Linux package preparation and verification
 
-The current artifact is a **development preview**, `0.1.0~dev1`, for Debian 13
-amd64. It is not a published release. Release verification and remaining issues
-are tracked in [ROADMAP](../ROADMAP.md).
+The `0.1-alpha` prerelease uses package version `0.1.0~alpha` for Debian 13
+amd64. Download the `.deb` and `SHA256SUMS` from the
+[GitHub release](https://github.com/oppenheimmer/nebula/releases/tag/0.1-alpha).
+From the download directory, verify and install it with:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+sudo apt install ./nebula-0.1.0~alpha-x86_64.deb
+```
+
+Release verification and remaining issues
+are tracked in [ROADMAP](../ROADMAP.md); the
+[release checklist](RELEASE_CHECKLIST.md) defines the remaining verification.
 Other distributions and architectures are not established by this verification.
+The separately built [Enterprise Linux 9 RPM preview](RPM.md) has its own
+container toolchain and runtime checks; the instructions below describe Debian.
 
 From the checkout, using the existing Docker daemon:
 
@@ -15,7 +27,10 @@ From the checkout, using the existing Docker daemon:
 The development image pins the official Debian manifest digest and the signed
 2026-10-30 Debian/security package snapshot in `packaging/debian.sources`.
 Package creation runs offline. Output is
-`build-container-gcc/packages/nebula-0.1.0~dev1-x86_64.deb` and stays out of Git.
+`build-container-gcc/packages/nebula-0.1.0~alpha-x86_64.deb` and stays out of Git.
+The package filename comes from CMake's package metadata, so the checker uses the
+artifact produced by that build even when the version changes. After successful
+verification it prints that artifact's SHA-256 checksum.
 The script then prepares an ephemeral Debian runtime image, installs the package
 offline, and runs checks with networking disabled, read-only host mounts and no
 compiler/CMake in that runtime. It does not install anything on the host.
@@ -27,6 +42,11 @@ libraries and image plugins are supplied by Debian packages rather than copied
 into Nebula's package. Nebula's MIT notice and the documentation install under
 `/usr/share/doc/nebula/`. Third-party licenses remain separate; see
 [DEPENDENCIES](DEPENDENCIES.md).
+
+`nebula --version` and `nebula_workspace --version` print the same version as the
+Debian package metadata. They do not need a display, open a workspace or create
+files. Include this version when reporting a problem. The workspace tool also
+provides `--help` without opening any data.
 
 For a prepared Debian desktop with the package installed, launch `nebula` or use
 the application menu. Choose a workspace folder; no service, account or network
@@ -59,7 +79,7 @@ JSON import, plus actual window editing/search tests and preview TLS tests. Thes
 checks complement the schema-migration regression suite; they are not a claim of
 upgrade compatibility with an earlier public package, since none exists yet.
 
-Before publishing, complete the remaining M08 acceptance and M09 release checks,
+Before a stable release, complete the M09 release checks,
 review dependency/image-plugin security updates, advance the pinned snapshot
 deliberately, rerun all applicable checks, review Debian dependency notices and
 record the exact source, image, package checksum and known limitations. Package

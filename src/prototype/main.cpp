@@ -5,6 +5,7 @@
 #include "nebula/editor/block_widgets.hpp"
 #include "nebula/editor/page_editor.hpp"
 #include "nebula/storage/workspace.hpp"
+#include "nebula/version.hpp"
 
 #include <QApplication>
 #include <QComboBox>
@@ -24,6 +25,7 @@
 #include <QTimer>
 #include <algorithm>
 #include <cstdio>
+#include <string>
 
 using namespace nebula;
 
@@ -224,10 +226,17 @@ void show_error(const QString& title, const QString& text)
 
 int main(int argc, char** argv)
 {
+    // Version diagnostics must also work without an available desktop/display.
+    if (argc == 2 && (std::string(argv[1]) == "--version" || std::string(argv[1]) == "-v")) {
+        std::printf("Nebula %s\n", version);
+        return 0;
+    }
     QApplication app(argc, argv);
-    QApplication::setApplicationName("Nebula editor prototype");
+    QApplication::setApplicationName("Nebula");
+    QApplication::setApplicationVersion(QString::fromLatin1(version));
     QCommandLineParser parser;
     parser.addHelpOption();
+    parser.addVersionOption();
     parser.addOption({"smoke-test", "Create the editor and exit after event processing."});
     parser.addOption({"benchmark", "Measure single or separate block editors, or the integrated workspace.", "mode"});
     parser.addOption({"blocks", "Number of benchmark blocks (1–10000).", "count", "1000"});

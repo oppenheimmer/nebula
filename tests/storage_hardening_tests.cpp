@@ -93,6 +93,7 @@ private slots:
     void symlinked_components_are_refused_beneath_a_root();
     void large_backups_copy_in_steps();
     void export_snapshot_is_private_read_only_and_independent_of_later_saves();
+    void exports_reject_corrupt_search_without_changing_the_source();
     void imported_revisions_stay_below_the_overflow_bound();
     void markdown_attachments_accept_common_syntax_and_report_missing_files();
 };
@@ -611,6 +612,34 @@ void StorageHardeningTests::export_snapshot_is_private_read_only_and_independent
                                  interchange::export_json(workspace, path(folder.filePath("uncommitted"))));
         QVERIFY(!QFile::exists(folder.filePath("uncommitted")));
     });
+}
+
+void StorageHardeningTests::exports_reject_corrupt_search_without_changing_the_source()
+{
+    QTemporaryDir folder;
+    const auto root = path(folder.filePath("workspace"));
+    auto writer = Workspace::open(root);
+    const auto page = writer.create_page(writer.create_database("Notes").id, "Keep", {},
+                                         {{"body", {}, BlockKind::Paragraph, {{"Indexed body"}}}});
+    auto reader = Workspace::read_only(root);
+    const auto file = folder.filePath("workspace/nebula.sqlite3");
+    execute_sql(file, "UPDATE page_search_content SET c4='corrupted' WHERE c4<>''");
+    const auto before = bytes(file);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, interchange::export_json(reader, path(folder.filePath("json"))));
+    QVERIFY(!QFile::exists(folder.filePath("json")));
+    QCOMPARE(bytes(file), before);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,
+                             interchange::export_markdown(reader, path(folder.filePath("markdown"))));
+    QVERIFY(!QFile::exists(folder.filePath("markdown")));
+    QCOMPARE(bytes(file), before);
+    QCOMPARE(encode_document(writer.load_page(page.document.id).document), encode_document(page.document));
+
+    writer.rebuild_search();
+    interchange::export_json(reader, path(folder.filePath("json")));
+    interchange::export_markdown(reader, path(folder.filePath("markdown")));
+    QCOMPARE(text(file, "SELECT count(*) FROM page_search_content WHERE c4='corrupted'"), std::string("0"));
+    QVERIFY(!QFile::exists(folder.filePath("json/.nebula-export-snapshot.sqlite3")));
+    QVERIFY(!QFile::exists(folder.filePath("markdown/.nebula-export-snapshot.sqlite3")));
 }
 
 QTEST_GUILESS_MAIN(StorageHardeningTests)

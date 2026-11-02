@@ -129,8 +129,9 @@ or HTML resource loader is added.
 - [Docker build documentation](https://docs.docker.com/build/)
 - [Docker run reference](https://docs.docker.com/reference/cli/docker/container/run/)
 
-Linux is the only target platform. The selected package target is Debian 13 amd64;
-other distributions and architectures have not been verified.
+Linux is the only target platform. The selected release package target is Debian
+13 amd64. The user also requested an Enterprise Linux 9 x86_64 RPM preview;
+[RPM.md](RPM.md) describes its separate build and verification environment.
 
 ## Optional Linux desktop acceptance environment
 
@@ -165,3 +166,26 @@ are explicit dependencies because dynamic plugin loading is not visible to ELF
 analysis. The clean runtime verification image adds Qt Test and fonts for checks,
 with no compiler or CMake; those test-only requirements are not application
 package dependencies. See [INSTALL](INSTALL.md) for preparation and limitations.
+
+## Enterprise Linux 9 RPM preview
+
+The optional `rpm-development` stage in `Dockerfile.dev` uses a digest-pinned
+AlmaLinux 9 base, with AlmaLinux CRB and Fedora EPEL repositories enabled inside
+the image. `build-rpm-image` selects it; `package-check.sh rpm` uses a separate
+`build-container-rpm/` directory and a clean EL9 runtime. Host dependencies and
+global configuration remain untouched. See [RPM](RPM.md) for the commands.
+
+The initial toolchain is GCC 11.5.0, CMake 3.31.8, Qt 6.10.3, SQLite 3.34.1 with
+FTS5, glibc 2.34 and OpenSSL 3.5.8 on AlmaLinux 9.8 x86_64. This preserves the
+C++17, Qt 6.5 API minimum and SQLite 3.33 minimum. Package repositories are live;
+the generated package inventory and image IDs record the actual environment,
+rather than claiming a frozen RPM dependency snapshot.
+
+`rpm-build` is a development-only dependency whose EL9 package records GPLv2+.
+The RPM links existing system Qt/SQLite libraries and bundles no third-party
+code. The installed Qt packages record
+`LGPL-3.0-only OR GPL-3.0-only WITH Qt-GPL-exception-1.0`; SQLite records Public
+Domain. Those packages retain their own notices. Nebula's RPM metadata is MIT
+and marks its installed `LICENSE` as an RPM license file. The clean runtime also
+contains the sample CJK/emoji fonts for tests; they are not required by Nebula's
+RPM metadata. Actual outcomes and limitations are in the roadmap work log.

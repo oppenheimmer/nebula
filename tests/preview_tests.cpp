@@ -49,6 +49,51 @@ public:
         socket->disconnectFromHost();
     }
 };
+class TlsWeb final : public QTcpServer {
+public:
+    QSslCertificate certificate;
+    QSslKey key;
+    QList<QByteArray> protocols;
+    QList<QByteArray> negotiated;
+    int requests = 0;
+
+private:
+    void incomingConnection(qintptr descriptor) override
+    {
+        auto* socket = new QSslSocket(this);
+        socket->setLocalCertificate(certificate);
+        socket->setPrivateKey(key);
+        auto configuration = socket->sslConfiguration();
+        configuration.setAllowedNextProtocols(protocols);
+        socket->setSslConfiguration(configuration);
+        if (!socket->setSocketDescriptor(descriptor)) {
+            delete socket;
+            return;
+        }
+        connect(socket, &QSslSocket::disconnected, socket, &QObject::deleteLater);
+        connect(socket, &QSslSocket::encrypted, this, [this, socket] {
+            const auto protocol = socket->sslConfiguration().nextNegotiatedProtocol();
+            negotiated.push_back(protocol);
+            // Negotiation alone demonstrates the unwanted HTTP/2 path. Close
+            // without exchanging frames; this fixture is an HTTP/1.1 server.
+            if (protocol == "h2")
+                socket->disconnectFromHost();
+        });
+        connect(socket, &QSslSocket::readyRead, this, [this, socket, bytes = QByteArray{}]() mutable {
+            bytes += socket->readAll();
+            if (!bytes.contains("\r\n\r\n"))
+                return;
+            socket->disconnect(SIGNAL(readyRead()));
+            ++requests;
+            LocalWeb::reply(socket, "verified HTTPS text", "text/plain");
+        });
+        socket->startServerEncryption();
+    }
+};
+struct RestoreTrust {
+    QSslConfiguration original = QSslConfiguration::defaultConfiguration();
+    ~RestoreTrust() { QSslConfiguration::setDefaultConfiguration(original); }
+};
 TextPreview value(const QSignalSpy& spy)
 {
     return qvariant_cast<TextPreview>(spy.at(0).at(0));
@@ -71,6 +116,7 @@ private slots:
     void timeout_cancel_and_destruction_finish_promptly();
     void http_and_authentication_failures();
     void https_uses_certificate_and_hostname_verification();
+    void https_uses_http1_even_when_server_offers_http2();
 };
 void PreviewTests::url_validation()
 {
@@ -267,29 +313,7 @@ void PreviewTests::https_uses_certificate_and_hostname_verification()
     QFile key(QString(NEBULA_TEST_FIXTURES) + "/preview-tls/test-key.pem");
     QVERIFY(certificate.open(QIODevice::ReadOnly));
     QVERIFY(key.open(QIODevice::ReadOnly));
-    class TlsWeb final : public QTcpServer {
-    public:
-        QSslCertificate certificate;
-        QSslKey key;
-        int requests = 0;
-        void incomingConnection(qintptr descriptor) override
-        {
-            auto* socket = new QSslSocket(this);
-            socket->setLocalCertificate(certificate);
-            socket->setPrivateKey(key);
-            if (!socket->setSocketDescriptor(descriptor)) {
-                delete socket;
-                return;
-            }
-            connect(socket, &QSslSocket::disconnected, socket, &QObject::deleteLater);
-            connect(socket, &QSslSocket::readyRead, this, [this, socket] {
-                socket->readAll();
-                ++requests;
-                LocalWeb::reply(socket, "verified HTTPS text", "text/plain");
-            });
-            socket->startServerEncryption();
-        }
-    } web;
+    TlsWeb web;
     web.certificate = QSslCertificate(certificate.readAll());
     web.key = QSslKey(key.readAll(), QSsl::Rsa);
     QVERIFY(!web.certificate.isNull());
@@ -303,10 +327,7 @@ void PreviewTests::https_uses_certificate_and_hostname_verification()
     QVERIFY(!error(refused).isEmpty());
     QCOMPARE(web.requests, 0);
 
-    struct RestoreTrust {
-        QSslConfiguration original = QSslConfiguration::defaultConfiguration();
-        ~RestoreTrust() { QSslConfiguration::setDefaultConfiguration(original); }
-    } trust;
+    RestoreTrust trust;
     auto configuration = trust.original;
     auto certificates = configuration.caCertificates();
     certificates.append(web.certificate);
@@ -324,6 +345,36 @@ void PreviewTests::https_uses_certificate_and_hostname_verification()
     mismatch.start(QString("https://localhost:%1/").arg(web.serverPort()));
     QTRY_COMPARE(wrong_host.size(), 1);
     QVERIFY(!error(wrong_host).isEmpty());
+    QCOMPARE(web.requests, 1);
+}
+void PreviewTests::https_uses_http1_even_when_server_offers_http2()
+{
+    QVERIFY(QSslSocket::supportsSsl());
+    QFile certificate(QString(NEBULA_TEST_FIXTURES) + "/preview-tls/test-cert.pem");
+    QFile key(QString(NEBULA_TEST_FIXTURES) + "/preview-tls/test-key.pem");
+    QVERIFY(certificate.open(QIODevice::ReadOnly));
+    QVERIFY(key.open(QIODevice::ReadOnly));
+    TlsWeb web;
+    web.certificate = QSslCertificate(certificate.readAll());
+    web.key = QSslKey(key.readAll(), QSsl::Rsa);
+    web.protocols = {"h2", "http/1.1"};
+    QVERIFY(!web.certificate.isNull());
+    QVERIFY(!web.key.isNull());
+    QVERIFY(web.listen(QHostAddress::LocalHost));
+    RestoreTrust trust;
+    auto configuration = trust.original;
+    auto certificates = configuration.caCertificates();
+    certificates.append(web.certificate);
+    configuration.setCaCertificates(certificates);
+    QSslConfiguration::setDefaultConfiguration(configuration);
+    TextPreviewFetcher fetcher;
+    QSignalSpy done(&fetcher, &TextPreviewFetcher::finished);
+    fetcher.start(QString("https://127.0.0.1:%1/").arg(web.serverPort()));
+    QTRY_COMPARE(web.negotiated.size(), 1);
+    QVERIFY2(web.negotiated.front() != "h2", "Text previews must not negotiate HTTP/2");
+    QTRY_COMPARE(done.size(), 1);
+    QVERIFY2(error(done).isEmpty(), qPrintable(error(done)));
+    QCOMPARE(value(done).excerpt, QString("verified HTTPS text"));
     QCOMPARE(web.requests, 1);
 }
 QTEST_MAIN(PreviewTests)

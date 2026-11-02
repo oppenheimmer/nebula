@@ -195,6 +195,13 @@ has_argument NEBULA_FUZZ_SECONDS=1 || fail 'fuzz duration lost'
 [[ "${call[*]}" == *NEBULA_LIBFUZZER=ON* ]] || fail 'parsers must be instrumented'
 if bash "$launcher" fuzz 0 >/dev/null 2>&1; then fail 'zero fuzz duration accepted'; fi
 
+reset_calls
+bash "$launcher" build-rpm-image
+count_calls 1
+load_call 0
+has_argument rpm-development || fail 'RPM builder must select the isolated EL9 stage'
+has_argument nebula-dev:el9 || fail 'RPM builder must keep its own image tag'
+
 cat > "$fixture/bin/git" <<'MOCK'
 #!/usr/bin/env bash
 case "$*" in *ls-files*) printf 'sample.cpp\0' ;; *) exit 1 ;; esac

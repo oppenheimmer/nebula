@@ -1,17 +1,26 @@
 #include "nebula/interchange/interchange.hpp"
 #include "nebula/storage/workspace.hpp"
+#include "nebula/version.hpp"
 #include <iostream>
+#include <string>
 
 int main(int argc, char** argv)
 {
     const std::string command = argc > 1 ? argv[1] : "";
+    if (argc == 2 && (command == "--version" || command == "-v")) {
+        std::cout << "nebula_workspace " << nebula::version << '\n';
+        return 0;
+    }
+    const bool help = argc == 2 && (command == "--help" || command == "-h");
     if ((argc != 4 || (command != "backup" && command != "restore" && command != "export-md" &&
                        command != "export-json" && command != "import-json")) &&
         (argc != 5 || command != "import-md")) {
-        std::cerr << "Usage: nebula_workspace backup|restore|export-md|export-json|import-json SOURCE_FOLDER "
-                     "NEW_DESTINATION_FOLDER\n"
-                  << "       nebula_workspace import-md MARKDOWN_FOLDER WORKSPACE_FOLDER DATABASE_ID\n";
-        return 2;
+        auto& output = help ? std::cout : std::cerr;
+        output << "Usage: nebula_workspace backup|restore|export-md|export-json|import-json SOURCE_FOLDER "
+                  "NEW_DESTINATION_FOLDER\n"
+               << "       nebula_workspace import-md MARKDOWN_FOLDER WORKSPACE_FOLDER DATABASE_ID\n"
+               << "       nebula_workspace --help|--version\n";
+        return help ? 0 : 2;
     }
     try {
         const auto source = std::filesystem::u8path(argv[2]);

@@ -4,15 +4,28 @@ test -x /usr/bin/nebula
 test -x /usr/bin/nebula_workspace
 test -f /usr/share/applications/nebula.desktop
 test -f /usr/share/doc/nebula/copyright
-for name in README.md LICENSE AGENTS.md ROADMAP.md docs/INSTALL.md; do
+for name in README.md LICENSE AGENTS.md ROADMAP.md docs/INSTALL.md docs/RELEASE_CHECKLIST.md; do
     test -f "/usr/share/doc/nebula/$name"
 done
 if command -v c++ >/dev/null 2>&1 || command -v cmake >/dev/null 2>&1; then
     printf '%s\n' 'Package verification must use a runtime environment without a build toolchain.' >&2
     exit 1
 fi
-cmp /usr/bin/nebula /build/nebula_prototype
-cmp /usr/bin/nebula_workspace /build/nebula_workspace
+case "${1:-deb}" in
+    deb)
+        cmp /usr/bin/nebula /build/nebula_prototype
+        cmp /usr/bin/nebula_workspace /build/nebula_workspace
+        version=$(dpkg-query -W -f='${Version}' nebula)
+        ;;
+    rpm)
+        # rpmbuild may strip ELF symbols; verify the installed package payload.
+        rpm -V nebula
+        version=$(rpm -q --qf '%{VERSION}' nebula)
+        ;;
+    *) printf '%s\n' 'Expected deb or rpm package verification.' >&2; exit 2 ;;
+esac
+test "$(nebula --version)" = "Nebula $version"
+test "$(nebula_workspace --version)" = "nebula_workspace $version"
 root=$(mktemp -d /tmp/nebula-package.XXXXXX)
 trap 'rm -rf "$root"' EXIT HUP INT TERM
 /build/nebula_package_fixture create "$root/workspace"

@@ -9,6 +9,7 @@ compiler=${2:-gcc}
 usage() {
     cat <<'HELP'
 Usage: ./scripts/dev.sh build-image
+       ./scripts/dev.sh build-rpm-image
        ./scripts/dev.sh build-desktop-image
        ./scripts/dev.sh test-desktop
        ./scripts/dev.sh test [gcc|clang|core|asan]
@@ -70,6 +71,10 @@ fi
 
 if [[ "$command_name" == build-image ]]; then
     exec docker build --file "$project_dir/Dockerfile.dev" --tag "$image" "$project_dir"
+fi
+if [[ "$command_name" == build-rpm-image ]]; then
+    exec docker build --file "$project_dir/Dockerfile.dev" --target rpm-development \
+        --tag nebula-dev:el9 "$project_dir"
 fi
 if [[ "$command_name" == build-desktop-image ]]; then
     exec docker build --file "$project_dir/Dockerfile.dev" --target desktop-check \

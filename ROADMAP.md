@@ -1,6 +1,6 @@
 # Nebula roadmap
 
-Last updated: 2026-10-30 (Asia/Tokyo)
+Last updated: 2026-11-02 (Asia/Tokyo)
 
 ## Project goal
 
@@ -37,7 +37,7 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Build | CMake; keep compiler and platform requirements explicit. |
 | Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
 | Modularity | UI-independent document core, application operations, storage interfaces, and separate desktop adapters. |
-| Platform | Linux only; the selected package target is Debian 13 amd64. |
+| Platform | Linux only; Debian 13 amd64 release target and a user-requested EL9 x86_64 RPM preview. |
 | Data ownership | Documented schema, migration paths, backup/restore, and portable exports. |
 
 The following remain implementation decisions rather than settled facts:
@@ -613,6 +613,17 @@ instructions matching the shipped behavior.
   backup, and recovery instructions.
 - [ ] M09.4 Record release verification, known limitations, and the release version.
 
+Current continuation: publish the user-requested initial `0.1-alpha` prerelease,
+with consistent executable/package version `0.1.0~alpha`, exact-source artifacts
+and checksums. Remaining stable-release checks and material limits are in
+[RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md); final release verification
+is still In progress. [Release notes](docs/RELEASE_NOTES.md) describe the alpha.
+The user additionally authorized an Enterprise Linux 9 x86_64 RPM preview on
+2026-11-02. Its isolated build and verification under M09.1–M09.4 are recorded
+in the RPM work-log entry; the Debian package workflow is preserved. This adds
+a Linux package target without starting the dependent audit or claiming final
+release acceptance.
+
 Exit criteria: a reproducible package installs and runs the agreed offline workflow
 on the documented Linux target. Release documentation and the roadmap reflect the
 actual delivered features and remaining issues.
@@ -1144,6 +1155,60 @@ problems remain in the risk register until reproduced.
   checks retain backlinks, create no trash and survive reopen; native Xwayland
   checks pass. Final compiler/sanitizer results are in the work-log checkpoint.
 
+### BUG-026 — Pasted previews negotiated an unnecessary affected HTTP/2 path
+
+- **Milestone/state/impact:** M09.4; Fixed and verified.
+  Qt's supported HTTP/2 path has an upstream-reported application-crash advisory,
+  [CVE-2026-96432](https://security-tracker.debian.org/tracker/CVE-2026-96432).
+- **Environment/reproduction:** Debian 13 amd64 container, Qt 6.8.2
+  (`6.8.2+dfsg-9+deb13u2`), GCC 14.2.0, offscreen Qt. A trusted local TLS server
+  offers `h2` before `http/1.1`; a pasted-preview GET negotiates `h2`. The new
+  `https_uses_http1_even_when_server_offers_http2` regression fails on that
+  negotiated protocol. It deliberately closes without exchanging HTTP/2 frames;
+  the upstream crash itself was not reproduced.
+- **Expected/diagnosis:** one bounded text GET should use HTTP/1.1. Qt enables
+  HTTP/2 by default; resource blocking and response-size/time limits do not
+  disable that protocol's state machine.
+- **Resolution:** set `Http2AllowedAttribute=false` on every preview request,
+  including redirected requests. Retain normal TLS trust/hostname checks. This
+  mitigates this adapter's protocol exposure without changing system libraries;
+  HTTP/2-only pages may have no preview and retain their pasted URL.
+- **Verification:** the pre-fix local TLS regression failed as expected
+  (`build-container-gcc/preview-http2-before.log`, ignored). It passes after the
+  fix on GCC, Clang, ASan/UBSan and the installed Debian runtime, including a
+  successful trusted HTTPS response. Certificate/hostname rejection and the
+  existing preview/controller/window cases also pass. Final outcomes are in the
+  2026-11-02 work-log entry.
+
+### BUG-027 — Older SQLite did not reject inconsistent FTS content during export
+
+- **Milestone/state/impact:** M09.1–M09.4; Fixed and verified.
+  The EL9 RPM build's reliability gate exposed an export validation gap on the
+  supported older SQLite baseline. Canonical note content remains intact, but
+  inconsistent derived search content was accepted without the expected error.
+- **Environment/reproduction:** AlmaLinux 9.8 x86_64 Docker container, GCC 11.5.0,
+  Qt 6.10.3, SQLite 3.34.1, offscreen Qt. Open a read-only export connection, use
+  another connection to change `page_search_content.c4` without updating its FTS
+  index, then export JSON. The existing
+  `reused_read_only_export_includes_other_connection_commits` regression and the
+  new `exports_reject_corrupt_search_without_changing_the_source` regression
+  both fail because no exception is raised. Pre-fix logs are retained in the
+  ignored RPM build directory.
+- **Expected/diagnosis:** reject inconsistent search data on every supported
+  SQLite version. SQLite added virtual-table integrity callbacks in 3.44;
+  `PRAGMA quick_check` on 3.34.1 does not compare FTS5 content with its index.
+  Merely enabling FTS5 is insufficient to make that older check equivalent.
+- **Resolution:** verify schema objects and issue FTS5's explicit `integrity-check`
+  command on the private writable export snapshot before enabling `query_only`.
+  Never write the source or silently repair its index. Apply this to JSON and
+  Markdown snapshots, retaining the SQLite 3.33 minimum and existing formats.
+- **Verification:** the new regression first failed on EL9. It requires failed
+  export destinations to be removed, source database bytes and canonical notes
+  to stay unchanged, and both exports to succeed after explicit index rebuilding.
+  These checks pass on EL9/SQLite 3.34.1 and Debian/SQLite 3.46.1, including
+  GCC, Clang and ASan/UBSan. Existing concurrency and fresh package/runtime
+  workflows also pass; detailed outcomes are in the RPM work-log entry.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -1292,6 +1357,21 @@ milestone, evidence, and the resulting action.
   M09.1):** earlier toolchain checks with CMake 4.3.5 warned that
   `SQLite::SQLite3` should become `SQLite3::SQLite3`. The build/tests passed.
   Future CMake upgrades must retain compatibility with the agreed 3.22 baseline.
+- **G35 — Response limits do not limit protocol negotiation (2026-11-02,
+  M09.4):** BUG-026's local TLS server negotiated HTTP/2 despite the preview's
+  text-only resource policy, body limit and deadline. Restrict the protocol on
+  each request and test actual negotiation separately from TLS trust and body
+  extraction. An upstream advisory is not evidence that its crash was reproduced.
+- **G36 — Older SQLite quick checks omit virtual-table consistency (2026-11-02,
+  M09):** EL9's SQLite 3.34.1 accepted corrupted FTS content during export
+  (BUG-027), unlike the previous SQLite 3.46.1 profile. Run FTS5's own integrity
+  command on the private writable snapshot before making it query-only; test
+  source-byte preservation and recovery by explicit index rebuilding.
+- **G37 — rpmbuild uses /var/tmp by default (2026-11-02, M09):** the first RPM
+  packaging attempt passed all tests but could not create `/var/tmp/rpm-tmp.*`
+  under the read-only container root. The generated spec overrides `_tmppath`
+  to the existing writable `/tmp` tmpfs. Final packaging passes with the same
+  restricted root/source mounts; no host path or container privilege is added.
 
 ## Suggestions
 
@@ -2944,6 +3024,157 @@ begin as part of this shutdown.
   configured author and subject-only messages. Final documentation changes record
   compression and verification outcomes only; they do not require rebuilding the
   removed local images. Markdown heading links and Git integrity checks passed.
+
+### Release diagnostics and preview protocol hardening — 2026-11-02
+
+- Continued M09.4 from clean source `ba36dd2f1c96b60e8613de2c3b68fb6bacbfbca3`.
+  Kept the work within Linux release preparation; M09 remains In progress and
+  the dependent M10 audit is Not started. The version remains the development
+  preview `0.1.0~dev1`; no final release, tag, commit or push was made.
+- Both executables now report that version with `--version`/`-v` before creating
+  a GUI or opening data. The workspace tool provides successful `--help`/`-h`
+  output while invalid commands retain exit code 2. A generated CMake header and
+  CPack use one version value. Command-line regressions use a deliberately invalid
+  Qt platform to enforce display-free diagnostics and check that the ordinary
+  Qt parser's version action does not create the requested workspace.
+- Package verification reads the exact generated CPack filename, rather than a
+  hard-coded version/architecture string. It checks installed executable versions
+  against dpkg metadata, requires the installed release checklist and prints the
+  artifact checksum only after the offline workflow passes. No schema, persistent
+  format or note-data change was introduced.
+- Reproduced and fixed BUG-026: a local TLS server offering `h2` first exposed
+  Qt's default HTTP/2 negotiation. The new regression failed before the fix and
+  now verifies a successful HTTP/1.1 preview from that server. Every request,
+  including a redirected request, disables HTTP/2. Trust/hostname checks, URL
+  preservation, limits, cancellation and controller/editor integration still pass.
+  Reviewed the upstream/official Debian advisory linked in the bug entry; this
+  is an adapter mitigation, not a system Qt patch or a reproduced upstream crash.
+- **Environment:** RHEL 9.8 x86_64 host; isolated Debian 13 amd64 containers,
+  GCC 14.2.0, Clang 19.1.7, Qt 6.8.2 (`6.8.2+dfsg-9+deb13u2`), SQLite
+  3.46.1 (`3.46.1-7+deb13u2`) and OpenSSL 3.5.7. All GUI checks used the
+  offscreen backend, without a native desktop/compositor or host display access.
+  Rebuilt the removed development image as
+  `sha256:3ec85282bdefedfdbbb3048e969782893187a83fcbf19347ccd3e51e4a0b493a`;
+  the pinned recipe/snapshot is unchanged. No host dependency was installed.
+- **Build/check results:** GCC Release, Clang Release and GCC Debug ASan/UBSan
+  each pass all 16 CTest groups, including editor/window interaction, storage,
+  migration, backup/recovery, interchange, preview and parser smoke regressions.
+  Core-only passes 2/2 without Qt/SQLite. Leak detection remains disabled under
+  the restricted container profile. The initial GCC run's sole failing group was
+  the deliberate pre-fix HTTP/2 regression; its ignored log is retained.
+- **Package results:** the complete `./scripts/package-check.sh` passes with no
+  compiler/CMake in the clean runtime. Installation, reinstall/purge preservation,
+  fresh/opened workspaces, editing/search, managed bytes/IDs/dates, JSON/Markdown
+  and fresh backup/restore pass. It verifies 62 full-window and 10 HTTP/TLS behavior
+  cases, excluding setup/cleanup. The two real-OS IME/reader cases are skipped by
+  this profile. Runtime image:
+  `sha256:1d9591fd32034c52bcc432345144cdd62290dc2d6cb44c1b1b06574dd1565813`.
+  The optional SVG/image-format plugin packages are absent from that image;
+  plugin inventories on other installed desktops may differ.
+- Verified local artifact:
+  `build-container-gcc/packages/nebula-0.1.0~dev1-x86_64.deb`, SHA-256
+  `653144b53d595c8b2b5f94d22ed80fabdba106b078a1da767c85358ffefab708`.
+  It contains this local implementation and its release checklist; subsequent
+  roadmap verification bookkeeping is not embedded retrospectively. Builds,
+  images and package output remain outside Git.
+- Added [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) for the final version/source,
+  dependency/backport/image-plugin review, verification environment, artifact
+  identity and material limits. README changes describe version-command usage;
+  progress stays here. Corrected the install guide's stale remaining-M08 wording.
+  Formatter, Bash/POSIX-shell syntax, local file/heading links and code fences
+  across 18 Markdown files, 76 unique task IDs, 26 preserved bug IDs and
+  `git diff --check` pass.
+- **Remaining:** M09.4 still requires the final release version/source and completed
+  release-checklist evidence, including the full dependency applicability review.
+  Native/real-OS desktop checks, coverage-guided fuzzing, performance benchmarks
+  and fresh remote CI were not repeated for this bounded change; their earlier
+  evidence remains recorded above. No new performance or final-release claim is
+  made. M10 begins after M09's exit criteria are complete.
+
+### Enterprise Linux 9 RPM preview built and verified — 2026-11-02
+
+- At the user's request, built an EL9 x86_64 RPM preview under M09.1–M09.4.
+  Preserved the earlier uncommitted release-polishing work and the Debian package
+  workflow. M09 remains In progress: this is `0.1.0~dev1`, not final release
+  acceptance. M10 is Not started. No AppImage, host installation, commit, tag,
+  push or published release was made.
+- Added `./scripts/dev.sh build-rpm-image` and
+  `./scripts/package-check.sh rpm`. The existing Dockerfile now has a separate
+  RPM stage with the official AlmaLinux 9 manifest pinned to
+  `sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2`.
+  Qt, GCC, SQLite, RPM tooling, CRB and EPEL configuration stay inside the image.
+  AlmaLinux/EPEL package repositories are live; the actual builder inventory is
+  retained as `build-container-rpm/package-environment.txt`, not represented as
+  a frozen package snapshot or bit-identical-build guarantee.
+- CPack selects DEB or RPM with `NEBULA_PACKAGE_GENERATOR`, retaining DEB as the
+  default. RPM metadata uses MIT, release `1.el9`, automatic ELF requirements
+  and explicit GUI-plugin/certificate/font requirements. The installed LICENSE
+  has RPM's license flag. The package bundles no third-party library/plugin.
+  Verified TLS backend ownership in `qt6-qtbase` and XCB platform ownership in
+  `qt6-qtbase-gui`. rpmbuild's symbol stripping is accounted for by verifying its
+  installed payload with `rpm -V`; Debian's exact build-binary comparison remains.
+- **Environment:** RHEL 9.8 x86_64 host, isolated AlmaLinux 9.8 x86_64 builder and
+  runtime, GCC 11.5.0, CMake 3.31.8, Qt 6.10.3 (`6.10.3-1.el9`), SQLite 3.34.1
+  (`3.34.1-11.el9_8`), glibc 2.34 (`2.34-283.el9_8`), OpenSSL 3.5.8
+  (`3.5.8-2.el9_8`) and rpm-build 4.16.1.3. GUI checks use offscreen Qt without
+  a native desktop/compositor. The two installed executables require at most
+  `GLIBC_2.34`; RPM correctly requires `Qt_6.10` and `GLIBCXX_3.4.29` runtime
+  symbols. This fixes the earlier Debian executable's ABI mismatch with EL9.
+- Builder image:
+  `sha256:aa60e4cfe790b774ce2a7e227ecf958bd17ccd265a8ef5d75a57ab52fa68f15c`.
+  Verified package runtime:
+  `sha256:d3e7b928b7d04d36729739f04044a2f018a2be17a862ad5cbf966406f8312353`.
+  New development dependency `rpm-build` records GPLv2+; system Qt and SQLite
+  retain their own notices, summarized in [DEPENDENCIES](docs/DEPENDENCIES.md).
+- **Defect and build constraints:** the initial EL9 run passed 15/16 groups and
+  exposed BUG-027: older SQLite's quick check omitted FTS consistency. The new
+  regression also failed before the fix. Explicit FTS5 validation now runs only
+  on the private export copy; failed JSON/Markdown exports remove their output,
+  preserve source bytes/notes, and succeed after explicit index rebuilding.
+  The SQLite minimum and persistent formats are unchanged. A subsequent RPM
+  attempt passed all 16 groups but hit the read-only `/var/tmp` default (G37).
+  Pre-fix and packaging-failure logs remain in the ignored RPM build directory.
+- **Final checks:** the one-command EL9 build/package workflow passes all 16 CTest
+  groups and clean offline installation, payload/version/license metadata, fresh
+  and opened workspaces, search/editing, managed files, JSON/Markdown, lossless
+  import and fresh backup/restore. Reinstall, removal and reinstall preserve an
+  unprivileged user's workspace. The installed runtime passes 62 full-window and
+  10 HTTP/TLS behavior cases, excluding setup/cleanup. Two actual OS IME/reader
+  cases are skipped in this offscreen profile. Package digest verification passes.
+- The storage fix also passes all 16 groups on the existing Debian GCC 14.2,
+  Clang 19.1.7 and GCC Debug ASan/UBSan configurations. Leak detection remains
+  disabled. The final Debian package/offline-runtime workflow passes as well;
+  its current preview SHA-256 is
+  `3d12317237a952bed967a70130ec55c766fcb60b89849314c133387d9dc2fd1f`.
+- **RPM artifact:**
+  `build-container-rpm/packages/nebula-0.1.0~dev1-x86_64.rpm` (830,894 bytes),
+  SHA-256 `7b992a49195d50402fff91105ede84ad71200c34220d57a0981152c15360f164`.
+  It is unsigned and stays ignored. The package contains the local implementation
+  based on `ba36dd2` plus this session's changes and packaging instructions;
+  subsequent verification bookkeeping is not embedded retrospectively.
+- Added [RPM](docs/RPM.md) build/install/runtime guidance and dependency notes.
+  Launcher regressions, formatter, shell syntax, local Markdown links/fences and
+  `git diff --check` pass. Workspaces and host packages were not modified.
+  Actual native RHEL desktop/OS IME/reader acceptance, coverage-guided fuzzing,
+  new performance measurements and remote CI were not run for this package task;
+  no new claims for those environments or measurements are made. Final release
+  dependency review/version evidence remains open under M09.4.
+
+### Initial alpha release preparation — 2026-11-02
+
+- The user authorized committing the accumulated changes, pushing them and
+  publishing the initial GitHub release with the exact tag `0.1-alpha` (M09.4).
+  It is a prerelease; M09 remains In progress and M10 remains Not started.
+  Stable-release dependency review and acceptance are still open.
+- Set the shared executable/package version to `0.1.0~alpha`. The tilde gives
+  Debian and RPM the intended ordering before `0.1.0`; the Git tag retains the
+  user's requested spelling. No workspace format or runtime behavior changes
+  accompany this version update.
+- Added release notes, download/checksum/install instructions and links from
+  the README. Distribution includes separate Debian 13 amd64 and EL9 x86_64
+  packages, checksum and build provenance files; packages and tool caches remain
+  ignored. Exact alpha package checks and publication results will be recorded
+  after they run. Earlier implementation/compiler results remain recorded above.
 
 ## Technical references discussed
 

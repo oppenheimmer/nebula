@@ -181,6 +181,11 @@ Workspace WorkspaceInternals::snapshot(const Workspace& source, const std::files
         throw StorageError(sql::kind_of(opened), "Cannot create export snapshot");
     copy_database(connection(source), raw);
     schema::harden(raw);
+    schema::check_objects(raw);
+    // SQLite before 3.44 does not check FTS content through quick_check. Run
+    // FTS5's own check while this private copy is writable, never on the source.
+    if (schema_version(raw) >= 8)
+        sql::execute(raw, "INSERT INTO page_search(page_search) VALUES('integrity-check')");
     sql::execute(raw, "PRAGMA foreign_keys=ON; PRAGMA query_only=ON");
     return Workspace(source.directory_, source.id_, std::move(database));
 }

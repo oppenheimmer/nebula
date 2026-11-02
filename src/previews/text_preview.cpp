@@ -206,6 +206,9 @@ void TextPreviewFetcher::cancel()
 void TextPreviewFetcher::request(const QUrl& url)
 {
     QNetworkRequest network_request(url);
+    // One text response needs no HTTP/2 or server push. Keep previews off the
+    // affected Qt HTTP/2 path described by CVE-2026-96432.
+    network_request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     network_request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     network_request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
     network_request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);

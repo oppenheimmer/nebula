@@ -11,6 +11,9 @@ status, milestones, bugs, and verification results belong in [ROADMAP.md](ROADMA
 New here? Start with the [first-use guide](docs/USER_GUIDE.md), including save
 checks, recovery and common corrections.
 
+An installed build reports its version with `nebula --version` or
+`nebula_workspace --version`. Both commands work without a display or workspace.
+
 ## Build with Docker
 
 Use the existing Docker CLI and daemon. Qt and build dependencies stay inside the
@@ -35,13 +38,21 @@ For a development shell, run `./scripts/dev.sh shell`. Source is read-only at
 the optional project-local SDK workflow are described in
 [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
-## Linux package preview
+## Linux packages
+
+Download the initial [0.1-alpha prerelease](https://github.com/oppenheimmer/nebula/releases/tag/0.1-alpha)
+for Debian 13 amd64 or Enterprise Linux 9 x86_64. Both packages use version
+`0.1.0~alpha`. See the [release notes](docs/RELEASE_NOTES.md) for installation,
+checksums and known limits.
 
 `./scripts/package-check.sh` builds a Debian 13 amd64 development package and
 checks install, removal, editing, search, export, backup/restore and TLS in an
 isolated runtime container. It does not install host packages. The artifact and
 installation/data-recovery instructions are in [INSTALL.md](docs/INSTALL.md).
-This preview is not a published release.
+
+For an Enterprise Linux 9 x86_64 RPM preview, use `./scripts/dev.sh build-rpm-image`
+followed by `./scripts/package-check.sh rpm`. Both run in Docker; see
+[RPM.md](docs/RPM.md) for runtime requirements, installation and build limits.
 
 ## Run
 

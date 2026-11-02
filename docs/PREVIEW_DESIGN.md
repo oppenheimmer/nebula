@@ -18,6 +18,12 @@ containing credentials are rejected. Authentication challenges fail instead of
 opening a login prompt. HTTPS uses Qt's normal certificate and hostname checks;
 the adapter never ignores TLS errors. Cancellation aborts the active reply.
 
+Requests use HTTP/1.1, including HTTPS requests to servers offering HTTP/2. A
+single text response needs neither multiplexing nor server push. This avoids
+Qt's HTTP/2 path affected by
+[CVE-2026-96432](https://security-tracker.debian.org/tracker/CVE-2026-96432);
+it does not patch system Qt libraries. HTTP/2-only servers may have no preview.
+
 Explicitly pasted private-network and loopback URLs are permitted. This supports
 the user's own local/intranet pages. Only the pasted origin may receive the GET;
 a redirect cannot change host, scheme or port. Consequently, pasting a URL sends
