@@ -10,12 +10,10 @@ sha256sum --check --ignore-missing SHA256SUMS
 sudo apt install ./nebula-0.1.0.alpha-x86_64.deb
 ```
 
-Release verification and remaining issues
-are tracked in [ROADMAP](../ROADMAP.md); the
-[release checklist](RELEASE_CHECKLIST.md) defines the remaining verification.
-Other distributions and architectures are not established by this verification.
-The separately built [Enterprise Linux 9 RPM preview](RPM.md) has its own
-container toolchain and runtime checks; the instructions below describe Debian.
+GitHub download filenames use `.alpha`; local builds use `~alpha`. Both contain
+the same package version. Verification evidence is in [ROADMAP](../ROADMAP.md).
+The [Enterprise Linux 9 RPM](RPM.md) has a separate toolchain and runtime checks;
+these Debian instructions do not establish compatibility with other distributions.
 
 From the checkout, using the existing Docker daemon:
 
@@ -29,11 +27,11 @@ The development image pins the official Debian manifest digest and the signed
 Package creation runs offline. Output is
 `build-container-gcc/packages/nebula-0.1.0~alpha-x86_64.deb` and stays out of Git.
 The package filename comes from CMake's package metadata, so the checker uses the
-artifact produced by that build even when the version changes. After successful
-verification it prints that artifact's SHA-256 checksum.
-The script then prepares an ephemeral Debian runtime image, installs the package
+artifact produced by that build even when the version changes.
+The script prepares an ephemeral Debian runtime image, installs the package
 offline, and runs checks with networking disabled, read-only host mounts and no
-compiler/CMake in that runtime. It does not install anything on the host.
+compiler/CMake in that runtime. After verification it prints the package's
+SHA-256 checksum. It does not install anything on the host.
 
 The package installs `nebula`, the desktop launcher and `nebula_workspace` for
 headless data operations. CPack derives ELF library dependencies; Qt platform
@@ -76,10 +74,10 @@ Package verification checks reinstallation, package removal and reinstallation
 against a workspace owned by an unprivileged user. It checks retained IDs,
 references, date values and attachment bytes after backup/restore and lossless
 JSON import, plus actual window editing/search tests and preview TLS tests. These
-checks complement the schema-migration regression suite; they are not a claim of
-upgrade compatibility with an earlier public package, since none exists yet.
+checks complement the schema-migration regression suite. This first release has
+no earlier published version against which to test package upgrades.
 
-Before a stable release, complete the M09 release checks,
+Before a stable release, complete the [M09 release checks](RELEASE_CHECKLIST.md),
 review dependency/image-plugin security updates, advance the pinned snapshot
 deliberately, rerun all applicable checks, review Debian dependency notices and
 record the exact source, image, package checksum and known limitations. Package

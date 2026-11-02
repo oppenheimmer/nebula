@@ -26,50 +26,51 @@ architecture or a promise of full Notion or Zim format compatibility.
 | Pasted link previews | User-authorized exception: fetch a pasted web page once for a removable text-only preview. No images/thumbnails, background refresh, or network requirement for ordinary notes. |
 | Organization | User-defined databases containing pages; saved views share the underlying pages. |
 | Editor | Flowing document with movable, nestable blocks; not a spatial canvas. |
-| Block affordance | Active block has a thin outline and subtle shadow; mouse reordering will use grip dots as its drag target. |
+| Block affordance | Active block has a thin outline and subtle shadow; mouse reordering uses grip dots as its drag target. |
 | Cross-referencing | Links to pages, headings, and blocks across databases in one workspace; backlinks and link-aware navigation/search. |
 | Language | C++17 baseline with conservative dependencies; C libraries where useful. |
 | Application license | MIT, selected by the user; dependencies retain their own licenses. |
-| Interface | Qt 6 Widgets is the preferred starting point, subject to the editor feasibility milestone. |
+| Interface | Qt 6 Widgets with the page-wide text editor selected in M01. |
 | Storage | SQLite for structured records, with small versioned JSON payloads for flexible block content and view settings. |
 | Workspace location | Ask where to create/open the workspace, suggesting `~/Document/nebula/`; keep the database and managed attachments together. |
-| Attachments | Prefer managed files beside the database; evaluate SQLite BLOBs if a single-file workspace becomes a requirement. |
+| Attachments | Managed files beside the database, coordinated with metadata, recovery and backups. |
 | Build | CMake; keep compiler and platform requirements explicit. |
 | Development isolation | Existing Docker CLI with a project development image. Qt and build dependencies must not be installed system-wide on the host. |
 | Modularity | UI-independent document core, application operations, storage interfaces, and separate desktop adapters. |
-| Platform | Linux only; Debian 13 amd64 release target and a user-requested EL9 x86_64 RPM preview. |
+| Platform | Linux only; Debian 13 amd64 and EL9 x86_64 alpha packages. |
 | Data ownership | Documented schema, migration paths, backup/restore, and portable exports. |
 
-The following remain implementation decisions rather than settled facts:
+The following remain open for stable-release acceptance:
 
 - Desktop/input-method/accessibility coverage beyond the recorded Linux
   IBus/Anthy/Orca profile.
-- Release dependency pinning and third-party distribution notices. The current
-  module/API baseline is recorded in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
-- Final Linux release verification/version and distribution method.
+- Dependency/security and third-party notice review. Debian uses a pinned package
+  snapshot; EL9 uses live repositories with recorded inventories. The baselines
+  are in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
+- Stable Linux release verification and version. The initial alpha is published
+  through GitHub Releases.
 - Portable performance expectations beyond the recorded reference machine;
   budgets are in [PERFORMANCE.md](docs/PERFORMANCE.md) and search behavior in
   [SEARCH.md](docs/SEARCH.md).
-- Interchange behavior and limitations are documented in
-  [INTERCHANGE.md](docs/INTERCHANGE.md),
-  [MARKDOWN.md](docs/MARKDOWN.md) and
-  [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
+
+Interchange contracts are documented in [INTERCHANGE.md](docs/INTERCHANGE.md),
+[MARKDOWN.md](docs/MARKDOWN.md) and [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
 ### Options considered
 
 | Option | Reason to consider it | Tradeoff and disposition |
 | --- | --- | --- |
-| C++ with Qt Widgets | Rich-text facilities, desktop controls, and model/view tables. | Preferred; custom block interactions still need a prototype. |
-| C++ with Qt Quick/QML | Flexible layouts and animated interfaces. | Adds QML and another interface model; a fallback if the editor investigation warrants it. |
-| C with GTK 4, or C++ with gtkmm | Strong Linux foundation; suitable if C or GNOME integration becomes the priority. | Would require a different editor adapter and dependency baseline. |
-| C++ with wxWidgets | Established native desktop controls. | Expected to require more custom work for this editor; keep as an alternative. |
+| C++ with Qt Widgets | Rich-text facilities, desktop controls, and model/view tables. | Selected and validated in M01. |
+| C++ with Qt Quick/QML | Flexible layouts and animated interfaces. | Not selected: adds QML and another interface model. |
+| C with GTK 4, or C++ with gtkmm | Strong Linux foundation. | Not selected: requires a different editor adapter and dependency baseline. |
+| C++ with wxWidgets | Established native desktop controls. | Not selected: expected to require more custom editor work. |
 | Markdown files with metadata | Easy external editing and inspection. | Block identity, rich formatting, database queries, and atomic changes require additional machinery. Use for interchange. |
 | JSON files per page | Inspectable, flexible page representation. | Transactions, indexing, and recovery become additional systems. Use versioned JSON for lossless interchange and selected payloads. |
 | SQLite | Fits a database-centered local application with transactions and indexed queries. | Selected storage direction. |
 
-Qt currently recommends Qt Quick for new interfaces. The Widgets preference is a
-project-specific choice based on C++ use and desktop text/table editing, not a
-claim that Widgets is Qt's preferred new-interface technology.
+The Widgets choice follows this project's C++ baseline and desktop text/table
+editing needs. The comparison evidence is in
+[EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md).
 
 ### Zim-inspired document cross-referencing
 
@@ -81,7 +82,7 @@ a [backlinks pane](https://zim-wiki.org/manual/Plugins/BackLinks_Pane.html), and
 Its [page navigation](https://zim-wiki.org/manual/Help/Pages.html) also supports
 starting a new page from a destination that does not yet exist.
 
-The following is Nebula's planned adaptation of those ideas, using its own block
+Nebula adapts those ideas using its own block
 model and keeping database views as the primary organization method:
 
 - **Page references:** insert a link using a picker or by typing `[[Page title]]`.
@@ -174,20 +175,19 @@ Import/export adapters use the application operations and document model.
 Platform adapters handle paths, dialogs, menus, shortcuts, and packaging.
 ```
 
-Use separate modules/build targets within one executable initially. Runtime
-plugins are not required to achieve modularity. The core must be testable without
-opening a window and must not depend on Qt GUI types.
+Internal modules/build targets support the GUI and headless workspace tool without
+runtime plugins. The core is testable without opening a window and has no Qt dependency.
 
-SQLite tables should hold page membership, property definitions and typed values,
+SQLite tables hold page membership, property definitions and typed values,
 block relationships/order, attachment metadata, and view definitions. Small JSON
-payloads can hold rich-text runs, typed inline references, and block-specific
+payloads hold rich-text runs, typed inline references, and block-specific
 presentation data. Inline references are authoritative; a derived SQLite link
 index supports backlinks and outgoing-link queries without scanning all note text.
 Keep persisted link edges consistent with committed content changes and provide a
-rebuild path. Full-text search indexes are also derived data; FTS5 is the starting
-candidate. Link queries operate on structured references rather than text matches.
+rebuild path. FTS5 supplies the derived full-text search index. Link queries
+operate on structured references rather than text matches.
 
-The preferred workspace layout contains the database and an `attachments/`
+The workspace contains the database and an `attachments/`
 directory. Import copies files into managed storage so moving the original file
 does not break the note. Complete the file write before committing its reference;
 interrupted imports may leave orphan files that can be reconciled safely.
@@ -200,18 +200,14 @@ only the selected data folder writable at `/data` in the editor container. An
 explicit `--workspace HOST_FOLDER` bypasses the chooser and can select folders
 outside the home directory. The host path remains visible in the window.
 
-The original version 1 bootstrap format was deliberately small: `nebula.sqlite3`,
-SQLite `application_id = 0x4e454255` (`NEBU`), `user_version = 1`, and
-`workspace_meta(id INTEGER PRIMARY KEY CHECK(id=1), workspace_id TEXT NOT NULL
-UNIQUE)`. Its single row contains a generated 32-character hexadecimal identity.
-Initialization occurs in a transaction; reopening preserves that identity. Unrelated
-databases and unsupported versions are rejected without modifying their contents.
-**Version 1 stores no pages or notes.** The current version 10 format adds persistent
-databases, pages, block payloads, properties, views, derived link edges, search rows,
-managed attachments, and deleted-block recovery.
+`nebula.sqlite3` uses SQLite `application_id = 0x4e454255` (`NEBU`) and schema
+version 10. It stores persistent databases, pages, block payloads, properties,
+views, derived link/search indexes, attachment metadata and deleted-block recovery.
+Initialization and migrations are transactional; reopening preserves the workspace
+identity. Unrelated databases and unsupported versions are rejected.
 [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md) documents the schema, JSON versions,
-ownership, autosave/undo boundaries, and backup contract. The prototype notice
-applies only to explicit in-memory demo mode.
+ownership, autosave/undo boundaries, and backup contract. Demo mode and automated
+previews without a selected workspace use a disposable in-memory page.
 
 Application operations must give related edits coherent validation and undo
 semantics. Autosave needs explicit saved/unsaved/error states. A change is saved
@@ -252,13 +248,8 @@ Milestone states: **Not started**, **In progress**, **Blocked**, **Complete**.
 Use task IDs and checkboxes for individual steps. A milestone is complete only
 when every required step and its exit criteria have supporting verification.
 Record partial progress explicitly; do not infer completion from code existing or
-from a proposed design. An in-memory editor prototype and test/build foundation
-now exist, with a workspace chooser and persistent SQLite database-to-page workflow.
-Content persistence, autosave, typed properties, and saved table views are
-implemented, including the interactive wiki workflow and managed attachments.
-Local search, structured reference queries, Markdown conversion and lossless JSON
-interchange and pasted-link previews are implemented. Release validation remains
-unfinished.
+from a proposed design. The initial alpha is published; stable-release verification
+remains open under M09.4. The full M10 audit has not started.
 
 Update the relevant milestone and work log in the same change as implementation.
 Record actual defects in the bug log, anticipated problems in the risk register,
@@ -618,11 +609,8 @@ is published, with executable/package version `0.1.0~alpha`, exact-source
 artifacts and verified download checksums. Remaining stable-release checks and material limits are in
 [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md); final release verification
 is still In progress. [Release notes](docs/RELEASE_NOTES.md) describe the alpha.
-The user additionally authorized an Enterprise Linux 9 x86_64 RPM preview on
-2026-11-02. Its isolated build and verification under M09.1–M09.4 are recorded
-in the RPM work-log entry; the Debian package workflow is preserved. This adds
-a Linux package target without starting the dependent audit or claiming final
-release acceptance.
+The alpha includes separately built Debian 13 amd64 and EL9 x86_64 packages.
+Their isolated build/runtime evidence is recorded in the work log.
 
 Exit criteria: a reproducible package installs and runs the agreed offline workflow
 on the documented Linux target. Release documentation and the roadmap reflect the
@@ -662,13 +650,6 @@ Exit criteria: the thorough audit is reviewable, findings have verified fixes or
 explicitly documented dispositions, the code follows the recorded Google C++
 style baseline, and simplification preserves tested behavior/data compatibility
 without unexplained performance regressions on the supported Linux environments.
-
-Progress from the Suggestions implementation (2026-10-30), before the subsequent M08
-verification checkpoint: integrated benchmarks over representative fixtures now exist for M08.3
-(measured values and proposed budgets are in the work log, not yet agreed gates);
-sanitizer, fuzz and stress modes support M08.1/M08.4; Empty trash, schema hardening
-and conflict recovery support M08.1. Each M08 task stays open until its own exit
-evidence is recorded.
 
 ## Risk register
 
@@ -1232,6 +1213,47 @@ problems remain in the risk register until reproduced.
   `sha256sum --check SHA256SUMS` successfully for both packages and build info.
   Published only after those checks passed, then verified the public tag URL,
   prerelease state and four uploaded assets.
+
+### BUG-029 — Current guides retained pre-alpha behavior and format claims
+
+- **Milestone/state/impact:** M09.3–M09.4; Fixed and verified. The documentation
+  contradicted the implemented clipboard, attachment and interchange contracts.
+- **Environment/reproduction:** source `74d0f5e`, RHEL 9.8 x86_64; text review,
+  without a desktop. Compare `CLIPBOARD_FORMAT.md`'s version-1 block claim with
+  the version-3 writer; `ATTACHMENTS.md`'s synchronous-import claim with the
+  worker copy; and `MARKDOWN.md`'s missing-file rejection claim with its warning
+  and label-preservation path. The identity section also implied imports had to
+  use generated UUID/hex spellings despite accepting the documented UTF-8 grammar.
+- **Expected/actual/diagnosis:** current guides should describe shipped behavior.
+  Earlier milestone wording survived implementation and contradicted newer text
+  in the same guides. JSON export also overstated recovery from damaged derived
+  indexes despite the explicit FTS consistency check introduced for BUG-027.
+- **Resolution:** reconcile the guides with the code, distinguish historical M01
+  evidence from current behavior, and state the pending-save limitation on handled
+  termination signals. Preserve dated work logs and measured baselines.
+- **Verification:** checked the codec, import worker, Markdown parser, identity
+  validator, snapshot integrity check and termination handler; existing GCC and
+  Clang regression suites pass all 16 CTest groups each. Source and staged
+  documentation links/fragments and code fences pass validation.
+
+### BUG-030 — Screenshot links were absent from the documentation install
+
+- **Milestone/state/impact:** M09.3; Fixed and verified for subsequent builds.
+  README screenshots added after the alpha tag were not in the install rules.
+  Published alpha packages predate those links and are unaffected.
+- **Environment/reproduction:** source `74d0f5e`, Debian 13 x86_64 Docker build on
+  RHEL 9.8, no desktop. Install the checkout: README references
+  `assets/screenshots/0.1-alpha/`, but the install rules copy only root documents
+  and `docs/`. The installed README therefore lacks its image and provenance files.
+- **Expected/actual/diagnosis:** local documentation links should resolve after
+  installation; screenshot assets were omitted when the README gained images.
+- **Resolution:** install the screenshot directory beside the documentation and
+  require its three PNGs and provenance README in the installed-package check.
+  Link to the CI workflow on GitHub, since it is not installed documentation.
+- **Verification:** staged `cmake --install` in the project build directory;
+  all 21 installed Markdown files, 127 local links/fragments and three image byte
+  comparisons pass. The documentation guard passes with the assets present and
+  rejects a missing screenshot or provenance file. No host install was performed.
 
 For each future defect, record:
 
@@ -3266,6 +3288,43 @@ begin as part of this shutdown.
   repeated interaction suites and the private Xvfb/Openbox/IBus/Anthy/Orca
   profile. It does not establish native RHEL desktop acceptance. M09 remains
   In progress pending stable-release dependency review; M10 is Not started.
+
+### 2026-11-02 — Documentation cleanup and focused refactoring
+
+- Reviewed the current documentation and source comments from clean `74d0f5e`
+  under M09.3–M09.4, as explicitly requested by the user. This narrow cleanup
+  precedes the scheduled M10 audit by user direction; it does not claim the full
+  audit or stable-release dependency review is complete. Milestone checkboxes
+  remain unchanged: M09 is In progress and M10 is Not started.
+- Shortened README from 355 to 248 lines, put native alpha downloads first and
+  kept detailed format/recovery contracts in their guides. Corrected BUG-029,
+  updated settled architecture decisions and retained historical verification
+  records. Reviewed the release notes, preview contract and screenshot provenance;
+  their release-specific statements remain valid.
+- Removed the unreachable macOS timestamp branch from the Linux file adapter,
+  an unused conflict-copy local, three unused Qt includes and a redundant preview
+  event-filter scope. Reused the existing warning-options helper and shared the
+  benchmark RSS/percentile helpers. Kept the comparison editor and fixtures:
+  tests, demo and benchmarks still exercise them. No document rules, storage
+  formats, dependencies, or application behavior changed.
+- Corrected screenshot installation and extended the package documentation guard
+  (BUG-030). A staged install verifies documentation without generating packages.
+- **Verification:** Debian 13 x86_64 Docker image `nebula-dev:debian13`,
+  Qt 6.8.2, GCC 14.2 and Clang 19.1.7, Release with warnings as errors; RHEL 9.8
+  x86_64 host, offscreen Qt without a desktop session. GCC and Clang each pass
+  all 16 CTest groups, including editor/window interaction, previews, storage,
+  recovery and interchange. Formatting and shell syntax checks pass. Both
+  1,000-block benchmark modes run and retain their JSON fields/counts; concurrent
+  compiler activity means these runs make no new performance claim.
+- Source and staged documentation checks pass for 21 Markdown files, 127 local
+  links/fragments and balanced fences; installed text/image bytes match source.
+  The roadmap retains 76 unique task IDs and now 30 unique bug IDs.
+  `git diff --check` passes. Native IME/Orca, sanitizers and full installed-package
+  workflows were not repeated for this behavior-preserving cleanup.
+- **Release decision:** no significant runtime or data-format changes were found,
+  so the user-requested conditional DEB/RPM rebuild is not triggered. Published
+  `0.1-alpha` artifacts and tag remain at `d4d794a`; this follow-up updates main.
+  The existing alpha packages retain their original embedded documentation.
 
 ## Technical references discussed
 

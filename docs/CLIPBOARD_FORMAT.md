@@ -3,7 +3,7 @@
 Nebula publishes `application/x-nebula-blocks+json` alongside ordinary text and
 HTML. Its payload is the version 1 document envelope used for recovery fragments:
 `version`, source page `id`, and a preorder `blocks` array. Each block contains
-`id`, `parent`, numeric `kind`, and a version 1 `payload` with rich-text runs.
+`id`, `parent`, numeric `kind`, and a versioned `payload` with rich-text runs.
 Run and block fields are defined in [WORKSPACE_FORMAT.md](WORKSPACE_FORMAT.md).
 Writers use block payload version 3 within the version 1 envelope; readers also
 accept legacy version 1–2 blocks. Default/custom label modes survive copying and

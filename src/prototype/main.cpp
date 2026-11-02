@@ -21,7 +21,6 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QTemporaryDir>
-#include <QTextBlock>
 #include <QTimer>
 #include <algorithm>
 #include <cstdio>
@@ -30,6 +29,22 @@
 using namespace nebula;
 
 namespace {
+
+qint64 peak_rss_kib()
+{
+    QFile status("/proc/self/status");
+    if (status.open(QIODevice::ReadOnly))
+        for (const auto& line : status.readAll().split('\n'))
+            if (line.startsWith("VmHWM:"))
+                return QString::fromUtf8(line).simplified().split(' ').value(1).toLongLong();
+    return -1;
+}
+
+double percentile95(std::vector<qint64> samples)
+{
+    std::sort(samples.begin(), samples.end());
+    return samples.empty() ? 0.0 : samples[std::min(samples.size() - 1, samples.size() * 95 / 100)] / 1000000.0;
+}
 
 int benchmark(const QString& mode, int count)
 {
@@ -57,12 +72,11 @@ int benchmark(const QString& mode, int count)
         QApplication::processEvents();
         latencies.push_back(timer.nsecsElapsed());
     }
-    std::sort(latencies.begin(), latencies.end());
     QJsonObject result{{"mode", mode},
                        {"blocks", count},
                        {"qt", qVersion()},
                        {"load_ms", load_ms},
-                       {"typing_p95_ms", latencies[28] / 1000000.0},
+                       {"typing_p95_ms", percentile95(latencies)},
                        {"native_editors", mode == "single" ? 1 : count}};
     if (mode == "single") {
         single.go_to_block("block-" + QString::number(std::min(500, count - 1)));
@@ -71,31 +85,11 @@ int benchmark(const QString& mode, int count)
         QApplication::processEvents();
         result["move_ms"] = timer.elapsed();
     }
-    QFile status("/proc/self/status");
-    if (status.open(QIODevice::ReadOnly)) {
-        for (const auto& line : status.readAll().split('\n')) {
-            if (line.startsWith("VmHWM:"))
-                result["peak_rss_kib"] = QString::fromUtf8(line).simplified().split(' ').value(1).toLongLong();
-        }
-    }
+    const auto rss = peak_rss_kib();
+    if (rss >= 0)
+        result["peak_rss_kib"] = rss;
     std::puts(QJsonDocument(result).toJson(QJsonDocument::Compact).constData());
     return 0;
-}
-
-qint64 peak_rss_kib()
-{
-    QFile status("/proc/self/status");
-    if (status.open(QIODevice::ReadOnly))
-        for (const auto& line : status.readAll().split('\n'))
-            if (line.startsWith("VmHWM:"))
-                return QString::fromUtf8(line).simplified().split(' ').value(1).toLongLong();
-    return -1;
-}
-
-double percentile95(std::vector<qint64> samples)
-{
-    std::sort(samples.begin(), samples.end());
-    return samples.empty() ? 0.0 : samples[std::min(samples.size() - 1, samples.size() * 95 / 100)] / 1000000.0;
 }
 
 // Integrated measurements (SUG-33): the real window, autosave path, SQLite,
@@ -315,7 +309,7 @@ int main(int argc, char** argv)
     }
     window->show();
     QApplication::setQuitOnLastWindowClosed(true);
-    // docker stop, kill and logout signals flush pending edits instead of dropping them.
+    // Attempt to save before exiting on SIGTERM/SIGINT/SIGHUP, even if a save fails.
     install_termination_handler([](int) {
         for (auto* widget : QApplication::topLevelWidgets())
             if (auto* open = qobject_cast<WorkspaceWindow*>(widget))

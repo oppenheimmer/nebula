@@ -83,7 +83,7 @@ struct Page {
 // Identities are 1–128 bytes of valid UTF-8 without control characters.
 bool valid_identity(const std::string& id);
 bool valid_utf8(const std::string& text);
-// Throws std::invalid_argument for an invalid prototype document.
+// Throws std::invalid_argument for an invalid block tree, identity or inline value.
 void validate(const Page& page);
 // Copy a page with fresh block identities; references between copied blocks
 // follow their copies and all other targets are unchanged.

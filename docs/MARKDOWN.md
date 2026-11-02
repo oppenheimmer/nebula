@@ -55,9 +55,9 @@ implementation. Unsupported heading levels, nesting, quotes, underscore emphasis
 code, tables and other constructs remain literal text with a warning. External
 links, remote images and unsupported link destinations become label text with a
 warning. Nothing is fetched. Local attachment paths are restricted to a single
-filename below attachments/; traversal, encoded paths, symlinks, missing files,
-invalid UTF-8/NUL input, duplicate block markers and files above 64 MiB fail
-explicitly. Inputs are not recursively scanned; ignored entries are reported.
+filename below attachments/; traversal, encoded separators and symlinks fail
+explicitly. Invalid UTF-8/NUL input, duplicate block markers and Markdown files
+above 64 MiB also fail. Inputs are not recursively scanned; ignored entries are reported.
 
 ## Conversion limits
 

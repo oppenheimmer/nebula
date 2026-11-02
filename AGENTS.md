@@ -33,9 +33,9 @@ prerequisite. Keep SDKs, container build output, and tool caches out of Git.
 
 ## Architecture and dependencies
 
-- Use the agreed C++17, Qt 6 Widgets, SQLite, and CMake direction. The editor
-  architecture remains subject to the M01 prototype; document evidence for any
-  proposed change to the selected toolkit or language baseline.
+- Use C++17, Qt 6 Widgets, SQLite, and CMake, with the page-wide editor selected in
+  M01. Document evidence for any proposed change to the toolkit, editor
+  architecture or language baseline.
 - Keep the document core independent of Qt GUI types and testable without a
   window. Put platform integration behind narrow adapters.
 - Separate document rules, application operations, storage, editor/view adapters,

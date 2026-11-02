@@ -7,7 +7,6 @@
 #include <QInputMethodEvent>
 #include <QLabel>
 #include <QStatusBar>
-#include <QTextBlock>
 #include <QToolButton>
 #include <QUuid>
 #include <algorithm>
@@ -113,18 +112,16 @@ bool PastedLinkPreview::eventFilter(QObject* watched, QEvent* event)
 {
     // This filter is installed only on the editor. Comparing a typed QPointer
     // here downcasts during QWidget destruction, after PageEditor has gone.
-    {
-        if (event->type() == QEvent::InputMethod) {
-            composing_ = !static_cast<QInputMethodEvent*>(event)->preeditString().isEmpty();
-            if (!composing_ && active_ && ready_)
-                QTimer::singleShot(0, this, &PastedLinkPreview::insert_ready);
-        } else if (event->type() == QEvent::FocusOut) {
-            composing_ = false;
-            if (active_ && ready_)
-                QTimer::singleShot(0, this, &PastedLinkPreview::insert_ready);
-        } else if (event->type() == QEvent::Hide && active_)
-            cancel();
-    }
+    if (event->type() == QEvent::InputMethod) {
+        composing_ = !static_cast<QInputMethodEvent*>(event)->preeditString().isEmpty();
+        if (!composing_ && active_ && ready_)
+            QTimer::singleShot(0, this, &PastedLinkPreview::insert_ready);
+    } else if (event->type() == QEvent::FocusOut) {
+        composing_ = false;
+        if (active_ && ready_)
+            QTimer::singleShot(0, this, &PastedLinkPreview::insert_ready);
+    } else if (event->type() == QEvent::Hide && active_)
+        cancel();
     return QObject::eventFilter(watched, event);
 }
 void PastedLinkPreview::insert_ready()

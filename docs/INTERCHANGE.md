@@ -46,10 +46,11 @@ are verified. Missing/corrupt required bytes fail export/import visibly; they do
 not become a successful partial export. File ownership, permissions, timestamps
 and empty directories are filesystem details outside the document model.
 
-Derived links and full-text indexes are excluded. Import rebuilds both from
-canonical records. An export can therefore recover from missing/stale derived
-rows without treating those rows as document content. The SQLite backup format
-is a separate recovery option; JSON does not contain a database binary.
+Derived links and full-text indexes are excluded; import rebuilds them from
+canonical records. Export still requires a valid database snapshot. Repair an
+inconsistent search index with **Search → Rebuild search and reference indexes**
+before retrying an export. SQLite backup is a separate recovery option;
+JSON does not contain a database binary.
 
 ## Envelope and canonical records
 
@@ -124,7 +125,8 @@ copies/checks files, then rebuilds indexes. File/directory flushes precede a
 successful result. A reported failure removes the newly created partial folder
 without overwriting existing data. An externally killed process can leave a new
 partial folder; use a different fresh destination when retrying. Original inputs
-remain unchanged. Process-kill boundary verification is part of M08.
+remain unchanged. Process-kill boundary verification is recorded under M08 in
+[ROADMAP.md](../ROADMAP.md).
 
 Linux semantic round-trip fixtures cover all canonical tables, rich/typed values,
 large revisions beyond JavaScript's exact integer range, trash/recovery, duplicate

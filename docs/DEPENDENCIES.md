@@ -26,20 +26,15 @@ byte-for-byte package reproducibility has not yet been demonstrated.
 | --- | --- | --- |
 | C++ | C++17 | Core values/operations and Qt adapters; no language extensions. |
 | CMake | 3.22 or newer | Targets, optional GUI build, CTest integration. |
-| Qt | 6.5 or newer | Core for internal JSON coding, Gui/Widgets for desktop adapters, Test for interaction tests. Core model types remain Qt-free. |
+| Qt | 6.5 or newer | Core for JSON, Gui/Widgets for the desktop, Network for pasted-link previews, Test for interaction tests. Core model types remain Qt-free. |
 | Compiler | GCC or Clang with C++17 support | Both are exercised during development. |
-| SQLite | 3.33 or newer | Versioned workspace records, transactions, link indexes, and online backup via its C API. JSON codec uses Qt Core internally. |
+| SQLite | 3.33 or newer, with FTS5 | Workspace records, transactions, link/search indexes, and online backup via its C API. |
 | Ninja | Container build tool | Host SDK fallback can use CMake's default generator. |
 
-Qt 6.5 is the configured API minimum, not a claim that this change was tested
-against every Qt 6.5 patch. The initial host-side validation used an isolated Qt
-6.8.3 SDK under `/tmp/nebula-qt`, GCC 11.5, Clang 21.1.8, and CMake 3.31.8 on RHEL
-9.8 x86_64. No host Qt packages were installed. The Docker workflow uses Debian's
-Qt package and is validated separately in the feasibility report.
-The temporary SDK, downloader environment, extra cursor runtime, and superseded
-host build directories were removed after Docker validation. Qt development tools
-now reside in the project image; the supported workflow does not depend on those
-temporary paths.
+Qt 6.5 is the configured API minimum. The alpha was verified with Debian 13's
+Qt 6.8.2 and EL9's Qt 6.10.3; the minimum itself has not been tested.
+Exact toolchains, image IDs and results are recorded in
+[ROADMAP.md](../ROADMAP.md) and the release's `BUILD_INFO.txt`.
 
 The Docker image includes DejaVu, Noto CJK, and Noto Color Emoji. Its explicit
 font profile is tested against Japanese, Arabic, and the sample emoji. The initial
@@ -73,23 +68,22 @@ The editor does not link the storage module.
 `nebula_files` provides managed-file copy/flush/locking and backup manifests. It
 uses the existing Qt Core SHA-256/JSON facilities and a narrow POSIX file
 adapter; no separate hashing or image library was added.
-The desktop previews images using Qt Gui's existing image readers. Filesystem operations require
-regular files, durable directory/file flushes, same-directory hard links and Unix
-shared/exclusive locks.
+The desktop previews images using Qt Gui's existing image readers. Filesystem
+operations require regular files, durable directory/file flushes, same-directory
+hard links and Unix shared/exclusive locks.
 
 ## Paste-preview adapter
 
-M07.8 adds a separate `nebula_previews` adapter using the existing Qt 6 baseline's
+The separate `nebula_previews` adapter uses the existing Qt 6 baseline's
 Network and Gui modules. Qt Network provides asynchronous HTTP(S), timeout and
 cancellation; Qt Gui supplies text-only HTML extraction with resource loading
 disabled. The document core, storage and headless interchange do not link this
 target. No browser engine, HTML scripting runtime or image importer is added.
-The adapter contract and remaining integration checks are in
+The adapter contract is in
 [PREVIEW_DESIGN.md](PREVIEW_DESIGN.md).
 
-The existing Debian 13 development image already contains Qt Network 6.8.2 and
-its OpenSSL TLS plugin, with OpenSSL 3.5.7. No image rebuild or host package
-installation was needed. Qt Network has the same commercial/LGPLv3/GPLv2 options
+The Debian 13 alpha image contains Qt Network 6.8.2 and its OpenSSL TLS plugin,
+with OpenSSL 3.5.7. Qt Network has the commercial/LGPLv3/GPLv2 options
 recorded by its [module documentation](https://doc.qt.io/qt-6.8/qtnetwork-index.html).
 OpenSSL 3 uses [Apache License 2.0](https://openssl-library.org/source/license/).
 Packaging must include the selected Qt/TLS plugin and applicable third-party
@@ -102,12 +96,13 @@ Linux release packaging must include the shipped
 
 The user selected MIT for Nebula's own source on 2026-10-29. The root `LICENSE`
 applies to that source. No Qt or Zim source/assets are copied into this repository.
-The prototype's image card is drawn by application code.
+Image and file cards are drawn by application code.
 
 Qt is a separate dependency with its own commercial and open-source licensing
 options; selected module and third-party notices must accompany a distributed
-package as appropriate. This development image is not a release packaging design.
-Record the exact linked libraries and notices during M09.
+package as appropriate. The alpha packages link distribution-provided libraries;
+their notices remain separate. M09 still requires the stable-release dependency
+and security review in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 SQLite is [public domain](https://sqlite.org/copyright.html); it has no Qt or GUI
 dependency.
 The bootstrap uses the
@@ -130,7 +125,7 @@ or HTML resource loader is added.
 - [Docker run reference](https://docs.docker.com/reference/cli/docker/container/run/)
 
 Linux is the only target platform. The selected release package target is Debian
-13 amd64. The user also requested an Enterprise Linux 9 x86_64 RPM preview;
+13 amd64. An Enterprise Linux 9 x86_64 RPM is also published for the alpha;
 [RPM.md](RPM.md) describes its separate build and verification environment.
 
 ## Optional Linux desktop acceptance environment
@@ -155,9 +150,9 @@ These summaries do not replace the installed notices or relicense the tools.
 The C++/Qt/SQLite baselines are unchanged. The F8 details dialog uses existing Qt
 Widgets APIs and adds no application runtime dependency.
 
-## Debian package preview
+## Debian package
 
-The development package targets Debian 13 amd64 and dynamically links the system
+The alpha package targets Debian 13 amd64 and dynamically links the system
 Qt and SQLite libraries. It bundles no third-party libraries or Qt image plugins;
 Debian retains their package licenses and update mechanisms. CPack uses the
 existing Debian `dpkg-shlibdeps` tooling and `file` (BSD-2-Clause-alike; development-only)
@@ -167,7 +162,7 @@ analysis. The clean runtime verification image adds Qt Test and fonts for checks
 with no compiler or CMake; those test-only requirements are not application
 package dependencies. See [INSTALL](INSTALL.md) for preparation and limitations.
 
-## Enterprise Linux 9 RPM preview
+## Enterprise Linux 9 RPM
 
 The optional `rpm-development` stage in `Dockerfile.dev` uses a digest-pinned
 AlmaLinux 9 base, with AlmaLinux CRB and Fedora EPEL repositories enabled inside

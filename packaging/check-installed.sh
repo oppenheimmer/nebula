@@ -7,6 +7,9 @@ test -f /usr/share/doc/nebula/copyright
 for name in README.md LICENSE AGENTS.md ROADMAP.md docs/INSTALL.md docs/RELEASE_CHECKLIST.md; do
     test -f "/usr/share/doc/nebula/$name"
 done
+for name in README.md 01-block-editor.png 02-journal-views.png 03-workspace-search.png; do
+    test -f "/usr/share/doc/nebula/assets/screenshots/0.1-alpha/$name"
+done
 if command -v c++ >/dev/null 2>&1 || command -v cmake >/dev/null 2>&1; then
     printf '%s\n' 'Package verification must use a runtime environment without a build toolchain.' >&2
     exit 1

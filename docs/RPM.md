@@ -68,7 +68,7 @@ CMake. It checks package payload integrity, version metadata, installed docs,
 fresh/opened workspaces, window editing/search, TLS previews, retained attachments,
 JSON/Markdown export, lossless import, and backup/restore into fresh folders.
 An unprivileged fixture also verifies that reinstall, removal and reinstall
-preserve its workspace. There is no earlier public RPM upgrade baseline.
+preserve its workspace. This first release has no earlier published RPM upgrade baseline.
 
 Actual results and image/compiler/library versions belong in the roadmap work
 log. These container checks use offscreen Qt, without a native desktop, OS IME or

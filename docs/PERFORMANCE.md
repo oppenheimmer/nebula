@@ -16,8 +16,7 @@ See [EDITOR_FEASIBILITY](EDITOR_FEASIBILITY.md) for the original comparison.
 
 For M08, the integrated fixture contains a 10,000-block page, 5,000 dated Journal
 entries, a hub with 1,200 referrers and 200 managed image cards. The following
-budgets were selected before the continuation's measurements, using the proposed
-budgets from the Suggestions checkpoint. They guide this reference-machine
+budgets were selected before measuring that fixture. They guide the reference-machine
 release assessment; they are not portable CI timing assertions or guarantees for
 every user's hardware.
 

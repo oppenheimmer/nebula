@@ -76,13 +76,8 @@ Digest read_file(int input, int output, const Progress& progress = {})
             throw StorageError(ErrorKind::Unavailable, "The file copy was cancelled");
     }
     const auto after = regular(input);
-#if defined(__APPLE__)
-    const bool changed = before.st_mtimespec.tv_sec != after.st_mtimespec.tv_sec ||
-                         before.st_mtimespec.tv_nsec != after.st_mtimespec.tv_nsec;
-#else
     const bool changed =
         before.st_mtim.tv_sec != after.st_mtim.tv_sec || before.st_mtim.tv_nsec != after.st_mtim.tv_nsec;
-#endif
     if (changed || before.st_size != after.st_size || size != after.st_size)
         throw std::runtime_error("The source file changed while being read; retry the import or backup");
     return {size, hash.result().toHex().toStdString()};

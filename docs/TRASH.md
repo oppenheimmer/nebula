@@ -45,6 +45,4 @@ pages or blocks report them as unavailable and show their stored text. Permanent
 deletion cannot be undone; existing backups and exports keep their independent
 copies. Keep a verified backup first.
 
-The page's reference panels use **Referenced by:** for incoming references and
-**References** for outgoing references. Their keyboard navigation and stable-ID
-resolution are unchanged by those labels.
+See [LINKS.md](LINKS.md) for reference states and navigation after trash/restore.

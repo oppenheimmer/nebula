@@ -4,10 +4,10 @@ Date: 2026-10-29 (Asia/Tokyo)
 
 ## Decision and status
 
-Use a **page-wide QTextDocument/QTextEdit adapter** as the provisional editor
-direction. It supplies continuous selection and a shared native undo history while
-allowing the prototype to map text blocks, references, lists, and painted objects
-to application-owned values.
+M01 selected a **page-wide QTextDocument/QTextEdit adapter**, retained in the
+application. It supplies continuous selection and a shared native undo history,
+mapping text blocks, references, lists and painted objects to application-owned
+values.
 
 This report records the initial feasibility evidence and measurements. Automated
 composition/accessibility tests do not establish actual OS input-method or
@@ -16,7 +16,7 @@ release gates are tracked in [ROADMAP.md](../ROADMAP.md).
 
 ## Runnable comparison
 
-`nebula_prototype --demo --compare-editors` exposes two tabs with the same sample:
+`./scripts/dev.sh run --demo --compare-editors` exposes two tabs with the same sample:
 
 - **Page-wide document:** a single native editor with stable block metadata,
   hierarchy operations, inline runs/references, and object representations.
@@ -31,7 +31,11 @@ not reverse edits in another. Focused typing is faster in the separate-widget
 baseline. A custom selection/history controller could change that tradeoff, but
 would add substantial implementation work.
 
-## Representation and operation ownership
+## Representation at M01
+
+These points describe the initial prototype. Current persistence, managed files
+and reference behavior are specified in [WORKSPACE_FORMAT.md](WORKSPACE_FORMAT.md),
+[ATTACHMENTS.md](ATTACHMENTS.md) and [LINKS.md](LINKS.md).
 
 - `include/nebula/core/document.hpp` defines prototype page/block/run/reference/
   asset values using standard C++ types, independent of Qt.
@@ -51,22 +55,22 @@ would add substantial implementation work.
   insertion, split/merge, and structural operations are grouped coherently. History
   is cleared on fixture load and does not survive closing the process.
 - Painted image/attachment cards share the document's selection and focus. They
-  are layout/interaction representations; no files are imported or managed yet.
+  were layout/interaction representations; M01 did not import or manage files.
 - Ctrl+click emits a typed reference target and can navigate to another block in
   the sample page. Workspace-wide resolution, wiki completion, backlinks, and
-  unresolved-target workflows remain production milestone work.
+  unresolved-target workflows were subsequent milestone work.
 
 At this investigation stage, the prototype did not define a SQLite schema or full
 rich-text serialization format. Application/storage interfaces and typing undo
 coalescing were follow-up work.
 
-## Test coverage
+## Initial test coverage
 
-The core suite has **10 named cases** covering valid/invalid documents, hierarchy,
+The M01 core suite had **10 named cases** covering valid/invalid documents, hierarchy,
 sibling boundaries, subtree movement, indent/outdent, stable references, Unicode
 fixture integrity, and the long-page fixture.
 
-The Qt suite has **27 feature/comparison cases**, plus its initialization and
+The M01 Qt suite had **27 feature/comparison cases**, plus its initialization and
 cleanup hooks:
 
 | Behavior | Evidence |
@@ -143,11 +147,12 @@ Timing includes synchronous event delivery and event processing, not a real
 compositor/input-method/screen-reader session. Peak RSS is read from Linux
 `/proc/self/status` in each fresh process. Each measurement process creates the
 candidate widgets and an empty inactive comparison container; the editor count
-above describes the active candidate. The prototype snapshots/normalizes all
-blocks on mutation and rewrites the document for tree changes. That cost is a
-known optimization target before M08, despite meeting the initial budgets here.
+above describes the active candidate. The M01 prototype snapshotted/normalized all
+blocks on mutation and rewrote the document for tree changes. Subsequent M08
+optimization and measurements are recorded in the roadmap; current fixtures and
+budgets are in [PERFORMANCE.md](PERFORMANCE.md).
 
-## Defects found and remaining validation
+## Defects and subsequent desktop acceptance
 
 - **BUG-001:** a parent split flattened its children. A failing test established
   the case; reparenting inside the same edit group fixed it. The regression passes.

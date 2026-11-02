@@ -368,7 +368,7 @@ PageEditor::PageEditor(QWidget* parent) : QTextEdit(parent)
     details->setShortcutContext(Qt::WidgetShortcut);
     addAction(details);
     connect(details, &QAction::triggered, this, &PageEditor::show_block_details);
-    setAcceptDrops(false); // Native internal text drag needs identity-aware handling in M05.
+    setAcceptDrops(false); // Grip dragging handles block identities; native text/file drops stay disabled.
     setTabChangesFocus(false);
     setFont(QFont("Sans Serif", 12));
     setPlaceholderText("Write a note…");

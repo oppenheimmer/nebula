@@ -27,6 +27,10 @@ and Enter/Tab; Escape dismisses it. The full Link… picker remains searchable w
 the target is outside those suggestions. It does not select a target implicitly.
 The integration follows Qt's [custom-completer example](https://doc.qt.io/qt-6/qtwidgets-tools-customcompleter-example.html).
 
+The Link… picker displays pages and their blocks in batches of 100. Expand a page
+or activate **Show more pages… / Show more blocks…** to continue. Searching covers
+the full target list, including items not yet displayed.
+
 Closing a uniquely matching expression converts only that expression to a typed
 reference. Duplicate page titles or duplicate heading text open the picker and
 require an explicit choice. Cancel preserves the typed expression. Unknown page

@@ -1983,7 +1983,6 @@ void WorkspaceWindow::save_conflict_copy()
     session_.discard();
     pending_ = false;
     link_targets_.invalidate();
-    const auto original = pending.document.id;
     history_navigation_ = true;
     session_.close();
     history_navigation_ = false;
@@ -1991,7 +1990,6 @@ void WorkspaceWindow::save_conflict_copy()
     findChild<QAction*>("saveConflictCopy")->setEnabled(false);
     statusBar()->showMessage(
         "Your edits were saved as a new page; the other version of \"" + q(pending.title) + "\" was kept.", 10000);
-    Q_UNUSED(original);
 }
 void WorkspaceWindow::empty_trash(QWidget* parent)
 {

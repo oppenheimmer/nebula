@@ -10,10 +10,13 @@ build alone does not establish a final release.
 - Set the intended version in `CMakeLists.txt`. `NEBULA_VERSION` supplies both
   executable diagnostics and package metadata. Remove the preview suffix
   only when the final release is ready.
-- Record the source revision and any local changes. Keep a release artifact tied
+- Record the tag, source revision and any local changes. Keep a release artifact tied
   to the source and documentation that were actually packaged.
 - Record the development/runtime image IDs, base digest, signed package snapshot,
   compiler, Qt, SQLite and TLS versions, architecture and desktop/backend.
+- Use upload-safe asset filenames. After uploading, download the assets and
+  verify their bytes, digests and checksum manifest against the local artifacts;
+  GitHub can normalize filenames without updating manifest contents (BUG-028).
 
 ## Dependency review
 
@@ -43,7 +46,8 @@ match the installed package, installed documentation links work, and record the
 artifact path and SHA-256 checksum. This checks installation/reinstallation/removal,
 offline editing/search, preserved identities and managed files, interchange, and
 backup/restore into fresh workspaces. Schema migration checks run separately in
-the storage suites. An earlier public-package upgrade has no test baseline yet.
+the storage suites. The first alpha has no earlier published upgrade baseline;
+future releases should verify upgrades from `0.1-alpha`.
 For the separately requested EL9 RPM preview, run `./scripts/package-check.sh rpm`
 using its own image and build directory; see [RPM](RPM.md). Its live repository
 inventory is separate from Debian's pinned package snapshot.

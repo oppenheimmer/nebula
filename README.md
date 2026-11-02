@@ -1,18 +1,30 @@
 # Nebula
 
-An always-local, single-user note-taking and diary application. Database entries
-open as flowing block documents, with Notion-inspired organization and
-Zim-inspired cross-references. Linux is the only target platform.
+An always-local, single-user note-taking and diary application for Linux.
+Databases organize pages with typed properties and flowing, movable blocks.
+Local links and backlinks connect notes across databases in one workspace.
 
-Workspace pages and properties are stored in a local SQLite database. The separate
-`--demo` mode edits an in-memory sample and discards it on close. Implementation
-status, milestones, bugs, and verification results belong in [ROADMAP.md](ROADMAP.md).
+Start with the [first-use guide](docs/USER_GUIDE.md). Nebula's source is
+[MIT licensed](LICENSE); dependencies retain their own licenses.
+Milestones, defects and verification evidence live in [ROADMAP.md](ROADMAP.md).
 
-New here? Start with the [first-use guide](docs/USER_GUIDE.md), including save
-checks, recovery and common corrections.
+## Linux packages
 
-An installed build reports its version with `nebula --version` or
-`nebula_workspace --version`. Both commands work without a display or workspace.
+Download the [0.1-alpha prerelease](https://github.com/oppenheimmer/nebula/releases/tag/0.1-alpha)
+from its **Assets** section:
+
+- [Debian 13 amd64](https://github.com/oppenheimmer/nebula/releases/download/0.1-alpha/nebula-0.1.0.alpha-x86_64.deb)
+  — [installation instructions](docs/INSTALL.md).
+- [Enterprise Linux 9 x86_64](https://github.com/oppenheimmer/nebula/releases/download/0.1-alpha/nebula-0.1.0.alpha-x86_64.rpm)
+  — [EPEL/CRB requirements and installation](docs/RPM.md).
+
+Both packages report `0.1.0~alpha`. GitHub download filenames use `.alpha`;
+local builds use `~alpha`. The release includes checksums and build information.
+See the [release notes](docs/RELEASE_NOTES.md) for alpha limitations. No AppImage
+is available.
+
+Launch an installed package with `nebula` or the application menu.
+`nebula --version` and `nebula_workspace --version` work without a display.
 
 ## Screenshots
 
@@ -33,12 +45,12 @@ related notes across databases.
 
 ![Workspace search for weekend, filtered to notes referencing the Weekend walk page](assets/screenshots/0.1-alpha/03-workspace-search.png)
 
-Capture details are in [the screenshot notes](assets/screenshots/0.1-alpha/README.md).
+[Capture details](assets/screenshots/0.1-alpha/README.md).
 
 ## Build with Docker
 
-Use the existing Docker CLI and daemon. Qt and build dependencies stay inside the
-development image; this workflow does not install packages into the host OS.
+Use the existing Docker CLI and daemon. Qt and development dependencies stay
+inside the project image.
 
 ```sh
 ./scripts/dev.sh build-image
@@ -47,273 +59,164 @@ development image; this workflow does not install packages into the host OS.
 ./scripts/dev.sh test core
 ```
 
-`build-image` downloads Debian and installs packages inside the image. Subsequent
-build/test containers run without networking, as your numeric user/group, with a
-read-only root filesystem and source mount. Build output goes to the ignored
-`build-container-gcc/`, `build-container-clang/`, or `build-container-core/` folder.
-Containers are removed after each command. Docker daemon access is required; the
-wrapper does not change daemon settings, socket permissions, or user groups.
+Image preparation downloads dependencies. Subsequent builds/tests run offline,
+as your numeric user/group, with read-only source and root mounts. Build output
+stays in ignored `build-container-*/` directories. The wrapper does not change
+Docker settings, socket permissions or user groups.
 
-For a development shell, run `./scripts/dev.sh shell`. Source is read-only at
-`/workspace`; build output is writable at `/build`. Dependency requirements and
-the optional project-local SDK workflow are described in
-[DEPENDENCIES.md](docs/DEPENDENCIES.md).
+`./scripts/dev.sh shell` opens a development shell with source at `/workspace`
+and writable output at `/build`. Dependency baselines and the project-local SDK
+fallback are in [DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
-## Linux packages
+To build and verify packages in clean Docker runtimes:
 
-Download the initial [0.1-alpha prerelease](https://github.com/oppenheimmer/nebula/releases/tag/0.1-alpha)
-for Debian 13 amd64 or Enterprise Linux 9 x86_64. Both packages use version
-`0.1.0~alpha`. See the [release notes](docs/RELEASE_NOTES.md) for installation,
-checksums and known limits.
+```sh
+./scripts/package-check.sh deb
+./scripts/dev.sh build-rpm-image
+./scripts/package-check.sh rpm
+```
 
-`./scripts/package-check.sh` builds a Debian 13 amd64 development package and
-checks install, removal, editing, search, export, backup/restore and TLS in an
-isolated runtime container. It does not install host packages. The artifact and
-installation/data-recovery instructions are in [INSTALL.md](docs/INSTALL.md).
-
-For an Enterprise Linux 9 x86_64 RPM preview, use `./scripts/dev.sh build-rpm-image`
-followed by `./scripts/package-check.sh rpm`. Both run in Docker; see
-[RPM.md](docs/RPM.md) for runtime requirements, installation and build limits.
+These commands verify installation, workspace preservation and offline note
+operations without installing host packages.
 
 ## Run
 
+For an installed package, run `nebula`. From a checkout:
+
 ```sh
 ./scripts/dev.sh run
-```
-
-The launcher rebuilds the executable, then asks where to keep the workspace. It
-suggests `~/Document/nebula/`. Choose an existing Nebula folder or enter a new
-location; Open workspace creates `nebula.sqlite3`, `attachments/`, and the lock files
-`.nebula.lock` and `.nebula-session.lock` there. New workspace folders are private to
-your account (0700) and the database file is 0600. Cancel leaves the location
-untouched. The selected host folder survives container exit and is shown above the
-editor. Backup and export folders are refused, so restore or import them instead; a
-non-empty folder that is not a workspace asks for confirmation first. A workspace can
-be open in only one Nebula process at a time. Unsupported or modified schema objects
-(for example triggers) are refused.
-
-Choose a database, create a page, and select its row to edit the flowing document.
-Double-click table cells to edit titles or typed properties. Numbers accept a decimal
-point or comma; tags are comma-separated, and empty or repeated entries are ignored.
-New view/Edit view/Delete view manage filters, sorting, and visible columns over the
-same pages; Rename property and Delete property change the database's fields
-(deleting removes that field's values after confirmation). Text sorts
-case-insensitively in natural order ("Item 9" before "Item 10"), and Contains ignores
-case. A new workspace includes a Journal database with Entry date, Mood, and Tags.
-Journal entry asks for the intended calendar date. Trash and Restore preserve
-page/database identities. Restore also lists deleted block fragments after restart.
-Restore a trashed page, database, or missing parent first; restoring a fragment
-preserves edits to blocks that are already present.
-
-The small red trash icons act on three different scopes: beside the database selector
-for the whole database, beside the page title for that page, and in the block toolbar
-for the active block and its nested blocks. Each opens a confirmation with Cancel as
-the default. Database trash also requires an acknowledgement checkbox. These controls
-retain content and attachments for Restore; block trash can also be undone while the
-page stays open. Restore… also offers **Empty trash permanently…** for content you
-want gone for good; see [TRASH.md](docs/TRASH.md) for scope, recovery and permanent
-deletion.
-
-Edits save after a 500 ms pause, before navigating to another page, and when closing
-the window. The status distinguishes pending edits, successful saves, and failures.
-Ctrl+S saves immediately. A forced kill or power loss can lose edits still pending.
-IME candidates enter the note only after committing the composition;
-preedit updates and cancellation alone do not create a save.
-On failure, edits remain visible and closing asks whether
-to keep the window open or discard pending changes. If the page changed elsewhere,
-Workspace → Keep my version as a new page saves your edits as a separate copy. Undo
-survives autosave but is cleared when switching pages and does not survive restart.
-Terminating the process (for example `docker stop`) saves pending edits first.
-Workspace → Check workspace integrity… runs the full database check, which also runs
-automatically after upgrades and weekly on open.
-
-Ctrl+Shift+F opens local workspace search over titles, blocks and properties.
-Select a database or search all active notes, then open a matching page/block.
-Words are AND-combined; a trailing * requests a prefix. Add reference filter finds
-incoming/outgoing page and block references, including with no search words.
-New view/Edit view saves the same reference conditions alongside properties.
-Search → Rebuild search and reference indexes repairs derived data. Language
-behavior and limits are documented in
-[SEARCH.md](docs/SEARCH.md).
-
-Import / Export provides Markdown folder conversion with a visible report.
-Imports create new pages in the selected database and remap links within the
-folder. Exports include active pages and referenced managed files. Markdown
-omits properties, views, trash and recovery history; see the supported subset and
-conversion limits in [MARKDOWN.md](docs/MARKDOWN.md).
-
-Lossless JSON folder export preserves IDs, properties, views, reference states,
-trash, recovery records and retained attachment bytes. JSON import validates into
-a new workspace and opens it in a separate window; existing destinations are
-refused. See [INTERCHANGE.md](docs/INTERCHANGE.md) for the versioned format,
-validation rules, size limit and headless Docker commands.
-
-The folder chooser sees your home directory read-only. The editor receives only
-the selected workspace as a writable data mount at `/data`. To select a location
-directly, including a location outside your home:
-
-```sh
 ./scripts/dev.sh run --workspace /path/to/your/nebula
 ```
 
-The Linux GUI uses X11 or Xwayland and requires `DISPLAY`, `/tmp/.X11-unix`, and a
-readable `XAUTHORITY` file (or `~/.Xauthority`). GUI containers share that display
-socket and authorization file. Headless tests do not share the display. No
-`xhost +`, privileged mode, or host networking is used.
+The Docker launcher rebuilds the application and asks where to keep the workspace,
+suggesting `~/Document/nebula/`. Choose the same folder when reopening.
+A workspace contains `nebula.sqlite3`, `attachments/` and coordination lock files.
+New workspace folders are private (0700), and database files are 0600. Cancel
+leaves the location untouched. Backups and exports must be restored/imported into
+a new workspace before opening. Only one process may open a workspace for editing.
 
-To open just the in-memory sample or the editor comparison:
+The chooser sees your home read-only. The editor receives the selected workspace
+as a writable mount at `/data`; `--workspace` can select folders outside your home.
+To import files from another host folder:
 
 ```sh
-./scripts/dev.sh run --demo
-./scripts/dev.sh run --demo --compare-editors
+./scripts/dev.sh run --import-root /path/to/source-folder
 ```
 
-The comparison tab uses separate text widgets with independent selection and undo.
-Use the **Block editor** tab for structural editing; block controls are disabled
-in the comparison tab.
+That folder appears read-only at `/imports`. The editor does not receive the rest
+of your home directory.
+
+The Docker GUI requires X11 or Xwayland: `DISPLAY`, `/tmp/.X11-unix` and a readable
+`XAUTHORITY` file (or `~/.Xauthority`). GUI containers share that display socket
+and authorization file. Headless checks do not access the host display.
+No `xhost +`, privileged mode or host networking is used.
+
+`./scripts/dev.sh run --demo` opens a disposable in-memory sample. Add
+`--compare-editors` to inspect the M01 comparison baseline; its separate widgets
+have independent selection and undo.
 
 ## Edit blocks
 
-Click a block to make it active. A thin outline with a subtle shadow identifies
-the active block; the label above the editor shows its position and nesting level.
-Drag its grip dots to move the block and its children. Drop above/below a block to
-reorder it; move the pointer to the right of its text to nest under it. The drop
-marker shows the destination, Escape cancels, and dragging near the top/bottom
-scrolls the document.
+Choose a database and select a page's row to edit it. Double-click table cells
+to change titles or typed properties. New view/Edit view controls filters,
+sorting and columns over the same pages. The Journal database includes Entry
+date, Mood and Tags; Journal entry asks which calendar date the entry describes.
+
+A thin outline and subtle shadow identify the active block. Drag its grip dots
+to reorder it with its children; drag right to nest, or press Escape to cancel.
+Visual wrapping never creates a new paragraph.
 
 | Action | Keyboard or control |
 | --- | --- |
-| Create a block | Enter |
-| Soft line break inside a block | Shift+Enter |
-| Insert a divider followed by an empty paragraph | Divider in the toolbar |
-| Move a block and its children | Alt+Up/Down, or Move up/down in the toolbar |
-| Nest under the previous sibling | Tab, or Indent |
-| Leave the current parent | Shift+Tab, Backspace at the block's start with no selection, or Outdent |
+| New paragraph / soft line break | Enter / Shift+Enter |
 | Bold / italic | Ctrl+B / Ctrl+I |
-| Paste only plain text | Ctrl+Shift+V, or Paste plain text in the context menu |
+| Paste plain text | Ctrl+Shift+V |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
-| Move the active block and its children to another page | Ctrl+Shift+M, or Workspace → Move block to page… |
-| Undo / redo the latest block transfer | Ctrl+Alt+Z / Ctrl+Alt+Shift+Z, or the Workspace menu |
-| Follow a sample block reference | Ctrl+click the link |
-| Follow the reference at the editor cursor | Ctrl+Enter, or Navigate → Follow reference at cursor |
-| Return to the previous position / go forward | Alt+Left / Alt+Right |
-| Read the active block's type, nesting, task state, references and asset labels | F8, or Block details in the context menu |
+| Move a block and its children | Alt+Up/Down or grip dots |
+| Nest / unnest | Tab / Shift+Tab |
+| Insert a divider | Divider toolbar button |
+| Move a subtree to another page | Ctrl+Shift+M |
+| Undo / redo the latest block transfer | Ctrl+Alt+Z / Ctrl+Alt+Shift+Z |
+| Follow a reference | Ctrl+click or Ctrl+Enter |
+| Navigate back / forward | Alt+Left / Alt+Right |
+| Read accessible block details | F8 |
+| Save immediately | Ctrl+S |
 
-Block details opens selectable, read-only text for keyboard and screen-reader use.
-Escape returns to the editor with its selection and undo history preserved.
+Splitting a parent transfers its children to the trailing block. Backspace at the
+start of a nested block outdents it. Adjacent typing shares an undo group until a
+pause, navigation or another command. Undo survives autosave on the open page;
+it clears on page navigation and does not survive restart.
 
-The first sibling cannot be indented. Unavailable toolbar actions are disabled.
-Moving and nesting keep the caret and selection where they were. Wrapping text does
-not create a block. Backspace at the start of a nested block moves it and its
-children out one level without removing text. Joining two blocks with
-Backspace/Delete does not add a recovery entry, since their text is still on the
-page. Splitting a parent gives the trailing
-block a new identity and transfers its children there; structural edits can be
-undone. Enter on an empty list/to-do block returns it to a paragraph. Consecutive
-typing forms one undo group until navigation, another command, a focus change, or a
-pause of at least one second. Use Attachments → Import image… / Import file… to save
-a managed copy and insert a card. Large files show progress and can be cancelled.
-Moving or deleting the original source does not affect the note. Image cards preview
-local files; Open current attachment hands other programs a read-only copy named like
-the original, so they cannot change the managed bytes. Save a copy… uses the selected
-card. Import is undoable and saves immediately.
+Attachments → Import image… / Import file… stores a managed copy. Moving or
+deleting the original source does not affect it. Open current attachment gives
+the desktop handler a read-only copy; Save a copy… exports its bytes.
+See [managed files](docs/ATTACHMENTS.md) for retention, preview and recovery rules.
 
-For importing host files in Docker, use `./scripts/dev.sh run --import-root
-/path/to/source-folder`; the chosen folder appears read-only at `/imports`.
-Check managed files… reports missing/changed bytes and can clean unregistered
-interrupted imports. Registered imports remain retained for undo and recovery.
-See [ATTACHMENTS.md](docs/ATTACHMENTS.md) for retention and preview limits.
+The red trash buttons act on the selected database, open page or active subtree.
+Each asks for confirmation. Restore… recovers saved deleted content after restart;
+Empty trash permanently… is separate and irreversible. See [trash and recovery](docs/TRASH.md).
 
-Workspace → Move page to database… keeps the page and block identities. Property
-values follow by matching name and type; missing destination properties are added.
-A conflicting property type cancels the whole move without dropping values.
-Moving a block to another page appends its subtree with the original identities,
-so existing links follow it. Both pages save together. An emptied source receives
-an empty paragraph. Moves clear the open page's editing undo. The latest block
-transfer has separate workspace undo/redo, available during this window's lifetime
-while neither affected page has changed since the transfer or its last undo/redo.
+Use Link… or type `[[Page]]`, `[[Page#Heading]]` or `[[Page#^block-id]]`.
+Links resolve by stable IDs; duplicate names require a target choice. Referenced
+by and References show incoming and outgoing links. [Link entry and navigation](docs/LINKS.md)
+covers labels, completion, unresolved targets and moves. [Clipboard semantics](docs/CLIPBOARD_FORMAT.md)
+explains identity remapping when copying between notes.
 
-Copy/cut/paste within Nebula retains block types, nesting, bold/italic text, card
-labels, and references. New blocks receive new IDs; the first pasted block may
-merge into the existing block. Links between copied blocks point to their pasted
-counterparts. References to other targets retain their IDs. Cut/paste also creates
-pasted identities; links elsewhere continue to identify the original blocks.
-Cross-workspace targets may therefore be unavailable. HTML from other applications
-supports headings, lists, bold/italic text, and paragraphs. Other styling and URL
-links become text; images become `[image]` without fetching resources. Plain text
-keeps paragraph boundaries and normalizes line endings. Invalid Nebula clipboard
-data is rejected visibly without replacing the selection.
-The full contract is in [CLIPBOARD_FORMAT.md](docs/CLIPBOARD_FORMAT.md).
-
-Use Link… to select a page, heading, or block across databases. Ctrl+click follows
-it; incoming/outgoing link lists include source excerpts and support Enter to open
-the exact destination. Navigate → Back/Forward restores the prior page, block,
-selection, and scroll position during the window's lifetime. Unavailable history
-destinations retain their entries so you can restore the target and retry.
-Targets retain their IDs
-through renaming and trash/restore. The link picker disambiguates page names by
-database. The picker can insert an unresolved page name without creating it;
-creating another page with that title does not silently bind the link. Type
-`[[Page]]`, `[[Page#Heading]]`, or `[[Page#^block-id]]` for wiki entry; append
-`|label` for a custom label. Completion shows database/target context, and duplicate
-matches require choosing a specific target. Link… also searches page/heading/block
-text and IDs. Default labels follow target titles/text, while explicit labels stay
-fixed. Following an unresolved reference offers existing-target selection or
-explicit page creation in a chosen database. Page creation and source binding
-commit together; undoing the binding keeps the created page. Escaping,
-completion, and unresolved behavior are described in [LINKS.md](docs/LINKS.md).
-
-The Link… picker loads pages and blocks in batches of 100. Expand a page to see
-its matching blocks; select **Show more pages… / Show more blocks…** and press
-Enter or double-click for the next batch. Search examines all cached targets,
-including blocks beyond the displayed batch and unsaved text on the open page.
+Ctrl+Shift+F searches the workspace. Words combine with AND; a trailing `*`
+requests a prefix. Reference filters also work without search words. Saved views
+combine those filters with typed properties. See [search behavior](docs/SEARCH.md)
+and [property/view rules](docs/WORKSPACE_FORMAT.md).
 
 ## Pasted web links
 
-Pasting a complete HTTP or HTTPS URL keeps the link and attempts a text-only
-preview once. The status bar offers **Cancel preview**. A successful preview is a
-separate editable paragraph; trash that block to keep just the link. Insertion
-has its own undo step. Save/reopen, clipboard, backup and lossless export preserve
-the text without fetching it again. Pictures and thumbnails are never imported.
+Pasting a complete HTTP(S) URL keeps the link and attempts one removable,
+text-only preview. Cancel preview stops the request. Successful text is a separate
+editable paragraph with its own undo step; opening a note never fetches it again.
 
-The normal workspace GUI has network access for this paste action. Ordinary notes
-work offline; builds, tests, the chooser, demo/smoke runs and data commands stay
-offline. Unsupported pages, timeouts, cancellation and network errors leave the
-URL in place. Requests send the pasted path/query to that origin, without cookies,
-credentials or Referer. Redirects must remain on the same scheme, host and port;
-pages requiring login or a cross-origin redirect may have no preview. See
-[PREVIEW_DESIGN.md](docs/PREVIEW_DESIGN.md) for limits and data handling.
+The request sends the pasted path/query to that origin, without cookies,
+credentials or Referer. Redirects must stay on the same scheme, host and port.
+No images or thumbnails are fetched. Failures leave the URL intact.
+[PREVIEW_DESIGN.md](docs/PREVIEW_DESIGN.md) documents limits and cancellation.
+
+The normal Docker workspace GUI has network access for this paste action.
+Ordinary note operations work offline; builds, tests, the chooser, demo/smoke
+runs and data commands use `--network=none`.
 
 ## Backup and restore
 
+For an installed package:
+
 ```sh
-./scripts/dev.sh backup /path/to/nebula /path/to/new-backup
-./scripts/dev.sh restore /path/to/new-backup /path/to/new-workspace
+nebula_workspace backup /path/to/workspace /path/to/new-backup
+nebula_workspace restore /path/to/new-backup /path/to/new-workspace
 ```
 
-These commands work without a display. Destinations must be new folders outside the
-source workspace. The source is mounted read-only, and the container can write only
-to a private staging folder that is renamed into place afterwards; the database is
-copied using SQLite's backup API. Restore creates a new workspace copy and preserves
-the original backup. Managed attachment availability and hashes are verified; a
-manifest covers the database and attachment files. Missing or changed files fail the
-backup, and restore rejects an incomplete or accidentally modified backup. The
-manifest detects corruption, not deliberate tampering: anyone who can edit a backup
-can also rewrite its manifest. Data commands refuse uncommitted source changes unless
-`NEBULA_ALLOW_DIRTY=1` is set. The format and durability rules are documented in
+From a checkout, use `./scripts/dev.sh backup` or `restore` with the same paths.
+Choose new destination folders outside the source. Backup copies a consistent
+database snapshot and managed attachments; restore verifies their hashes and
+creates a fresh workspace. Missing or changed files fail the operation.
+The checksum manifest detects corruption, not deliberate tampering.
+
+Material data-handling limits:
+
+- Autosave waits 500 ms. **Saved locally** means persistence succeeded. A failed
+  save keeps edits visible; normal close asks whether to retry or discard them.
+  Forced termination or power loss can lose pending edits. Handled termination
+  signals attempt a save but still exit if it fails.
+- Backups must include the database and its managed files. Use the documented
+  tool rather than copying a live database alone.
+- Lossless JSON preserves the supported model, IDs, trash, recovery and retained
+  files. Markdown omits properties, views and recovery history. See
+  [JSON interchange](docs/INTERCHANGE.md) and [Markdown conversion](docs/MARKDOWN.md).
+- Interrupted exports can retain a private full-workspace scratch database,
+  including data omitted from Markdown. Remove incomplete exports before sharing.
+
+Docker data commands mount the source read-only and write through a private staging
+folder. They refuse uncommitted source changes unless `NEBULA_ALLOW_DIRTY=1` is set.
+Persistence, migrations and undo boundaries are documented in
 [WORKSPACE_FORMAT.md](docs/WORKSPACE_FORMAT.md).
 
-Interrupted JSON/Markdown export folders can contain a temporary full workspace
-database, including data omitted from Markdown. Remove an incomplete folder and
-retry before sharing it; successful exports remove that private scratch database.
-
 ## Checks and measurements
-
-`test gcc` and `test clang` run CTest for the document core, launcher, editor,
-workspace lifecycle/recovery, application window, fuzz smoke cases and launch check,
-with warnings treated as errors. `test core` builds the document core without Qt or
-SQLite. `test asan` repeats the suite in a Debug build with AddressSanitizer and
-UndefinedBehaviorSanitizer.
 
 ```sh
 ./scripts/dev.sh test asan
@@ -330,26 +233,16 @@ UndefinedBehaviorSanitizer.
 ./scripts/dev.sh benchmark workspace
 ```
 
-`stress` repeats the editor and desktop suites to expose timing-dependent failures.
-`test-native` runs editor and desktop interactions on X11/Xwayland. The screenshot
-appears at `build-container-gcc/prototype.png`. Smoke tests and screenshots skip the
-chooser unless `--workspace` is supplied. `benchmark single`/`separate` print JSON
-measurements for the 1,000-block editor fixture; see
-[EDITOR_FEASIBILITY.md](docs/EDITOR_FEASIBILITY.md) for methodology. `benchmark
-workspace` measures the real window over a 10,000-block page, a 5,000-entry Journal,
-a page referenced by 1,000 entries and a page with 200 images.
-`.github/workflows/ci.yml` runs the Docker checks on GitHub-hosted Linux.
-`test-desktop` uses a separate optional image with a private Xvfb/Openbox desktop,
-IBus/Anthy and Orca/AT-SPI. It sends real X11 input through the OS input engine and
-checks the reader's speech output and selection, without accessing the host's
-display, audio or session bus. Its logs stay in the ignored build folder.
-See [DEPENDENCIES.md](docs/DEPENDENCIES.md) for isolation and baseline limits.
+GCC/Clang tests cover the core, storage, editor, application window and launch;
+ASan adds AddressSanitizer/UndefinedBehaviorSanitizer. Fuzzing exercises parsers,
+and stress repeats interaction suites. Logs, corpora and screenshots stay in
+ignored build directories. Formatter commands require a Git checkout.
 
-`fuzz` uses Clang with coverage-guided libFuzzer, ASan and UBSan for each parser
-target; its corpus, logs and crash artifacts stay in ignored `build-container-fuzz/`.
-Rebuild the development image to supply the fuzzing and formatting tools.
-`format --check` checks C++ formatting without writing; `format` applies the
-repository style through the container. These commands need a Git checkout.
+`test-native` uses the host X11/Xwayland display. `test-desktop` uses a private
+Xvfb/Openbox desktop with IBus/Anthy and Orca/AT-SPI, without host display, audio
+or session-bus access. [Dependency profiles](docs/DEPENDENCIES.md) describe isolation.
 
-Nebula's source is [MIT licensed](LICENSE). Dependencies retain their own licenses.
-Project management conventions are in [AGENTS.md](AGENTS.md).
+The workspace benchmark covers 10,000 blocks, 5,000 Journal entries, 1,200
+referrers and 200 images. [PERFORMANCE.md](docs/PERFORMANCE.md) defines fixtures
+and budgets. GitHub's [checks workflow](https://github.com/oppenheimmer/nebula/blob/main/.github/workflows/ci.yml) runs the Docker
+validation. Project conventions are in [AGENTS.md](AGENTS.md).

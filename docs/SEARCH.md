@@ -39,7 +39,8 @@ Whitespace-separated terms are AND-combined. Each term is literal text; quote
 marks, parentheses, OR, and SQL syntax do not introduce query operators. A trailing
 asterisk requests a token prefix, for example `walk*`. A bare `walk` matches a
 whole token, not `walking`. Punctuation inside a term separates tokens that must
-occur together in order. Empty/punctuation-only queries return no results.
+occur together in order. Without reference filters, empty/punctuation-only queries
+return no results.
 Queries allow at most 32 terms and 4096 UTF-8 bytes; invalid UTF-8 is rejected.
 The desktop entry limits input to 1024 UTF-16 code units.
 

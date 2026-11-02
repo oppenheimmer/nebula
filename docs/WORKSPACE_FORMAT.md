@@ -61,11 +61,12 @@ Page, block, database, property, view, recovery and workspace identities are 1â€
 bytes of valid UTF-8 without control characters (U+0000â€“U+001F, U+007F). Storage
 generates 32 lowercase hexadecimal characters; the editor and clipboard generate
 hyphenated UUIDs. Attachment IDs are always 32 lowercase hexadecimal characters.
-Imports and clipboard payloads with other identities are rejected. `workspace_id`
+Imports and clipboard payloads must satisfy these grammars; non-attachment IDs
+need not use the generated hexadecimal or UUID spellings. `workspace_id`
 identifies a workspace lineage: restore and lossless JSON import keep it, so two
 imports of one export share it. Folder paths, not identities, distinguish copies.
 
-| Table | Canonical responsibility |
+| Table | Responsibility |
 | --- | --- |
 | `workspace_meta` | Single row with the permanent workspace identity. |
 | `databases` | Permanent ID, name, and trash flag. |
@@ -207,9 +208,11 @@ Undoing while viewing another page preserves that page's text undo history.
 
 The desktop saves after 500 ms without a new edit, and flushes before page/database
 navigation or a normal window close. Pending changes are visible. Saved locally
-means the SQLite commit succeeded with `synchronous=FULL`; edits during the debounce interval are pending
-and may be lost if the process is killed. Save failures retain the document and
-block silent closing. Undo belongs to the page editor, survives autosave, and is
+means the SQLite commit succeeded with `synchronous=FULL`; edits during the debounce
+interval are pending and may be lost if the process is killed. Save failures retain
+the document and require retry or explicit discard before a normal close.
+SIGTERM/SIGINT/SIGHUP attempt a save, then exit even if it fails.
+Undo belongs to the page editor, survives autosave, and is
 cleared on page navigation; it does not survive restart. Adjacent printable typing
 joins one undo group while the caret is continuous and pauses remain under one
 second. Navigation, focus changes, formatting, structural commands, clipboard

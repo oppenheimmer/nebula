@@ -1,11 +1,11 @@
 # First steps with Nebula
 
-Nebula keeps one person's notes in a local workspace. The current development
-workflow is Linux with Docker and X11/Xwayland. Linux is the only target platform.
+Nebula keeps one person's notes in a local workspace on Linux. Install the
+[Debian package](INSTALL.md) or [EL9 RPM](RPM.md), or build from source with Docker.
 
 ## Open your first notebook
 
-If the package preview is already installed, launch `nebula`. For a source
+If the package is already installed, launch `nebula`. For a source
 checkout, use the project folder with the existing Docker daemon running:
 
 ```sh
@@ -22,6 +22,8 @@ Select **Journal**, then **Journal entry**, and choose the day you are writing
 about. Other databases can hold ordinary pages. Select a page's table row to
 write; double-click table cells to edit its title or properties. Entry date is
 separate from the time you created the page. Views filter or sort the same pages.
+Numbers accept a decimal point or comma. Tags
+are comma-separated; blank values remain unset rather than becoming false or zero.
 
 ## Write and find things
 
@@ -63,9 +65,11 @@ not mean the edit is on disk. Confirm a first note by closing and reopening the
 same workspace. To make a backup, save and close the window, then run:
 
 ```sh
-./scripts/dev.sh backup /path/to/workspace /path/to/new-backup
-./scripts/dev.sh restore /path/to/new-backup /path/to/new-workspace
+nebula_workspace backup /path/to/workspace /path/to/new-backup
+nebula_workspace restore /path/to/new-backup /path/to/new-workspace
 ```
+
+From a source checkout, use `./scripts/dev.sh backup` or `restore` with the same paths.
 
 Choose new destination folders outside the source. Restore creates another
 workspace; open it and check a note and attachment before relying on it. Keep the
@@ -84,7 +88,7 @@ omits properties, saved views and trash history.
 | Search or backlinks seem stale | Use **Search → Rebuild search and reference indexes**, then repeat the search. A saved view may also be filtering the page out. |
 | An attachment is unavailable | Use **Attachments → Check managed files…**. Restore a verified backup into a fresh workspace if the managed bytes are missing; deleting the original import source is normally harmless. |
 | Workspace reports it is already open | Close the other Nebula process and retry. Do not remove lock files to bypass a running session. |
-| GUI does not launch | Check Docker access and the X11/Xwayland requirements in [README](../README.md#run); do not install Qt system-wide or change display access permissions broadly. |
+| GUI does not launch | Check the package's [Debian](INSTALL.md) or [EL9](RPM.md) runtime requirements. For Docker, check access and X11/Xwayland setup in [README](../README.md#run). |
 | Import/restore refuses its destination | Select a new folder; these operations deliberately refuse to overwrite existing data. A backup/export folder must be restored/imported before opening as a workspace. |
 
 If a problem persists, keep the original workspace, the exact error and steps to

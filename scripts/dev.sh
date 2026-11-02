@@ -24,7 +24,7 @@ Usage: ./scripts/dev.sh build-image
        ./scripts/dev.sh import-md MARKDOWN_FOLDER WORKSPACE_FOLDER DATABASE_ID
        ./scripts/dev.sh export-json WORKSPACE_FOLDER NEW_EXPORT_FOLDER
        ./scripts/dev.sh import-json EXPORT_FOLDER NEW_WORKSPACE_FOLDER
-       ./scripts/dev.sh run [--import-root HOST_FOLDER] [prototype options]
+       ./scripts/dev.sh run [--import-root HOST_FOLDER] [application options]
        ./scripts/dev.sh shell
 
 Qt and development packages are installed inside the image only.

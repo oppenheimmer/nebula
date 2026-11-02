@@ -74,12 +74,12 @@ missing files, checksum mismatches and unsupported manifests before creating the
 destination, and checks each copied file against the verified digest. The manifest
 detects accidental corruption or incomplete copies; it is not tamper evidence,
 because whoever can edit a backup can also regenerate its manifest. Manifests above
-64 MiB are rejected explicitly. Schema 7 backups require a manifest; legacy backups
+64 MiB are rejected explicitly. Schema 7 and later backups require a manifest; legacy backups
 remain supported and are migrated in the new workspace. The original backup is
 unchanged. The restored live workspace removes the snapshot manifest because
 subsequent edits change its database.
 
 File durability and locking use a narrow POSIX adapter
 for regular files, flushes, same-directory hard links and shared/exclusive locks.
-Linux verification is recorded in the roadmap. The current import/audit operations are
-synchronous; large-file responsiveness remains part of M08 performance validation.
+Linux verification and large-file measurements are recorded in
+[ROADMAP.md](../ROADMAP.md).

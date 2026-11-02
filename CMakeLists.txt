@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(Nebula VERSION 0.1.0 LANGUAGES CXX C)
 
-# Keep executable diagnostics and package metadata on the same preview version.
+# Share the version between executable diagnostics and package metadata.
 set(NEBULA_VERSION "${PROJECT_VERSION}~alpha")
 configure_file(cmake/version.hpp.in generated/nebula/version.hpp @ONLY)
 
@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 include(CTest)
-option(NEBULA_BUILD_EDITOR "Build the Qt editor feasibility prototype" ON)
+option(NEBULA_BUILD_EDITOR "Build the Qt desktop application and workspace tools" ON)
 option(NEBULA_SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(NEBULA_WERROR "Treat compiler warnings in Nebula targets as errors" OFF)
 option(NEBULA_LIBFUZZER "Build coverage-guided parser fuzzing (Clang)" OFF)
@@ -95,9 +95,7 @@ if(NEBULA_BUILD_EDITOR)
     set_target_properties(nebula_previews PROPERTIES AUTOMOC ON)
     target_include_directories(nebula_previews PUBLIC include)
     target_link_libraries(nebula_previews PUBLIC Qt6::Network Qt6::Gui)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(nebula_previews PRIVATE -Wall -Wextra -Wpedantic $<$<BOOL:${NEBULA_WERROR}>:-Werror>)
-    endif()
+    nebula_warnings(nebula_previews)
 
     add_library(nebula_desktop
         src/app/pasted_link_preview.cpp include/nebula/app/pasted_link_preview.hpp
