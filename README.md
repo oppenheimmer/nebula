@@ -14,6 +14,27 @@ checks, recovery and common corrections.
 An installed build reports its version with `nebula --version` or
 `nebula_workspace --version`. Both commands work without a display or workspace.
 
+## Screenshots
+
+Nebula `0.1-alpha`, using a fictional example workspace.
+
+**Block editing and local links.** Nested lists, tasks, a managed file attachment,
+and incoming/outgoing references in one page.
+
+![Block editor showing a weekend plan with tasks, an attachment and backlinks](assets/screenshots/0.1-alpha/01-block-editor.png)
+
+**Diary entries and saved views.** A date-sorted Journal view with entry dates,
+moods and tags alongside the selected page.
+
+![Journal with a saved Recent entries view and a diary page open](assets/screenshots/0.1-alpha/02-journal-views.png)
+
+**Workspace search.** Combine text matching with a reference filter to find
+related notes across databases.
+
+![Workspace search for weekend, filtered to notes referencing the Weekend walk page](assets/screenshots/0.1-alpha/03-workspace-search.png)
+
+Capture details are in [the screenshot notes](assets/screenshots/0.1-alpha/README.md).
+
 ## Build with Docker
 
 Use the existing Docker CLI and daemon. Qt and build dependencies stay inside the

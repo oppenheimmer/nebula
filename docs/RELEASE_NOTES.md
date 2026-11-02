@@ -31,15 +31,20 @@ sha256sum --check --ignore-missing SHA256SUMS
 On Debian 13 amd64:
 
 ```sh
-sudo apt install ./nebula-0.1.0~alpha-x86_64.deb
+sudo apt install ./nebula-0.1.0.alpha-x86_64.deb
 ```
 
 On Enterprise Linux 9 x86_64 with compatible EPEL and CRB/CodeReady Builder
 repositories configured:
 
 ```sh
-sudo dnf install ./nebula-0.1.0~alpha-x86_64.rpm
+sudo dnf install ./nebula-0.1.0.alpha-x86_64.rpm
 ```
+
+GitHub replaces `~` with `.` in download filenames. Local builds and the
+documentation embedded in these initial packages use filenames containing
+`~alpha`; use the downloaded filenames shown above when installing release assets.
+The installed version remains `0.1.0~alpha`.
 
 The EL9 package requires Qt 6.10 runtime symbols; it was built and checked in
 AlmaLinux 9.8 containers. Debian uses its Qt 6.8 runtime. Both packages dynamically

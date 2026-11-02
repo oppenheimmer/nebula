@@ -613,9 +613,9 @@ instructions matching the shipped behavior.
   backup, and recovery instructions.
 - [ ] M09.4 Record release verification, known limitations, and the release version.
 
-Current continuation: publish the user-requested initial `0.1-alpha` prerelease,
-with consistent executable/package version `0.1.0~alpha`, exact-source artifacts
-and checksums. Remaining stable-release checks and material limits are in
+The user-requested initial [0.1-alpha prerelease](https://github.com/oppenheimmer/nebula/releases/tag/0.1-alpha)
+is published, with executable/package version `0.1.0~alpha`, exact-source
+artifacts and verified download checksums. Remaining stable-release checks and material limits are in
 [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md); final release verification
 is still In progress. [Release notes](docs/RELEASE_NOTES.md) describe the alpha.
 The user additionally authorized an Enterprise Linux 9 x86_64 RPM preview on
@@ -1209,6 +1209,30 @@ problems remain in the risk register until reproduced.
   GCC, Clang and ASan/UBSan. Existing concurrency and fresh package/runtime
   workflows also pass; detailed outcomes are in the RPM work-log entry.
 
+### BUG-028 — GitHub upload normalization broke the draft checksum filenames
+
+- **Milestone/state/impact:** M09.4; Fixed and verified before publication.
+  The initial draft's checksum entries and installation commands did not match
+  GitHub's downloaded package filenames. Package bytes were unaffected.
+- **Environment/reproduction:** RHEL 9.8 x86_64, GitHub CLI 2.103.3 and GitHub
+  Releases, without a desktop. Upload `nebula-0.1.0~alpha-x86_64.deb` and `.rpm`
+  with a manifest using those basenames, then list/download the draft's assets.
+  The upload verification guard failed because the expected asset names differed.
+- **Expected/actual/diagnosis:** the downloaded filenames must match the checksum
+  manifest and install instructions. GitHub rewrites `~` to `.` in asset names;
+  an API rename request was normalized in the same way.
+- **Resolution:** use `.alpha` in published filenames and checksum entries,
+  retain `~alpha` in package metadata and local CPack output, and document that
+  distinction in the release notes, build information and current install guides.
+  The initial packages' embedded documentation retains the local-build filenames;
+  the published release notes provide the correct download commands. The tag and
+  package contents were preserved.
+- **Verification:** downloaded all four corrected draft assets, matched their
+  SHA-256 hashes against local files and GitHub's reported digests, and ran
+  `sha256sum --check SHA256SUMS` successfully for both packages and build info.
+  Published only after those checks passed, then verified the public tag URL,
+  prerelease state and four uploaded assets.
+
 For each future defect, record:
 
 | Field | Required content |
@@ -1372,6 +1396,12 @@ milestone, evidence, and the resulting action.
   under the read-only container root. The generated spec overrides `_tmppath`
   to the existing writable `/tmp` tmpfs. Final packaging passes with the same
   restricted root/source mounts; no host path or container privilege is added.
+
+- **G38 — GitHub normalizes release asset names (2026-11-02, M09.4):** uploading
+  filenames containing `~` produced names containing `.` instead (BUG-028).
+  Verify downloaded basenames as well as bytes; prepare the public checksum
+  manifest and installation commands for the names GitHub actually serves.
+  Keep package-manager version syntax separate from download filenames.
 
 ## Suggestions
 
@@ -3175,6 +3205,67 @@ begin as part of this shutdown.
   packages, checksum and build provenance files; packages and tool caches remain
   ignored. Exact alpha package checks and publication results will be recorded
   after they run. Earlier implementation/compiler results remain recorded above.
+
+### Initial alpha published — 2026-11-02
+
+- Committed the release/packaging/storage/preview work as
+  `d4d794a4f6767b52a6b98acd9b8963d4485849ee`, using the configured Git author.
+  Pushed `main` and the annotated `0.1-alpha` tag normally, without rewriting
+  history. The tag identifies the exact source contents used for both packages.
+- Published [Nebula 0.1-alpha](https://github.com/oppenheimmer/nebula/releases/tag/0.1-alpha)
+  as a GitHub prerelease at 16:14 JST. It includes the Debian package, EL9 RPM,
+  `SHA256SUMS` and `BUILD_INFO.txt` (source revision, image IDs, package inventories,
+  commands and verification limits). GitHub provides the tagged source archives.
+  BUG-028 was caught and corrected while the release was still a draft.
+- **Exact alpha checks:** EL9/AlmaLinux 9.8 x86_64, GCC 11.5.0, Qt 6.10.3 and
+  SQLite 3.34.1 pass all 16 CTest groups. Both the Debian 13 amd64 and EL9 clean
+  package workflows pass installation, reinstallation/removal, offline editing,
+  search, attachment preservation, interchange and fresh backup/restore. Each
+  offscreen runtime passes 62 full-window and 10 preview/TLS behavior cases,
+  excluding setup/cleanup; two OS IME/reader cases are skipped in this profile.
+  The Debian alpha command-line/version group passes separately. Existing full
+  GCC/Clang/ASan implementation evidence remains in the preceding entries.
+- **Published package hashes:** `.deb`
+  `45e7da06ec3687413d656c77f7782786e5c75eff9544316c7078f3c001afc9d5`;
+  `.rpm` `1e264e8d768389f367b16ef2c1485f0ab30559a70cf744bdd343e883463cc897`.
+  Downloaded files and GitHub API digests match the local artifacts. Packages
+  are unsigned; the download names use `.alpha` and metadata uses `~alpha`.
+- Formatter, shell syntax, 20 Markdown files/103 local links, balanced fences,
+  76 unique milestone task IDs and `git diff --check` passed before the release
+  commit. The final dependency applicability review and native RHEL acceptance
+  remain open; M09 is In progress and M10 is Not started.
+
+### Alpha screenshots and publication records — 2026-11-02
+
+- At the user's request, added three screenshots under
+  `assets/screenshots/0.1-alpha/` and embedded them with feature captions in the
+  README (M09.3–M09.4): block editing/attachments/backlinks, a saved Journal
+  view with typed properties, and text search combined with a reference filter.
+  The accompanying asset notes record source, dimensions and capture conditions.
+- Captured actual widgets from the `d4d794a` alpha application libraries in the
+  existing Debian 13 amd64 Docker environment: GCC 14.2, Qt 6.8.2, SQLite 3.46.1,
+  offscreen Qt, DejaVu Sans 10-point UI text, on RHEL 9.8 x86_64. The temporary
+  fixture contains fictional notes and a managed text file. No personal data,
+  host desktop or network access was used. Images are direct PNG widget captures;
+  build helpers and temporary workspaces remain outside Git.
+- The first temporary driver compile attempted unavailable `pkg-config`;
+  using the installed CMake/Qt package configuration resolved it without adding
+  dependencies. The final driver compiles with warnings as errors and verifies
+  two backlinks, eight saved-view rows, two text/reference search results,
+  opening a selected result, successful persistence and workspace integrity.
+  All three images were visually reviewed. PNG dimensions, chunk checksums,
+  compressed pixels and absence of text/EXIF metadata pass validation.
+- Documentation checks pass for 21 Markdown files, 110 local file/image links,
+  balanced code fences, 76 unique milestone tasks, 28 unique bug IDs and
+  `git diff --check`. The follow-up contains screenshots and documentation only;
+  the published tag and verified package contents remain at `d4d794a`.
+- [Release-tag CI run 41404446051](https://github.com/oppenheimmer/nebula/actions/runs/41404446051)
+  completed successfully: both Linux and private desktop jobs passed on
+  GitHub's Ubuntu 24.04 x86_64 runners with the project's Debian containers.
+  This includes GCC, Clang, core-only, ASan/UBSan, parser fuzzing, packaging,
+  repeated interaction suites and the private Xvfb/Openbox/IBus/Anthy/Orca
+  profile. It does not establish native RHEL desktop acceptance. M09 remains
+  In progress pending stable-release dependency review; M10 is Not started.
 
 ## Technical references discussed
 

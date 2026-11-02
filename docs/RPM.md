@@ -48,7 +48,7 @@ On a suitably configured EL9 desktop, run from the download directory:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-sudo dnf install ./nebula-0.1.0~alpha-x86_64.rpm
+sudo dnf install ./nebula-0.1.0.alpha-x86_64.rpm
 nebula --version
 nebula
 ```

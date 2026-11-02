@@ -7,7 +7,7 @@ From the download directory, verify and install it with:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-sudo apt install ./nebula-0.1.0~alpha-x86_64.deb
+sudo apt install ./nebula-0.1.0.alpha-x86_64.deb
 ```
 
 Release verification and remaining issues
